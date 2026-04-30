@@ -1,8 +1,10 @@
-# plato-forum
+# plato
 
-Phase 2 of the plato forum. Built per `docs/01-product/build-plan.md` (in the `plato/` repo, sibling).
+A forum that lives at one URL. Magic-link to post (no password, no PII). Pseudonyms and identicons by default. Search and read on the web. Owner moderates; mod actions are public; if it goes bad, fork the archive.
 
-This is the M1 skeleton: boots, serves a stylesheet, has the `html\`\`` templating helper with passing tests. Nothing else works yet — features land per the milestone plan.
+phpBB-era discourse, 2026 substrate. Implementation of the [plato forum PRD](docs/01-product/prd-forum.md).
+
+This is the M1 foundation: boots, serves a stylesheet, has the `html\`\`` templating helper, schema migrations, knowless library wiring, identity layer (pseudonym + identicon). Content + integration land in subsequent commits per the [build plan](docs/01-product/build-plan.md).
 
 ## Run
 
@@ -13,6 +15,7 @@ SECRET=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toStrin
   && sed -i '/^KNOWLESS_SECRET=$/d' .env \
   && echo "KNOWLESS_SECRET=$SECRET" >> .env
 
+npm install
 npm run migrate    # idempotent, safe to re-run
 npm start          # http://localhost:8080
 ```
@@ -23,12 +26,12 @@ npm start          # http://localhost:8080
 npm test
 ```
 
-Runs `node --test test/`. Should be green out of the box.
+Runs `node --test 'test/**/*.test.js'`. 44/44 green at M1 foundation + auth + identity.
 
 ## Layout
 
 ```
-plato-forum/
+plato/
   bin/
     server.js         # http entry point
     migrate.js        # apply src/db/migrations/*.sql idempotently
@@ -40,18 +43,21 @@ plato-forum/
       templates.js    # html`` + escapeHTML + raw — server-side rendering primitive
       static.js       # /static/* handler
       static/
-        style.css     # terminal aesthetic — see plato/forum-poc-archived/samples/1-terminal.html
+        style.css     # terminal aesthetic — see docs/design/1-terminal.html
     db/
       migrations/
-        001_initial.sql   # placeholder; M1 fills in
+        001_initial.sql   # M1 schema (handles, posts, drafts)
   test/
-    unit/             # pure-function tests (templates, schema, parsers)
+    unit/             # pure-function tests (templates, avatars, parsers)
     integration/      # end-to-end against in-memory sqlite + real knowless
+  docs/
+    01-product/       # PRDs, build plan
+    design/           # visual reference samples
 ```
 
 ## What's locked
 
-See `docs/01-product/build-plan.md` §Locked Decisions in the `plato/` repo. Short version:
+See [docs/01-product/build-plan.md §Locked Decisions](docs/01-product/build-plan.md). Short version:
 
 - Visual: terminal aesthetic, 720px column, JetBrains Mono, charcoal background
 - Rendering: `html\`\`` tagged template + `raw()` opt-out, server-side only, no client JS in v1

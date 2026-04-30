@@ -59,6 +59,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`plato-forum on ${BASE_URL}`));
+server.listen(PORT, () => console.log(`plato on ${BASE_URL}`));
 
 process.on('SIGINT', () => { server.close(() => process.exit(0)); });

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>/sub/woodworking — classic</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-soft: #f6f7f8;
+    --bg-soft-2: #eef0f2;
+    --border: #e3e6e8;
+    --text: #1a1a1b;
+    --text-dim: #7c7f81;
+    --accent: #0079d3;
+    --upvote: #ff4500;
+    --downvote: #7193ff;
+    --new: #2d8e44;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg-soft); margin: 0; }
+  body {
+    font: 14px/1.45 -apple-system, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    color: var(--text);
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 4rem;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+  header h1 { margin: 0; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+  header .nav { font-size: 0.85rem; color: var(--text-dim); }
+  header .nav a { color: var(--text-dim); margin-left: 0.9rem; }
+  .grid { display: grid; grid-template-columns: 1fr 240px; gap: 1rem; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } aside { order: -1; } }
+  main, aside { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  aside { padding: 0.6rem 0.8rem; height: fit-content; }
+  aside h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 700; margin: 0.4rem 0 0.5rem; }
+  aside .row { display: flex; justify-content: space-between; padding: 0.35rem 0; font-size: 0.85rem; border-bottom: 1px solid var(--border); }
+  aside .row:last-child { border-bottom: 0; }
+  aside .row .name { color: var(--accent); font-weight: 600; }
+  aside .row .stats { color: var(--text-dim); font-size: 0.78rem; }
+  .post { display: grid; grid-template-columns: 38px 1fr; gap: 0; border-bottom: 1px solid var(--border); }
+  .post:last-child { border-bottom: 0; }
+  .vote { background: var(--bg-soft); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0.5rem 0; color: var(--text-dim); font-size: 0.78rem; gap: 2px; }
+  .vote .arrow { font-size: 0.85rem; cursor: pointer; padding: 1px 0; line-height: 1; }
+  .vote .arrow.up:hover { color: var(--upvote); }
+  .vote .arrow.down:hover { color: var(--downvote); }
+  .vote .score { color: var(--text); font-weight: 700; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+  .body { padding: 0.7rem 0.9rem; }
+  .body h2 { margin: 0 0 0.25rem; font-size: 1rem; font-weight: 500; line-height: 1.35; }
+  .body h2 a { color: var(--text); }
+  .body h2 a:hover { color: var(--accent); }
+  .meta { color: var(--text-dim); font-size: 0.78rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+  .meta img { width: 20px; height: 20px; border-radius: 50%; background: var(--bg-soft-2); }
+  .meta .name { color: var(--text); font-weight: 500; }
+  .meta .badge { background: var(--bg-soft-2); padding: 1px 6px; border-radius: 3px; font-size: 0.72rem; }
+  .meta .new { background: var(--new); color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.72rem; }
+  .meta .when::before { content: '· '; }
+  .meta .sub { color: var(--accent); font-weight: 500; }
+  .links { color: var(--text-dim); font-size: 0.78rem; margin-top: 0.5rem; display: flex; gap: 0.9rem; flex-wrap: wrap; }
+  .links .lh { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; background: var(--bg-soft); border-radius: 3px; }
+  .links .lh img { width: 13px; height: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>plato</h1>
+  <div class="nav">
+    <a href="#">home</a><a href="#">my subs</a><a href="#">new</a>
+    <span style="margin-left:1rem; color:var(--text);">usual-caribou</span>
+  </div>
+</header>
+
+<div class="grid">
+  <main>
+
+    <div class="post">
+      <div class="vote">
+        <span class="arrow up">▲</span><span class="score">47</span><span class="arrow down">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="#">Restoring a Stanley #5 — the chipbreaker is the whole game</a></h2>
+        <div class="meta">
+          <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=usual-caribou" alt="">
+          <span class="name">usual-caribou</span>
+          <span class="badge">5+ years</span>
+          <span class="sub">/sub/woodworking</span>
+          <span class="when">2h ago</span>
+        </div>
+        <div class="links">
+          <span class="lh"><img src="https://www.google.com/s2/favicons?domain=youtube.com&sz=32"> youtube.com</span>
+          <span class="lh"><img src="https://www.google.com/s2/favicons?domain=lostartpress.com&sz=32"> lostartpress.com</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="post">
+      <div class="vote">
+        <span class="arrow up">▲</span><span class="score">12</span><span class="arrow down">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="#">How do you sharpen a card scraper without burning your fingers?</a></h2>
+        <div class="meta">
+          <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=quick-sparrow" alt="">
+          <span class="name">quick-sparrow</span>
+          <span class="new">new</span>
+          <span class="sub">/sub/woodworking</span>
+          <span class="when">4h ago</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="post">
+      <div class="vote">
+        <span class="arrow up">▲</span><span class="score">9</span><span class="arrow down">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="#">Overnight oats: the ratio that finally worked for me</a></h2>
+        <div class="meta">
+          <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=tame-otter" alt="">
+          <span class="name">tame-otter</span>
+          <span class="badge">1 year</span>
+          <span class="sub">/sub/cooking</span>
+          <span class="when">5h ago</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="post">
+      <div class="vote">
+        <span class="arrow up">▲</span><span class="score">23</span><span class="arrow down">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="#">'95 Honda Civic, runs, $1,800 firm — 24th &amp; Mission</a></h2>
+        <div class="meta">
+          <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=happy-falcon" alt="">
+          <span class="name">happy-falcon</span>
+          <span class="badge">1 month</span>
+          <span class="sub">/sub/sf-classifieds</span>
+          <span class="when">6h ago</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="post">
+      <div class="vote">
+        <span class="arrow up">▲</span><span class="score">31</span><span class="arrow down">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="#">SB-218 amendment text dropped Friday — buried changes in §7</a></h2>
+        <div class="meta">
+          <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=brave-magpie" alt="">
+          <span class="name">brave-magpie</span>
+          <span class="badge">5+ years</span>
+          <span class="sub">/sub/policy-watching</span>
+          <span class="when">8h ago</span>
+        </div>
+        <div class="links">
+          <span class="lh"><img src="https://www.google.com/s2/favicons?domain=leginfo.legislature.ca.gov&sz=32"> legislature.ca.gov</span>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <aside>
+    <h3>Active subs · 24h</h3>
+    <div class="row"><a class="name" href="#">/woodworking</a><span class="stats">47 · 2.3k</span></div>
+    <div class="row"><a class="name" href="#">/cooking</a><span class="stats">23 · 5.1k</span></div>
+    <div class="row"><a class="name" href="#">/sf-classifieds</a><span class="stats">18 · 412</span></div>
+    <div class="row"><a class="name" href="#">/policy-watching</a><span class="stats">9 · 184</span></div>
+  </aside>
+</div>
+
+</body>
+</html>

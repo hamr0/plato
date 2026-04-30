@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>/sub/woodworking — terminal</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-soft: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --amber: #d29922;
+    --green: #56d364;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); margin: 0; }
+  body {
+    font: 14px/1.55 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    color: var(--text);
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem 1rem 4rem;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+  header .nav { color: var(--text-dim); font-size: 0.85rem; margin-top: 0.3rem; }
+  header .nav a { color: var(--text-dim); margin-right: 0.8rem; }
+  .post { padding: 1rem 0; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: auto 1fr; gap: 0.75rem; }
+  .vote { display: flex; flex-direction: column; align-items: center; color: var(--text-dim); font-size: 0.75rem; min-width: 2.2rem; }
+  .vote .score { color: var(--text); font-weight: 600; font-size: 0.9rem; }
+  .vote .arrow { font-size: 0.85rem; line-height: 1; padding: 1px 0; cursor: pointer; }
+  .vote .arrow:hover { color: var(--accent); }
+  .body h2 { margin: 0 0 0.3rem; font-size: 0.95rem; font-weight: 600; }
+  .body h2 a { color: var(--text); }
+  .body h2 a:hover { color: var(--accent); }
+  .meta { color: var(--text-dim); font-size: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+  .meta img { width: 18px; height: 18px; border-radius: 3px; background: var(--bg-soft); }
+  .meta .name { color: var(--text); }
+  .meta .badge { color: var(--amber); }
+  .meta .new { color: var(--green); }
+  .meta .when { color: var(--text-dim); }
+  .links { color: var(--text-dim); font-size: 0.78rem; margin-top: 0.4rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+  .links .lh { display: inline-flex; align-items: center; gap: 4px; }
+  .links .lh img { width: 13px; height: 13px; }
+  .sub-list { margin-bottom: 2rem; }
+  .sub-list .row { display: flex; justify-content: space-between; padding: 0.4rem 0; border-bottom: 1px dashed var(--border); font-size: 0.85rem; }
+  .sub-list .row .name { color: var(--accent); }
+  .sub-list .row .desc { color: var(--text-dim); flex: 1; padding: 0 0.8rem; }
+  .sub-list .row .stats { color: var(--text-dim); font-size: 0.78rem; }
+  h3.section { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); font-weight: 600; margin: 1.5rem 0 0.5rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>plato · forum-poc</h1>
+  <div class="nav">
+    <a href="#">/home</a><a href="#">/my-subs</a><a href="#">/new</a>
+    <span style="float:right; color:var(--text-dim);">logged in as <span style="color:var(--text)">usual-caribou</span></span>
+  </div>
+</header>
+
+<h3 class="section">// active subs · last 24h</h3>
+<div class="sub-list">
+  <div class="row"><span class="name">/sub/woodworking</span><span class="desc">— hand-tool woodworking</span><span class="stats">47 posts · 2.3k</span></div>
+  <div class="row"><span class="name">/sub/cooking</span><span class="desc">— recipes and technique</span><span class="stats">23 posts · 5.1k</span></div>
+  <div class="row"><span class="name">/sub/sf-classifieds</span><span class="desc">— buy/sell in SF Bay</span><span class="stats">18 posts · 412</span></div>
+  <div class="row"><span class="name">/sub/policy-watching</span><span class="desc">— legislative tracking</span><span class="stats">9 posts · 184</span></div>
+</div>
+
+<h3 class="section">// recent · max 2 per sub</h3>
+
+<div class="post">
+  <div class="vote">
+    <span class="arrow">▲</span><span class="score">47</span><span class="arrow">▼</span>
+  </div>
+  <div class="body">
+    <h2><a href="#">restoring a stanley #5 — the chipbreaker is the whole game</a></h2>
+    <div class="meta">
+      <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=usual-caribou" alt="">
+      <span class="name">usual-caribou</span>
+      <span class="badge">5+ years</span>
+      <span>· /sub/woodworking</span>
+      <span class="when">· 2h ago</span>
+    </div>
+    <div class="links">
+      <span class="lh"><img src="https://www.google.com/s2/favicons?domain=youtube.com&sz=32"> youtube.com</span>
+      <span class="lh"><img src="https://www.google.com/s2/favicons?domain=lostartpress.com&sz=32"> lostartpress.com</span>
+    </div>
+  </div>
+</div>
+
+<div class="post">
+  <div class="vote">
+    <span class="arrow">▲</span><span class="score">12</span><span class="arrow">▼</span>
+  </div>
+  <div class="body">
+    <h2><a href="#">how do you sharpen a card scraper without burning your fingers?</a></h2>
+    <div class="meta">
+      <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=quick-sparrow" alt="">
+      <span class="name">quick-sparrow</span>
+      <span class="new">new account</span>
+      <span>· /sub/woodworking</span>
+      <span class="when">· 4h ago</span>
+    </div>
+  </div>
+</div>
+
+<div class="post">
+  <div class="vote">
+    <span class="arrow">▲</span><span class="score">9</span><span class="arrow">▼</span>
+  </div>
+  <div class="body">
+    <h2><a href="#">overnight oats: the ratio that finally worked for me</a></h2>
+    <div class="meta">
+      <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=tame-otter" alt="">
+      <span class="name">tame-otter</span>
+      <span class="badge">1 year</span>
+      <span>· /sub/cooking</span>
+      <span class="when">· 5h ago</span>
+    </div>
+  </div>
+</div>
+
+<div class="post">
+  <div class="vote">
+    <span class="arrow">▲</span><span class="score">23</span><span class="arrow">▼</span>
+  </div>
+  <div class="body">
+    <h2><a href="#">'95 honda civic, runs, $1800 firm — 24th &amp; mission</a></h2>
+    <div class="meta">
+      <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=happy-falcon" alt="">
+      <span class="name">happy-falcon</span>
+      <span class="badge">1 month</span>
+      <span>· /sub/sf-classifieds</span>
+      <span class="when">· 6h ago</span>
+    </div>
+  </div>
+</div>
+
+<div class="post">
+  <div class="vote">
+    <span class="arrow">▲</span><span class="score">31</span><span class="arrow">▼</span>
+  </div>
+  <div class="body">
+    <h2><a href="#">SB-218 amendment text dropped friday — buried changes in §7</a></h2>
+    <div class="meta">
+      <img src="https://api.dicebear.com/9.x/bottts-neutral/svg?seed=brave-magpie" alt="">
+      <span class="name">brave-magpie</span>
+      <span class="badge">5+ years</span>
+      <span>· /sub/policy-watching</span>
+      <span class="when">· 8h ago</span>
+    </div>
+    <div class="links">
+      <span class="lh"><img src="https://www.google.com/s2/favicons?domain=leginfo.legislature.ca.gov&sz=32"> legislature.ca.gov</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
