@@ -9,6 +9,13 @@ const DB_PATH = process.env.DB_PATH ?? './forum.db';
 
 const db = openDb(DB_PATH);
 
+// Migrations may need to rebuild tables to alter constraints (SQLite cannot
+// ALTER TABLE ADD CONSTRAINT). The canonical pattern requires foreign_keys
+// = OFF, which is a no-op inside a transaction. Disable here, before any
+// BEGIN. Re-enabled at the end with a foreign_key_check to catch any
+// integrity issue introduced by the migrations themselves.
+db.exec('PRAGMA foreign_keys = OFF');
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS schema_migrations (
     filename TEXT PRIMARY KEY,
@@ -38,6 +45,14 @@ for (const f of files) {
     console.error(`failed ${f}: ${err.message}`);
     process.exit(1);
   }
+}
+
+db.exec('PRAGMA foreign_keys = ON');
+const violations = db.prepare('PRAGMA foreign_key_check').all();
+if (violations.length > 0) {
+  console.error('foreign key check failed after migrations:');
+  for (const v of violations) console.error(' ', v);
+  process.exit(1);
 }
 
 console.log(applied_count === 0 ? 'no pending migrations' : `applied ${applied_count} migration(s)`);
