@@ -15,6 +15,7 @@
     "@dicebear/collection": "^9.4.2",
     "@dicebear/core": "^9.4.2",
     "knowless": "^1.0.0",
+    "marked": "^18.0.2",
     "unique-names-generator": "^4.7.1"
   }
 }
