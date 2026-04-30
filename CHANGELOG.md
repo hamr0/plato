@@ -40,6 +40,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 - Terminal-aesthetic styles for posts, votes, author meta, and post-body article rendering.
 - End-to-end integration test: a stranger posts via the form, the magic link is captured by an injected mailer, the click flow drives the redirect chain, and the finished post renders with pseudonym + identicon. Cookie jar preserves the session across hops.
 
+### Fixed
+- Logged-in users no longer re-do the magic-link round trip on every post. The `/draft` form omits the email input when a session exists, and the handler short-circuits to `submitDraft` + `finalizeDraft` inline — matching PRD §post-flow step 6 ("Subsequent posts in the same session use the cookie. No re-click required."). Two integration tests cover the new path.
+
 ### Changed
 - Repository renamed from `plato-forum` to `plato`. Documentation and code now live in one repository.
 - POC graduated and was archived. Phase 2 implementation started in a clean repository per AGENT_RULES POC discipline.

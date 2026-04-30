@@ -99,7 +99,9 @@ function renderHome(req, res, { db, auth }) {
       ${loginBar}
       <h3 class="section">// new post</h3>
       <form method="POST" action="/draft">
-        <input name="email" type="email" placeholder="your email (we don't keep it)" required>
+        ${currentHandle
+          ? html``
+          : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
         <input name="title" placeholder="post title" required>
         <textarea name="body" placeholder="markdown body" required></textarea>
         <button>post</button>
@@ -110,12 +112,13 @@ function renderHome(req, res, { db, auth }) {
   );
 }
 
-async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl }) {
+async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody } = form;
+  const currentHandle = auth.handleFromRequest(req);
 
-  if (!email || !title || !postBody) {
+  if (!title || !postBody || (!currentHandle && !email)) {
     return send(
       res,
       400,
@@ -124,6 +127,12 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl }) {
         html`<p class="muted">all fields are required. <a href="/">back</a></p>`
       )
     );
+  }
+
+  if (currentHandle) {
+    const { draftId } = submitDraft(db, { title, body: postBody });
+    const { postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
+    return redirect(res, `/post/${postId}`);
   }
 
   if (isDisposableEmail(email, disposableDomains)) {
@@ -240,7 +249,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth });
       if (path === '/draft' && method === 'POST') {
-        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl });
+        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
       }
 
       let m;

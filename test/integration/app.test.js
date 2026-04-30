@@ -209,6 +209,64 @@ test('end-to-end: stranger posts → magic link → click → published post vis
   assert.match(html, /logged in as/);
 });
 
+test('logged-in user posts directly without re-doing magic link', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { mailer, baseUrl } = ctx;
+
+  const jar = newJar();
+
+  // Establish session: one full magic-link round trip on a first post.
+  let res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      email: 'alice@example.com',
+      title: 'first',
+      body: 'first body',
+    }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(mailer.sent.length, 1);
+  res = await jarFetch(jar, magicLinkFrom(mailer.sent[0]));
+  assert.equal(res.status, 302);
+  res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
+  assert.equal(res.status, 302);
+
+  // Home page now shows the form without an email input.
+  res = await jarFetch(jar, baseUrl + '/');
+  const homeHtml = await res.text();
+  assert.match(homeHtml, /logged in as/);
+  assert.doesNotMatch(homeHtml, /name="email"/);
+
+  // Second post: no email field, must publish directly with no new mail sent.
+  res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'second', body: 'second body' }),
+  });
+  assert.equal(res.status, 302);
+  assert.match(res.headers.get('location'), /\/post\/[0-9a-f]{16}$/);
+  assert.equal(mailer.sent.length, 1, 'no second magic-link mail sent');
+
+  res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /second/);
+});
+
+test('anonymous /draft without email returns 400', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+
+  const res = await fetch(baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 't', body: 'b' }),
+  });
+  assert.equal(res.status, 400);
+});
+
 test('disposable email is rejected at /draft, knowless never invoked', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
