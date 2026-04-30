@@ -34,6 +34,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 ### Added — M1 Disposable-domain blocklist
 - Forum-side disposable-email domain check (PRD spam rule 7). Blocked at form submission, before knowless is invoked. Operator owns the blocklist file; M5 adds the cron sync to the upstream community-maintained list.
 
+### Added — M1 Integration (M1 done)
+- HTTP request helpers (body reader, form/cookie parsers, send/redirect).
+- Application factory `createApp({db, auth, disposableDomains, postsDir, baseUrl})` wires every M1 module behind the routes: `GET /`, `POST /draft`, `GET /draft/<id>/finalize`, `GET /post/<id>`, `GET /avatar/<handle>.svg`. Knowless handlers mounted at `/login`, `/auth/callback`, `/verify`, `/logout`.
+- Terminal-aesthetic styles for posts, votes, author meta, and post-body article rendering.
+- End-to-end integration test: a stranger posts via the form, the magic link is captured by an injected mailer, the click flow drives the redirect chain, and the finished post renders with pseudonym + identicon. Cookie jar preserves the session across hops.
+
 ### Changed
 - Repository renamed from `plato-forum` to `plato`. Documentation and code now live in one repository.
 - POC graduated and was archived. Phase 2 implementation started in a clean repository per AGENT_RULES POC discipline.
