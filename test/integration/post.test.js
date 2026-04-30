@@ -3,21 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFileSync as readFile } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { openDb } from '../../src/db/index.js';
 import { submitDraft, finalizeDraft, getPost, listRecentPosts } from '../../src/content/post.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const MIGRATION_001 = readFile(
-  resolve(HERE, '../../src/db/migrations/001_initial.sql'),
-  'utf8'
-);
+import { applyAllMigrations } from '../_helpers/migrations.js';
 
 function freshDb() {
   const db = openDb(':memory:');
-  db.exec(MIGRATION_001);
+  applyAllMigrations(db);
   return db;
 }
 
@@ -54,6 +46,8 @@ test('submitDraft: rejects missing body', () => {
 
 test('submitDraft: custom subName overrides default', () => {
   const db = freshDb();
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)')
+    .run('cooking', Date.now());
   const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'cooking' });
   const row = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
   assert.equal(row.sub_name, 'cooking');

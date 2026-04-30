@@ -1,20 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { openDb } from '../../src/db/index.js';
 import { pseudonymFor, defaultGenerate } from '../../src/identity/pseudonym.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const MIGRATION_001 = readFileSync(
-  resolve(HERE, '../../src/db/migrations/001_initial.sql'),
-  'utf8'
-);
+import { applyAllMigrations } from '../_helpers/migrations.js';
 
 function freshDb() {
   const db = openDb(':memory:');
-  db.exec(MIGRATION_001);
+  applyAllMigrations(db);
   return db;
 }
 

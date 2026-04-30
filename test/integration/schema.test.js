@@ -1,19 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { openDb } from '../../src/db/index.js';
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const MIGRATION_001 = readFileSync(
-  resolve(HERE, '../../src/db/migrations/001_initial.sql'),
-  'utf8'
-);
+import { applyAllMigrations } from '../_helpers/migrations.js';
 
 function freshDb() {
   const db = openDb(':memory:');
-  db.exec(MIGRATION_001);
+  applyAllMigrations(db);
   return db;
 }
 
@@ -123,6 +115,62 @@ test('drafts: NULL finalized_post_id is fine (unfinalized draft)', () => {
     .run('d1', 't', 'b', Date.now());
   const row = db.prepare('SELECT finalized_post_id FROM drafts WHERE id = ?').get('d1');
   assert.equal(row.finalized_post_id, null);
+});
+
+test('subs: general sub exists after migration with NULL owner', () => {
+  const db = freshDb();
+  const row = db.prepare('SELECT * FROM subs WHERE name = ?').get('general');
+  assert.equal(row.name, 'general');
+  assert.equal(row.owner_handle, null);
+  assert.equal(row.default_sort, 'new');
+});
+
+test('subs: name is PRIMARY KEY (UNIQUE)', () => {
+  const db = freshDb();
+  assert.throws(() => {
+    db.prepare(`INSERT INTO subs (name, created_at) VALUES (?, ?)`)
+      .run('general', Date.now());
+  }, /UNIQUE|PRIMARY/);
+});
+
+test('subs: owner_handle FK rejects nonexistent handle', () => {
+  const db = freshDb();
+  assert.throws(() => {
+    db.prepare(`INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)`)
+      .run('mysub', 'nonexistent-handle', Date.now());
+  }, /FOREIGN KEY/);
+});
+
+test('posts.sub_name FK rejects nonexistent sub', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('h1', 'usual-caribou', Date.now());
+  assert.throws(() => {
+    db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run('p1', 'nope', 'h1', 't', 'posts/p1.md', Date.now());
+  }, /FOREIGN KEY/);
+});
+
+test('drafts.sub_name FK rejects nonexistent sub', () => {
+  const db = freshDb();
+  assert.throws(() => {
+    db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at)
+                VALUES (?, ?, ?, ?, ?)`)
+      .run('d1', 'nope', 't', 'b', Date.now());
+  }, /FOREIGN KEY/);
+});
+
+test('sub_mods: composite PK on (sub_name, handle)', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('h1', 'usual-caribou', Date.now());
+  db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)')
+    .run('general', 'h1', 'owner');
+  assert.throws(() => {
+    db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)')
+      .run('general', 'h1', 'co');
+  }, /UNIQUE|PRIMARY/);
 });
 
 test('STRICT enforcement: type mismatches reject', () => {
