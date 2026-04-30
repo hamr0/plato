@@ -300,6 +300,167 @@ test('GET /static/style.css served', async (t) => {
   assert.match(res.headers.get('content-type'), /text\/css/);
 });
 
+async function loginVia(jar, baseUrl, mailer, email) {
+  let res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email, title: 'bootstrap', body: 'bootstrap' }),
+  });
+  assert.equal(res.status, 200);
+  const link = magicLinkFrom(mailer.sent[mailer.sent.length - 1]);
+  res = await jarFetch(jar, link);
+  assert.equal(res.status, 302);
+  res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
+  assert.equal(res.status, 302);  // /draft/<id>/finalize → /post/<id>
+}
+
+test('M2: logged-in user creates a sub and posts in it', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl, mailer } = ctx;
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+
+  // Create a sub.
+  let res = await jarFetch(jar, baseUrl + '/sub/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ name: 'cooking', description: 'recipes etc.' }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/cooking');
+
+  // Sub page renders.
+  res = await jarFetch(jar, baseUrl + '/sub/cooking');
+  assert.equal(res.status, 200);
+  let body = await res.text();
+  assert.match(body, /\/sub\/cooking/);
+  assert.match(body, /recipes etc\./);
+
+  // Post into the new sub via the sub page form (hidden sub_name=cooking).
+  res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'cooking', title: 'pasta', body: 'al dente' }),
+  });
+  assert.equal(res.status, 302);
+  assert.match(res.headers.get('location'), /\/post\/[0-9a-f]{16}$/);
+
+  // Sub page now shows the post.
+  res = await jarFetch(jar, baseUrl + '/sub/cooking');
+  body = await res.text();
+  assert.match(body, /pasta/);
+});
+
+test('M2: GET /sub/create requires session', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+  const res = await fetch(baseUrl + '/sub/create');
+  assert.equal(res.status, 401);
+});
+
+test('M2: POST /sub/create rejects reserved name', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl, mailer } = ctx;
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+
+  const res = await jarFetch(jar, baseUrl + '/sub/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ name: 'admin' }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /reserved/);
+});
+
+test('M2: POST /sub/create rejects duplicate name', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl, mailer } = ctx;
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+
+  let res = await jarFetch(jar, baseUrl + '/sub/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ name: 'cooking' }),
+  });
+  assert.equal(res.status, 302);
+
+  res = await jarFetch(jar, baseUrl + '/sub/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ name: 'cooking' }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /already exists/);
+});
+
+test('M2: GET /sub/<unknown> returns 404', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+  const res = await fetch(baseUrl + '/sub/nonesuch');
+  assert.equal(res.status, 404);
+});
+
+test('M2: home page caps recent posts to 2 per sub', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  const handle = 'c'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'capper-test', Date.now());
+
+  // 5 posts in 'general'. Cap is 2 → only the 2 newest should appear.
+  const insert = db.prepare(
+    `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+     VALUES (?, 'general', ?, ?, ?, ?)`
+  );
+  const now = Date.now();
+  for (let i = 0; i < 5; i++) {
+    insert.run(
+      String(i).padStart(16, '0'),
+      handle,
+      `general-post-${i}`,
+      `posts/g${i}.md`,
+      now - i * 1000,
+    );
+  }
+
+  const res = await fetch(baseUrl + '/');
+  const body = await res.text();
+  assert.match(body, /general-post-0/, 'newest visible');
+  assert.match(body, /general-post-1/, 'second-newest visible');
+  assert.doesNotMatch(body, /general-post-2/, '3rd post must be capped');
+  assert.doesNotMatch(body, /general-post-3/);
+  assert.doesNotMatch(body, /general-post-4/);
+});
+
+test('M2: /draft to unknown sub returns 400', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl, mailer } = ctx;
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'poster@example.com');
+
+  const res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'doesnotexist', title: 't', body: 'b' }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /doesn't exist/);
+});
+
 test('SECURITY: title with HTML is escaped on home page', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

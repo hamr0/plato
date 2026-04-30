@@ -7,11 +7,18 @@ import {
   submitDraft,
   finalizeDraft,
   getPost,
-  listRecentPosts,
+  listRecentPostsCappedPerSub,
+  listPostsInSub,
 } from '../content/post.js';
+import {
+  createSub,
+  getSubByName,
+  listActiveSubs,
+  validateSubName,
+  RESERVED_SUB_NAMES,
+} from '../content/sub.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 
-const POST_ID_RE = /^[0-9a-f]{16}$/;
 const HANDLE_RE = /^[0-9a-f]{1,128}$/;
 
 function layout(title, body) {
@@ -39,7 +46,7 @@ function authorMeta(post, pseudonym) {
   return html`<div class="meta">
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
     <span class="name">${pseudonym}</span>
-    <span>· /sub/${post.sub_name}</span>
+    <span>· <a href="/sub/${post.sub_name}">/sub/${post.sub_name}</a></span>
     <span class="when">· ${relativeTime(post.created_at)}</span>
   </div>`;
 }
@@ -53,40 +60,89 @@ function pseudonymsByHandle(db, handles) {
   return new Map(rows.map((r) => [r.handle, r.pseudonym]));
 }
 
+function listAllSubs(db) {
+  return db.prepare('SELECT name FROM subs ORDER BY name ASC').all();
+}
+
+function loginBarFor(db, currentHandle) {
+  if (!currentHandle) {
+    return html`<p class="muted"><em>fill the form to post — magic-link required, no password, no PII</em></p>`;
+  }
+  const pseudonym = pseudonymFor(db, currentHandle);
+  return html`<p class="muted">
+    logged in as <strong>${pseudonym}</strong>
+    <img src="/avatar/${currentHandle}.svg" width="18" height="18" alt="" style="vertical-align:middle">
+    — <form method="POST" action="/logout" style="display:inline">
+      <button>logout</button>
+    </form>
+  </p>`;
+}
+
+function postFormFor({ currentHandle, defaultSub, allSubs }) {
+  // Anonymous users always post to `general`. Logged-in users pick from a
+  // dropdown of all subs. When a sub is contextually fixed (the sub page),
+  // we hide the picker and pin the value.
+  let subField;
+  if (defaultSub) {
+    subField = html`<input type="hidden" name="sub_name" value="${defaultSub}">`;
+  } else if (currentHandle) {
+    subField = html`<select name="sub_name">
+      ${allSubs.map((s) => html`<option value="${s.name}">/sub/${s.name}</option>`)}
+    </select>`;
+  } else {
+    subField = html`<input type="hidden" name="sub_name" value="general">`;
+  }
+
+  return html`<form method="POST" action="/draft">
+    ${currentHandle
+      ? html``
+      : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
+    ${subField}
+    <input name="title" placeholder="post title" required>
+    <textarea name="body" placeholder="markdown body" required></textarea>
+    <button>post</button>
+  </form>`;
+}
+
+function postRowsView(posts, pseudonyms) {
+  if (posts.length === 0) {
+    return html`<p class="muted">no posts yet — be the first.</p>`;
+  }
+  return posts.map((post) => {
+    const name = pseudonyms.get(post.handle) ?? post.handle.slice(0, 8);
+    return html`<div class="post">
+      <div class="vote">
+        <span class="arrow">▲</span>
+        <span class="score">0</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="body">
+        <h2><a href="/post/${post.id}">${post.title}</a></h2>
+        ${authorMeta(post, name)}
+      </div>
+    </div>`;
+  });
+}
+
+function activeSubsView(active) {
+  if (active.length === 0) {
+    return html`<p class="muted">no active subs in the last 24 hours.</p>`;
+  }
+  return html`<ul class="subs">
+    ${active.map((s) => html`<li>
+      <a href="/sub/${s.name}">/sub/${s.name}</a>
+      <span class="muted">· ${s.post_count} post${s.post_count === 1 ? '' : 's'}</span>
+    </li>`)}
+  </ul>`;
+}
+
 function renderHome(req, res, { db, auth }) {
-  const posts = listRecentPosts(db, { limit: 50 });
+  const posts = listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
+  const active = listActiveSubs(db);
+  const allSubs = listAllSubs(db);
   const currentHandle = auth.handleFromRequest(req);
-  const currentPseudonym = currentHandle ? pseudonymFor(db, currentHandle) : null;
-
-  const loginBar = currentHandle
-    ? html`<p class="muted">
-        logged in as <strong>${currentPseudonym}</strong>
-        <img src="/avatar/${currentHandle}.svg" width="18" height="18" alt="" style="vertical-align:middle">
-        — <form method="POST" action="/logout" style="display:inline">
-          <button>logout</button>
-        </form>
-      </p>`
-    : html`<p class="muted"><em>fill the form to post — magic-link required, no password, no PII</em></p>`;
-
-  const postRows =
-    posts.length === 0
-      ? html`<p class="muted">no posts yet — be the first.</p>`
-      : posts.map((post) => {
-          const name = pseudonyms.get(post.handle) ?? post.handle.slice(0, 8);
-          return html`<div class="post">
-            <div class="vote">
-              <span class="arrow">▲</span>
-              <span class="score">0</span>
-              <span class="arrow">▼</span>
-            </div>
-            <div class="body">
-              <h2><a href="/post/${post.id}">${post.title}</a></h2>
-              ${authorMeta(post, name)}
-            </div>
-          </div>`;
-        });
 
   send(
     res,
@@ -96,26 +152,110 @@ function renderHome(req, res, { db, auth }) {
         <h1>plato · forum</h1>
         <div class="nav muted">a forum that lives at one URL</div>
       </header>
-      ${loginBar}
+      ${loginBarFor(db, currentHandle)}
+      <h3 class="section">// active subs</h3>
+      ${activeSubsView(active)}
+      ${currentHandle
+        ? html`<p class="muted"><a href="/sub/create">+ create a sub</a></p>`
+        : html``}
       <h3 class="section">// new post</h3>
-      <form method="POST" action="/draft">
-        ${currentHandle
-          ? html``
-          : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
-        <input name="title" placeholder="post title" required>
-        <textarea name="body" placeholder="markdown body" required></textarea>
-        <button>post</button>
-      </form>
-      <h3 class="section">// recent</h3>
-      ${postRows}
+      ${postFormFor({ currentHandle, allSubs })}
+      <h3 class="section">// recent (2 per sub)</h3>
+      ${postRowsView(posts, pseudonyms)}
     `)
   );
+}
+
+function renderSubPage(req, res, { db, auth }, subName) {
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
+  }
+  const posts = listPostsInSub(db, subName, { limit: 50 });
+  const handles = [...new Set(posts.map((p) => p.handle))];
+  const pseudonyms = pseudonymsByHandle(db, handles);
+  const currentHandle = auth.handleFromRequest(req);
+
+  send(
+    res,
+    200,
+    layout(`/sub/${subName}`, html`
+      <header>
+        <h1>/sub/${subName}</h1>
+        ${sub.description ? html`<p class="muted">${sub.description}</p>` : html``}
+      </header>
+      <p><a href="/">← home</a></p>
+      ${loginBarFor(db, currentHandle)}
+      <h3 class="section">// new post in /sub/${subName}</h3>
+      ${postFormFor({ currentHandle, defaultSub: subName })}
+      <h3 class="section">// posts</h3>
+      ${postRowsView(posts, pseudonyms)}
+    `)
+  );
+}
+
+function renderSubCreate(req, res, { auth }) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(
+      res,
+      401,
+      layout('login required', html`<p class="muted">creating a sub requires a session. <a href="/">back</a> and post once to get one.</p>`)
+    );
+  }
+  send(
+    res,
+    200,
+    layout('create a sub', html`
+      <header><h1>create a sub</h1></header>
+      <p><a href="/">← home</a></p>
+      <form method="POST" action="/sub/create">
+        <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
+        <input name="description" placeholder="one-line description (optional)">
+        <button>create</button>
+      </form>
+      <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>
+    `)
+  );
+}
+
+async function handleSubCreate(req, res, { db, auth }) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, layout('login required', html`<p class="muted">login first.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { name, description = '' } = form;
+
+  try {
+    validateSubName(name);
+  } catch (err) {
+    return send(
+      res,
+      400,
+      layout('invalid name', html`<p class="muted">${err.message} <a href="/sub/create">try again</a></p>`)
+    );
+  }
+
+  try {
+    createSub(db, { name, description, ownerHandle: currentHandle });
+  } catch (err) {
+    return send(
+      res,
+      400,
+      layout('create failed', html`<p class="muted">${err.message} <a href="/sub/create">try again</a></p>`)
+    );
+  }
+
+  redirect(res, `/sub/${name}`);
 }
 
 async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody } = form;
+  const subName = form.sub_name || 'general';
   const currentHandle = auth.handleFromRequest(req);
 
   if (!title || !postBody || (!currentHandle && !email)) {
@@ -129,8 +269,19 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     );
   }
 
+  if (!getSubByName(db, subName)) {
+    return send(
+      res,
+      400,
+      layout(
+        'unknown sub',
+        html`<p class="muted">/sub/${subName} doesn't exist. <a href="/">back</a></p>`
+      )
+    );
+  }
+
   if (currentHandle) {
-    const { draftId } = submitDraft(db, { title, body: postBody });
+    const { draftId } = submitDraft(db, { title, body: postBody, subName });
     const { postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
     return redirect(res, `/post/${postId}`);
   }
@@ -146,7 +297,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     );
   }
 
-  const { draftId } = submitDraft(db, { title, body: postBody });
+  const { draftId } = submitDraft(db, { title, body: postBody, subName });
 
   await auth.startLogin({
     email,
@@ -232,6 +383,8 @@ function renderAvatar(res, handle) {
   res.end(avatarSvg(handle));
 }
 
+const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
+
 export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
   return async function handler(req, res) {
     try {
@@ -251,8 +404,13 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
       }
+      if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { auth });
+      if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
 
       let m;
+      if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
+        return renderSubPage(req, res, { db, auth }, m[1]);
+      }
       if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
         return handleFinalize(req, res, { db, auth, postsDir }, m[1]);
       }
