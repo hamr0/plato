@@ -154,10 +154,9 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl }) {
         <header>
           <h1>plato · check your email</h1>
         </header>
-        <p>If <code>${email}</code> is acceptable, a magic link is on its way.</p>
-        <p class="muted">Click it to publish. The link expires in 15 minutes.</p>
-        <p class="muted">Your draft is saved server-side until you click — or until 1h passes, whichever comes first.</p>
-        <p><a href="/">back</a></p>
+        <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
+        <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
+        <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
       `
     )
   );
