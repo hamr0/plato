@@ -1,6 +1,8 @@
 # PRD: Forum — phpBB-Era Discourse, 2026 Substrate
 
-A Reddit-shaped community platform owned by its members, not a company. Pseudonymous text-first discussion, hierarchical replies, upvote/downvote, sub-communities, passwordless auth via [knowless](../../../knowless). Replaces Discord, Slack, subreddits, and old-style mailing lists for groups that want to last decades.
+> **Status (April 2026):** POC validated end-to-end. Phase 2 implementation underway in this repo per the [build plan](build-plan.md). M1 foundation, auth, identity, and markdown modules are in place; content + integration is next. The "POC flow" and "Pre-POC checklist" sections below are kept for historical context — they describe the validation that was done, not pending work.
+
+A Reddit-shaped community platform owned by its members, not a company. Pseudonymous text-first discussion, hierarchical replies, upvote/downvote, sub-communities, passwordless auth via [knowless](https://github.com/hamr0/knowless). Replaces Discord, Slack, subreddits, and old-style mailing lists for groups that want to last decades.
 
 The thesis: the open web's failures were never technical. The protocols still work. What died was the on-ramp and the defaults. Social media has corrupted attention, manufactured followers, weaponized algorithms, and turned discourse into surveillance. The phpBB era already had the right shape — small, durable, focused on what was said, not who said it. We rebuild that shape with 2026 expectations baked in: passwordless auth, no PII collection, no media hosting, exit-via-fork as the real check on power.
 
@@ -330,7 +332,7 @@ Per-IP hashcash at the Caddy perimeter (off-the-shelf modules) is the primary de
 
 Boring and proven. No exotic protocols.
 
-- **Auth**: [knowless](../../../knowless) v0.2+, standalone forward-auth mode. Caddy in front, knowless handles `/login`, `/auth/callback`, `/verify`, `/logout`. Forum app reads `X-User-Handle`.
+- **Auth**: [knowless](https://github.com/hamr0/knowless) v1.0+, library mode for solo Node-on-Node deployment (Phase 1-2). Standalone forward-auth via Caddy is a Phase 8 production option for multi-language or multi-tenant deployments.
 - **Backend**: Node.js, Go, or Python. Reference impl TBD — pick at build start. (Knowless being Node doesn't constrain the forum.)
 - **Database**: SQLite (single-instance) or PostgreSQL (multi-instance hosting).
 - **Web server**: Caddy (auto-TLS) in front of everything.

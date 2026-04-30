@@ -1,79 +1,68 @@
 # plato
 
-A forum that lives at one URL. Magic-link to post (no password, no PII). Pseudonyms and identicons by default. Search and read on the web. Owner moderates; mod actions are public; if it goes bad, fork the archive.
+**A forum that lives at one URL.** Reddit-shaped community platform, owned by its members. Magic-link to post, no passwords, no email collected. Pseudonymous by default. If a moderator goes bad, fork the archive and run it elsewhere.
 
-phpBB-era discourse, 2026 substrate. Implementation of the [plato forum PRD](docs/01-product/prd-forum.md).
+phpBB-era discourse with 2026 expectations: passwordless auth, deterministic pseudonyms, text-first content, no algorithmic feed, exit-via-fork as the real check on power.
 
-This is the M1 foundation: boots, serves a stylesheet, has the `html\`\`` templating helper, schema migrations, knowless library wiring, identity layer (pseudonym + identicon). Content + integration land in subsequent commits per the [build plan](docs/01-product/build-plan.md).
+## Why
 
-## Run
+Social media corrupted attention, manufactured followers, and turned discourse into surveillance. The protocols that ran the open web still work. What died was the on-ramp and the defaults. plato rebuilds the on-ramp.
+
+## What it does
+
+- Sub-communities (subs), posts, hierarchical comments, upvote and downvote.
+- Magic-link login. No password. No personally identifiable information stored — only an HMAC of your email, which the server forgets the moment the link is sent.
+- Auto-generated two-word pseudonyms and small identicon avatars, deterministic from your handle. No uploads, no profile photos.
+- Moderator tools per sub: collapse, remove, ban. Every moderator action is recorded in a public mod log.
+- Per-sub RSS feeds.
+- Opt-in email digests or [ntfy](https://ntfy.sh) push notifications per sub. Off by default.
+- One-command export of any sub or any user's history. Fork and run elsewhere whenever you want.
+
+## What it deliberately does not do
+
+- Host media. Images, videos, files — link to them on the host of your choice. plato never holds a single byte.
+- Render preview cards, embeds, or auto-played video.
+- Algorithmic feed. Chronological, reverse-chronological, or user-defined sorts only.
+- Show karma, follower counts, post counts, "online now" badges, leaderboards, or any other status game.
+- Direct messages.
+- Ask for your real name, phone number, photo, or anything else identifying.
+
+## Status
+
+In active development. The architecture is validated end-to-end (a stranger can post via magic link and the post appears under a generated pseudonym, with zero PII stored). Phase 2 implementation is in progress under a milestone plan; see the [build plan](docs/01-product/build-plan.md).
+
+## Try it locally
 
 ```bash
+git clone https://github.com/hamr0/plato
+cd plato
+npm install
 cp .env.example .env
-# generate KNOWLESS_SECRET (zsh-safe)
+
+# generate a knowless secret (zsh-safe)
 SECRET=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))") \
   && sed -i '/^KNOWLESS_SECRET=$/d' .env \
   && echo "KNOWLESS_SECRET=$SECRET" >> .env
 
-npm install
-npm run migrate    # idempotent, safe to re-run
-npm start          # http://localhost:8080
+npm run migrate
+npm start
 ```
 
-## Test
+Then open http://localhost:8080.
 
-```bash
-npm test
-```
+Magic-link emails go through your local SMTP. For development, the easiest setup is [Mailpit](https://github.com/axllent/mailpit) on port 1025 — captures all outgoing mail in a web UI at http://localhost:8025. For production, use Postfix per the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 
-Runs `node --test 'test/**/*.test.js'`. 44/44 green at M1 foundation + auth + identity.
+## Documentation
 
-## Layout
+- [Forum PRD](docs/01-product/prd-forum.md) — the spec
+- [Build plan](docs/01-product/build-plan.md) — milestone roadmap and locked decisions
+- [Visual reference](docs/design/) — three aesthetic samples explored before locking the terminal style
+- [Changelog](CHANGELOG.md) — what has been built
 
-```
-plato/
-  bin/
-    server.js         # http entry point
-    migrate.js        # apply src/db/migrations/*.sql idempotently
-  src/
-    auth/             # knowless wiring (M1)
-    content/          # post + draft + markdown storage (M1)
-    identity/         # pseudonym + identicon (M1)
-    web/
-      templates.js    # html`` + escapeHTML + raw — server-side rendering primitive
-      static.js       # /static/* handler
-      static/
-        style.css     # terminal aesthetic — see docs/design/1-terminal.html
-    db/
-      migrations/
-        001_initial.sql   # M1 schema (handles, posts, drafts)
-  test/
-    unit/             # pure-function tests (templates, avatars, parsers)
-    integration/      # end-to-end against in-memory sqlite + real knowless
-  docs/
-    01-product/       # PRDs, build plan
-    design/           # visual reference samples
-```
+## Built on
 
-## What's locked
+- [knowless](https://github.com/hamr0/knowless) — passwordless email auth
+- [marked](https://marked.js.org), [unique-names-generator](https://github.com/andreasonny83/unique-names-generator), [dicebear](https://www.dicebear.com)
+- Node.js stdlib: `node:http`, `node:sqlite`, `node:test`
 
-See [docs/01-product/build-plan.md §Locked Decisions](docs/01-product/build-plan.md). Short version:
-
-- Visual: terminal aesthetic, 720px column, JetBrains Mono, charcoal background
-- Rendering: `html\`\`` tagged template + `raw()` opt-out, server-side only, no client JS in v1
-- Tests: `node:test` stdlib, no Vitest
-- Auth: knowless library mode (single Node process; PRD's standalone+Caddy is a Phase 8 production option)
-- Media: plain markdown body + 16×16 favicon hints on outbound links. No previews, no embeds, ever.
-
-## Milestone plan (high level)
-
-- **M1** Foundation — clean repo, schema, knowless, one user posts to one hardcoded sub
-- **M2** Multi-tenant content — sub creation, front page, sub pages
-- **M3** Discussion — comments, voting, sorting
-- **M4** Moderation — collapse/remove, flag system, public mod log
-- **M5** Spam defenses — rules 7-16, favicon cache, URLhaus integration
-- **M6** Subscriptions + notifications — sub subscribe, my-subs, email digest, ntfy, RSS
-- **M7** Identity + export/import — per-sub + per-user export, archive signing, fork flow
-- **M8** Production polish — docker-compose, search, dark mode, mobile, deploy guide
-
-Each milestone ~2 weeks. ~3-4 months total to v1.
+No frontend framework. No template engine. No client-side JavaScript in the v1 path.
