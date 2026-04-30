@@ -131,7 +131,9 @@ Same page for everyone — logged in or not. Two sections, no personalization, n
 
 **Active subs (last 24h)**: list ordered by post count in the last 24 hours, tiebreak by member count. Sub name, one-line description, post count, member count.
 
-**Recent posts (last 24h, chronological)**: stream of posts from any sub, newest first, **capped at 2 posts per sub** so a busy sub can't drown out everything else. Time, sub, title, score.
+**Recent posts (last 24h, chronological)**: stream of posts from any sub, newest first, **capped at 2 posts per sub** so a busy sub can't drown out everything else. Each row shows time, sub, title, score, and a short body preview (~280 chars / first paragraph) with a "read more →" affordance when truncated.
+
+Sub pages are read-mode: each post shows its full body inline (truncated only past ~1500 chars), so visitors can scan a sub's content without paging through individual permalinks. The permalink page stays canonical for sharing and (M3+) hosting comments.
 
 That's the home page. Two lists, both chronological, both deduped. No "for you," no algorithm, no ranking magic.
 
@@ -186,7 +188,8 @@ Every sub publishes `/sub/<name>/feed.xml`. Composes with any RSS reader. The fo
 4. User clicks within 15 min → session cookie set (30-day TTL).
 5. Forum derives handle from the verified knowless session via `X-User-Handle` header (forward-auth) or `auth.handleFromRequest(req)` (library mode).
 6. Subsequent posts in the same session use the cookie. No re-click required.
-7. Cookie expires after 30 days → magic link required again.
+7. After publishing, the user is redirected to `/sub/<name>` so the new post lands in its sub feed in context, not on a bare permalink.
+8. Cookie expires after 30 days → magic link required again.
 
 For repeat users, posting feels almost as fast as logged-in posting. For first-timers, it's two clicks more than a session-based platform.
 

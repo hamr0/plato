@@ -132,7 +132,7 @@ test('end-to-end: stranger posts → magic link → click → published post vis
     body: new URLSearchParams({
       email: 'alice@example.com',
       title: 'first post',
-      body: '# hello\n\nworld **bold**',
+      body: 'world **bold**\n\n# tail',
     }),
   });
   assert.equal(res.status, 200);
@@ -151,19 +151,18 @@ test('end-to-end: stranger posts → magic link → click → published post vis
   const next = res.headers.get('location');
   assert.match(next, /\/draft\/[0-9a-f]{16}\/finalize$/);
 
-  // 5. Follow redirect to /draft/<id>/finalize
+  // 5. Follow redirect to /draft/<id>/finalize → /sub/<sub_name>
   res = await jarFetch(jar, new URL(next, baseUrl).toString());
   assert.equal(res.status, 302);
-  const postUrl = res.headers.get('location');
-  assert.match(postUrl, /\/post\/[0-9a-f]{16}$/);
+  const subUrl = res.headers.get('location');
+  assert.match(subUrl, /\/sub\/general$/, 'finalize redirects to the sub the post landed in');
 
-  // 6. View the post
-  res = await jarFetch(jar, new URL(postUrl, baseUrl).toString());
+  // 6. View the sub page; the new post (preview) is on it
+  res = await jarFetch(jar, new URL(subUrl, baseUrl).toString());
   assert.equal(res.status, 200);
   html = await res.text();
-  assert.match(html, /first post/, 'title rendered');
-  assert.match(html, /<h1>hello<\/h1>/, 'markdown body rendered');
-  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /first post/, 'title rendered on sub page');
+  assert.match(html, /<strong>bold<\/strong>/, 'preview markdown rendered');
   assert.match(html, /<img src="\/avatar\/[0-9a-f]{64}\.svg"/, 'identicon shown');
   assert.match(html, /[a-z]+-[a-z]+/, 'pseudonym shown');
 
@@ -173,8 +172,8 @@ test('end-to-end: stranger posts → magic link → click → published post vis
   html = await res.text();
   assert.match(html, /first post/);
 
-  // 8. Returning user is shown as logged in (cookie still in jar)
-  assert.match(html, /logged in as/);
+  // 8. Returning user's status block is rendered (cookie still in jar)
+  assert.match(html, /class="status muted"/);
 });
 
 test('logged-in user posts directly without re-doing magic link', async (t) => {
@@ -204,7 +203,7 @@ test('logged-in user posts directly without re-doing magic link', async (t) => {
   // Home page now shows the form without an email input.
   res = await jarFetch(jar, baseUrl + '/');
   const homeHtml = await res.text();
-  assert.match(homeHtml, /logged in as/);
+  assert.match(homeHtml, /class="status muted"/);
   assert.doesNotMatch(homeHtml, /name="email"/);
 
   // Second post: no email field, must publish directly with no new mail sent.
@@ -214,7 +213,7 @@ test('logged-in user posts directly without re-doing magic link', async (t) => {
     body: new URLSearchParams({ title: 'second', body: 'second body' }),
   });
   assert.equal(res.status, 302);
-  assert.match(res.headers.get('location'), /\/post\/[0-9a-f]{16}$/);
+  assert.match(res.headers.get('location'), /\/sub\/general$/);
   assert.equal(mailer.sent.length, 1, 'no second magic-link mail sent');
 
   res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
@@ -345,7 +344,7 @@ test('M2: logged-in user creates a sub and posts in it', async (t) => {
     body: new URLSearchParams({ sub_name: 'cooking', title: 'pasta', body: 'al dente' }),
   });
   assert.equal(res.status, 302);
-  assert.match(res.headers.get('location'), /\/post\/[0-9a-f]{16}$/);
+  assert.equal(res.headers.get('location'), '/sub/cooking');
 
   // Sub page now shows the post.
   res = await jarFetch(jar, baseUrl + '/sub/cooking');

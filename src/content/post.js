@@ -64,7 +64,7 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
 
   // Idempotent: re-finalizing an already-finalized draft returns the existing post.
   if (draft.finalized_post_id) {
-    return { postId: draft.finalized_post_id, alreadyFinalized: true };
+    return { postId: draft.finalized_post_id, subName: draft.sub_name, alreadyFinalized: true };
   }
 
   // Ensure the handle row exists (pseudonymFor inserts on first sight). This
@@ -102,7 +102,7 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
     throw err;
   }
 
-  return { postId, alreadyFinalized: false };
+  return { postId, subName: draft.sub_name, alreadyFinalized: false };
 }
 
 export function getPost(db, postId, postsDir) {
@@ -115,6 +115,30 @@ export function getPost(db, postId, postsDir) {
   const bodyHtml = renderMarkdown(body);
 
   return { post, body, bodyHtml };
+}
+
+// Body preview for list views (home, sub pages). Reads the file, takes the
+// first paragraph (or maxChars, whichever is shorter), renders it. truncated
+// signals to the caller whether to show a "read more" affordance. Markdown is
+// re-rendered through the same allow-listed pipeline as full posts, so
+// preview content is as XSS-safe as the post body itself.
+export function getPostPreview(post, postsDir, { maxChars = 280 } = {}) {
+  // Tolerate a missing file: the index row and the file tree can drift
+  // (operator restored only the DB, partial backfill, etc.). A list view
+  // should not 500 because one post's file vanished.
+  let raw;
+  try {
+    raw = readFileSync(resolve(postsDir, basename(post.file_path)), 'utf8');
+  } catch {
+    return { html: '', truncated: false };
+  }
+  const body = parseFrontmatter(raw).trim();
+  if (!body) return { html: '', truncated: false };
+  const firstPara = body.split(/\n\s*\n/)[0].trim();
+  const cut = firstPara.length > maxChars;
+  const text = cut ? firstPara.slice(0, maxChars).trimEnd() + '…' : firstPara;
+  const truncated = cut || firstPara.length < body.length;
+  return { html: renderMarkdown(text), truncated };
 }
 
 export function listRecentPosts(db, { limit = 50, offset = 0 } = {}) {

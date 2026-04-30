@@ -7,6 +7,7 @@ import {
   submitDraft,
   finalizeDraft,
   getPost,
+  getPostPreview,
   listRecentPostsCappedPerSub,
   listPostsInSub,
 } from '../content/post.js';
@@ -64,18 +65,32 @@ function listAllSubs(db) {
   return db.prepare('SELECT name FROM subs ORDER BY name ASC').all();
 }
 
-function loginBarFor(db, currentHandle) {
-  if (!currentHandle) {
-    return html`<p class="muted"><em>fill the form to post — magic-link required, no password, no PII</em></p>`;
-  }
+function loginStatusFor(db, currentHandle) {
+  if (!currentHandle) return html``;
   const pseudonym = pseudonymFor(db, currentHandle);
-  return html`<p class="muted">
-    logged in as <strong>${pseudonym}</strong>
-    <img src="/avatar/${currentHandle}.svg" width="18" height="18" alt="" style="vertical-align:middle">
-    — <form method="POST" action="/logout" style="display:inline">
-      <button>logout</button>
+  return html`<div class="status muted">
+    <img src="/avatar/${currentHandle}.svg" width="16" height="16" alt="">
+    <strong>${pseudonym}</strong>
+    <form method="POST" action="/logout" class="inline">
+      <button class="link">logout</button>
     </form>
-  </p>`;
+  </div>`;
+}
+
+function anonHintFor(currentHandle) {
+  return currentHandle
+    ? html``
+    : html`<p class="muted"><em>fill the form to post — magic-link required, no password, no PII</em></p>`;
+}
+
+function siteHeader({ db, currentHandle, title, subtitle }) {
+  return html`<header class="site">
+    <div class="brand">
+      <h1>${title ?? html`plato · forum`}</h1>
+      ${subtitle ? html`<div class="nav muted">${subtitle}</div>` : html``}
+    </div>
+    ${loginStatusFor(db, currentHandle)}
+  </header>`;
 }
 
 function postFormFor({ currentHandle, defaultSub, allSubs }) {
@@ -104,12 +119,13 @@ function postFormFor({ currentHandle, defaultSub, allSubs }) {
   </form>`;
 }
 
-function postRowsView(posts, pseudonyms) {
+function postRowsView(posts, pseudonyms, previews) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
   return posts.map((post) => {
     const name = pseudonyms.get(post.handle) ?? post.handle.slice(0, 8);
+    const preview = previews?.get(post.id);
     return html`<div class="post">
       <div class="vote">
         <span class="arrow">▲</span>
@@ -119,9 +135,22 @@ function postRowsView(posts, pseudonyms) {
       <div class="body">
         <h2><a href="/post/${post.id}">${post.title}</a></h2>
         ${authorMeta(post, name)}
+        ${preview
+          ? html`<div class="preview">${raw(preview.html)}${preview.truncated
+              ? html` <a href="/post/${post.id}" class="more">read more →</a>`
+              : html``}</div>`
+          : html``}
       </div>
     </div>`;
   });
+}
+
+function buildPreviews(posts, postsDir, maxChars) {
+  const map = new Map();
+  for (const p of posts) {
+    map.set(p.id, getPostPreview(p, postsDir, { maxChars }));
+  }
+  return map;
 }
 
 function activeSubsView(active) {
@@ -136,23 +165,21 @@ function activeSubsView(active) {
   </ul>`;
 }
 
-function renderHome(req, res, { db, auth }) {
+function renderHome(req, res, { db, auth, postsDir }) {
   const posts = listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const active = listActiveSubs(db);
   const allSubs = listAllSubs(db);
   const currentHandle = auth.handleFromRequest(req);
+  const previews = buildPreviews(posts, postsDir, 280);
 
   send(
     res,
     200,
     layout('plato', html`
-      <header>
-        <h1>plato · forum</h1>
-        <div class="nav muted">a forum that lives at one URL</div>
-      </header>
-      ${loginBarFor(db, currentHandle)}
+      ${siteHeader({ db, currentHandle, subtitle: 'a forum that lives at one URL' })}
+      ${anonHintFor(currentHandle)}
       <h3 class="section">// active subs</h3>
       ${activeSubsView(active)}
       ${currentHandle
@@ -161,12 +188,12 @@ function renderHome(req, res, { db, auth }) {
       <h3 class="section">// new post</h3>
       ${postFormFor({ currentHandle, allSubs })}
       <h3 class="section">// recent (2 per sub)</h3>
-      ${postRowsView(posts, pseudonyms)}
+      ${postRowsView(posts, pseudonyms, previews)}
     `)
   );
 }
 
-function renderSubPage(req, res, { db, auth }, subName) {
+function renderSubPage(req, res, { db, auth, postsDir }, subName) {
   const sub = getSubByName(db, subName);
   if (!sub) {
     return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
@@ -175,21 +202,26 @@ function renderSubPage(req, res, { db, auth }, subName) {
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
+  // Sub page = read mode. Show full bodies inline; truncate only if very
+  // long (~1500 chars) so a runaway essay doesn't dominate the scroll.
+  const previews = buildPreviews(posts, postsDir, 1500);
 
   send(
     res,
     200,
     layout(`/sub/${subName}`, html`
-      <header>
-        <h1>/sub/${subName}</h1>
-        ${sub.description ? html`<p class="muted">${sub.description}</p>` : html``}
-      </header>
+      ${siteHeader({
+        db,
+        currentHandle,
+        title: html`/sub/${subName}`,
+        subtitle: sub.description || null,
+      })}
       <p><a href="/">← home</a></p>
-      ${loginBarFor(db, currentHandle)}
+      ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName })}
       <h3 class="section">// posts</h3>
-      ${postRowsView(posts, pseudonyms)}
+      ${postRowsView(posts, pseudonyms, previews)}
     `)
   );
 }
@@ -282,8 +314,8 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
 
   if (currentHandle) {
     const { draftId } = submitDraft(db, { title, body: postBody, subName });
-    const { postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
-    return redirect(res, `/post/${postId}`);
+    const { subName: published } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
+    return redirect(res, `/sub/${published}`);
   }
 
   if (isDisposableEmail(email, disposableDomains)) {
@@ -345,7 +377,7 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
     throw err;
   }
 
-  redirect(res, `/post/${result.postId}`);
+  redirect(res, `/sub/${result.subName}`);
 }
 
 function renderPost(req, res, { db, postsDir }, postId) {
@@ -400,7 +432,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       if (path === '/verify') return auth.verify(req, res);
       if (path === '/logout' && method === 'POST') return auth.logout(req, res);
 
-      if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth });
+      if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir });
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
       }
@@ -409,7 +441,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
 
       let m;
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
-        return renderSubPage(req, res, { db, auth }, m[1]);
+        return renderSubPage(req, res, { db, auth, postsDir }, m[1]);
       }
       if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
         return handleFinalize(req, res, { db, auth, postsDir }, m[1]);
