@@ -31,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 - Atomic finalize: post insert + draft update happen in a single transaction. Idempotent — re-finalizing an already-finalized draft returns the existing post id.
 - XSS protections from `renderMarkdown` carry through end-to-end (verified by an integration test that puts `<script>` and `javascript:` URLs through the full draft → finalize → render path).
 
+### Added — M1 Disposable-domain blocklist
+- Forum-side disposable-email domain check (PRD spam rule 7). Blocked at form submission, before knowless is invoked. Operator owns the blocklist file; M5 adds the cron sync to the upstream community-maintained list.
+
 ### Changed
 - Repository renamed from `plato-forum` to `plato`. Documentation and code now live in one repository.
 - POC graduated and was archived. Phase 2 implementation started in a clean repository per AGENT_RULES POC discipline.

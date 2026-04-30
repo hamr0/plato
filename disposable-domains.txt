@@ -1,0 +1,16 @@
+# Forum-side disposable-domain blocklist.
+# One domain per line. Lines starting with # are ignored.
+# Operator pulls/curates this file; production cron syncs from
+# disposable-email-domains/disposable-email-domains on GitHub (M5 milestone).
+# Override by editing this file and restarting (or hot-reload in M5+).
+
+mailinator.com
+guerrillamail.com
+10minutemail.com
+tempmail.com
+trashmail.com
+sharklasers.com
+yopmail.com
+throwawaymail.com
+mailnesia.com
+maildrop.cc
