@@ -37,6 +37,8 @@ Plato is *not* for: image-first communities, communities that want voice/video, 
 - Public mod log per sub. Every action is on the record.
 - Community auto-revert: if a soft-removed post racks up enough net upvotes after the collapse, the system lifts the collapse on its own and writes "community overruled" to the log. Defends against capricious mods. Does *not* apply to hard removals.
 - Per-sub flag system. Five categories (spam, harassment, illegal, off-topic, other). Three distinct flaggers auto-collapse a post pending mod review.
+- Unified mod surface at `/modlog` for any user moderating one or more subs: three modes (open / inbox / audit), click-to-filter on every column, native `<details>` row expansion that shows the body inline so mods rule without navigating away. Public per-sub `/sub/<name>/modlog` shows the same audit table, minus pending data.
+- Forum-wide spam defenses: tiered rate limits per account age, per-sub topic-flood limits, per-post link cap, an operator-editable `spam-patterns.txt` regex file, and an hourly URLhaus blocklist sync (cron script ships in `bin/`). All knobs have PRD-locked floors; operators tighten via `config.json`, never loosen.
 - Magic-link login. No passwords ever. Your email never lands in the database in plaintext.
 - Deterministic pseudonyms and robot avatars. Same user, same display, no uploads.
 - Markdown-only post bodies, with raw HTML escaped, image-markdown turned into plain links, and dangerous URL schemes stripped.
@@ -97,12 +99,45 @@ If you change these, document *why* in your fork's CHANGELOG so future-you remem
 
 ### Tier 3: Per-sub setting, no restart, set when the sub is created
 
-Currently the only per-sub knobs (more arrive in M5):
+The only per-sub knobs:
 
 - **Auto-uncollapse threshold for posts.** Floor 50, default 50. The number of net upvotes since a soft-removal that auto-lifts the collapse. Higher = harder for the community to overrule a mod.
 - **Auto-uncollapse threshold for comments.** Floor 20, default 20. Same idea, lower bar because comments accumulate fewer votes.
 
 Both shown on `/sub/create` as number inputs. The floors are enforced — you can raise them but not lower them.
+
+Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file.
+
+### Tier 4: Operator config (`config.json`), boot-validated, tighten-only
+
+Forum-wide spam-defense knobs. Drop a `config.json` at the project root (or set `PLATO_CONFIG=` to point elsewhere). Every value has a PRD-locked floor — overrides must be **at most** as permissive as the floor. Bad config throws at boot, not on first user request.
+
+```jsonc
+{
+  "rateLimits": {
+    "perAccount": {
+      "new":    { "postsPerHour": 1, "postsPerDay": 3,  "commentsPerDay": 10 },
+      "recent": { "postsPerHour": 3, "postsPerDay": 10, "commentsPerDay": 30 }
+    },
+    "perSubDay": { "newish": 5, "trusted": 20 }
+  },
+  "linkCaps": { "new": 1, "recent": 3, "established": 5 },
+  "spamPatternsFile": "spam-patterns.txt",
+  "urlhausCacheFile": "data/urlhaus.txt"
+}
+```
+
+The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/day instead of 3), drop `postsPerDay` to a lower number. Setting `perAccount.new.postsPerHour: 5` would throw `exceeds floor of 1; operator can only tighten`.
+
+**`spam-patterns.txt`** ships with conservative starter regexes for crypto/job/wire/romance scams. Add one line per spam wave you encounter; restart picks them up. Comments start with `#`. Bad regex skips with a stderr warning rather than killing boot.
+
+**`bin/refresh-urlhaus.js`** fetches the URLhaus blocklist hourly. Wire to system cron:
+
+```
+0 * * * * cd /path/to/plato && node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
+```
+
+The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch (or wait for the next deploy). Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
 
 ---
 
@@ -183,7 +218,7 @@ The aesthetic is **terminal-honest**. Mono font where it fits, no emoji unless t
 
 ## What's coming next
 
-- **M5 — Spam defenses + per-sub structure.** Per-sub flag-threshold override (currently 3 globally), per-sub rate limits, link-cap with URLhaus integration, regex spam patterns, velocity dashboard. Per-sub flairs (closed-list, owner-curated). Per-sub NSFW banner. "My mod decisions" mod-self-review panel.
+- **M5 — Mod surface + spam defenses (mostly done).** Unified `/modlog` (open/inbox/audit) shipped. Forum-wide rate limits, per-sub topic-flood limit, link cap, regex spam-patterns, URLhaus hourly cron all shipped. Still open: per-sub flag-threshold override (currently 3 globally), per-sub flairs (closed-list, owner-curated), per-sub NSFW banner, "new account" tag in mod queue.
 - **M6 — Subscriptions and notifications.** Follow a sub, get a per-sub notification preference (none / new posts / comments on my posts).
 - **M7 — Search.** SQLite FTS5 over post titles and bodies and comments. No external service.
 - **M8 — Operator polish.** Light-mode toggle (forkable tokens already in place). Opinionated Caddy config. Install script. systemd unit.
@@ -213,7 +248,7 @@ A: Magic-link is locked. If you need OAuth or passwords, you're forking. Replace
 A: No. Mods remove via the mod log. The log is the audit trail; author-side deletion would break it.
 
 **Q: What's stopping someone from spamming sign-ups with disposable emails?**
-A: The `disposable-domains.txt` blocklist (operator-curated; M5 syncs to upstream). And the new-account vote-weight rules (half weight, no comment voting, posts < 24h) limit the damage a fresh sockpuppet can do. M5 adds rate limits.
+A: Layered defense: (1) `disposable-domains.txt` blocklist at form submit, (2) magic-link requires a working inbox per identity, (3) account-age tiered rate limits (1 post/hour for accounts <24h), (4) per-sub topic-flood limit (5 posts/day per sub for new accounts), (5) per-post outbound link cap (1 link/post for new accounts), (6) `spam-patterns.txt` regex match → auto-collapse for mod review, (7) URLhaus hourly cron blocks known-malicious link hosts. New-account vote-weight rules (half weight, no comment voting, posts < 24h only) limit damage from any sockpuppet that gets through.
 
 **Q: How big can a plato instance get?**
 A: SQLite + one Node process handles tens of thousands of daily-active users on a small VPS, which covers basically every community plato is targeting. Past that, you're forking and adding read replicas — but if you're at that scale, you've outgrown the project's design center anyway.

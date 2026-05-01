@@ -273,6 +273,29 @@ This is not theoretical. The export must be one-click and complete, tested befor
 
 Layered, all standard practice. Each rule below has explicit criteria and a source for the data it depends on.
 
+### Build status (M5)
+
+| Rule | Status | Notes |
+|---|---|---|
+| 1. Magic-link to post | shipped (M1) | knowless library |
+| 2. Per-account rate limits | shipped (M5/B1) | tier'd by account age; `RATE_LIMIT_FLOOR` in `rateLimit.js`; per-instance tighten via `config.json` |
+| 3. Per-sub rate limits | shipped (M5/B2) | newish 5/day, trusted 20/day; same tighten-only floor |
+| 4. Disposable email blocking | shipped (M1) | `disposable-domains.txt` |
+| 5. Honeypot fields | deferred | low ROI; bots that fill posting fields are also bots that fill honeypots |
+| 6. Outbound link cap | shipped (M5/B4) | 1/3/5 by tier; `LINK_CAP_FLOOR` |
+| 6b. URL malicious-domain check | shipped (M5/B5) | URLhaus hourly cron via `bin/refresh-urlhaus.js` |
+| 7. Flag button | shipped (M4) | five categories, AUTO_HIDE_THRESHOLD=3 |
+| 8. Velocity alerts | deferred | post-trial; manual /modlog scrolling suffices for unannounced trial |
+| 9. Spam pattern file | shipped (M5/B3) | `spam-patterns.txt` operator-editable, version-controlled |
+| 10. Bayesian filter | deferred | not v1; regex covers the campaign-reuse pattern |
+| 11. Hashcash | deferred | the rate limit + link cap stack already costs an attacker more than hashcash adds |
+| 12. Ban evasion correlation | deferred | post-v1; needs IP /24 grouping infrastructure |
+| 13. No DMs in v1 | locked | DM is permanently out |
+| 14. No media hosting | locked | text-only is permanent |
+| 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` for mods |
+
+The deferred items aren't blockers for an unannounced public trial; the shipped layer is enough that an attacker who gets through magic-link → tiered rate limit → link cap → spam regex → URLhaus has already done more work than spamming a typical small instance is worth.
+
 ### 1. Magic-link to post
 
 **Criteria**: every first-time post from a new email requires clicking a magic link in the inbox. Subsequent posts in the same browser session use a cookie token that expires after 30 days of inactivity.

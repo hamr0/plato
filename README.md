@@ -43,6 +43,20 @@ Two tools, one is reversible by the community:
 
 Every action lands in a public log per sub. No private mod chat decides what stays up — the audit trail is the social pressure.
 
+Mods of multiple subs work from one unified inbox at `/modlog` with three modes: **open** (pending flags awaiting decision, expand any row to see the body, flag breakdown, and rule inline), **inbox** (deduped current state with a per-target event count), and **audit** (every event flat). Click any mod or user in any column to filter by them. The same audit table — minus pending data — is what `/sub/<name>/modlog` shows the public.
+
+### Spam defenses that don't require an arms-race team
+
+A small, transparent layer that stops the obvious bots without invasive surveillance:
+
+- **Magic-link auth** raises the floor: every account costs a working inbox.
+- **Account-age tiered rate limits**: new accounts post sparingly; established accounts post freely.
+- **Per-post link cap**: 1 link for new accounts, 5 for trusted — keeps comment sections from becoming link farms.
+- **Spam pattern file** (`spam-patterns.txt`): version-controlled regex set, operator appends per spam wave. Matching content auto-collapses pending mod review.
+- **URLhaus integration**: hourly cron pulls the community-maintained malicious-URL list. Posts linking to known-bad hosts auto-flag.
+
+Each knob has a PRD-locked floor. Operators can tighten via `config.json`, never loosen — the codebase is the safety net.
+
 ### Text only — and that's the whole point
 
 Markdown for post bodies. Hyperlinks for everything else. plato does not host images, videos, files, embeds, or auto-played anything. Markdown image syntax becomes a plain link to wherever you parked the picture.

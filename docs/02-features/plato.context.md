@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.1.0 (M4 shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.0 (M4 + M5 mod surface + M5 defenses shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -35,7 +35,10 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Change new-account window or weight | `NEW_ACCOUNT_WINDOW_MS` / weight literal in `src/content/vote.js` |
 | Change young-post window for new-account voting | `YOUNG_POST_WINDOW_MS` in `src/content/vote.js` |
 | Change auto-uncollapse threshold for a sub | per-sub via `/sub/create` form (post ≥ 50, comment ≥ 20) |
-| Change auto-hide flag threshold | `AUTO_HIDE_THRESHOLD` in `src/content/flag.js` (M5 will make this per-sub) |
+| Change auto-hide flag threshold | `AUTO_HIDE_THRESHOLD` in `src/content/flag.js` (per-sub override pending) |
+| Tighten rate limits / link cap | `config.json` at project root — see Operator Config below |
+| Append spam regex patterns | `spam-patterns.txt` at project root, one regex per line |
+| Refresh URLhaus blocklist | wire `bin/refresh-urlhaus.js` to system cron, hourly |
 | Change score-collapse threshold | `COLLAPSE_THRESHOLD` in `src/web/app.js` (default −3) |
 | Change max comment-tree depth | `MAX_DEPTH` in `src/web/app.js` (default 4) |
 | Change inline comment preview length | `COMMENT_PREVIEW_CHARS` in `src/web/app.js` (default 280) |
@@ -76,8 +79,10 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | POST | `/sub/create` | create sub (validates name + thresholds) |
 | GET | `/sub/<name>/post/<id>` | post page with comments (sort: best/new via `?sort=`) |
 | POST | `/sub/<name>/post/<id>/comment` | add comment (Accept: JSON for in-place insert) |
-| GET | `/sub/<name>/modlog` | public mod-action log for the sub |
+| GET | `/sub/<name>/modlog` | public mod-action audit (resolved-only; supports `?mod=`, `?user=`, `?date=`, `?type=` filters) |
 | POST | `/sub/<name>/mod` | mod action (collapse/uncollapse/remove/unremove/ban/...) |
+| GET | `/modlog` | unified mod inbox for any user moderating ≥1 sub. Modes: `?mode=open`/`inbox`/`audit`. Filters: `mode`, `date`, `type`, `sub`, `mod`, `user`, `page`. Default = open if pending exist, else audit. |
+| POST | `/modlog/resolve` | one-shot decision endpoint for the open-mode form: `decision=uphold-soft|uphold-hard|dismiss` |
 | POST | `/draft` | submit a draft post (logged-in: inlines finalize) |
 | GET | `/draft/<id>/finalize` | finalize after magic-link click |
 | GET | `/post/<id>` | canonical post permalink |
@@ -111,7 +116,9 @@ These have hardcoded constants because the right value is the same for almost ev
 - **`COLLAPSE_THRESHOLD = -3`** (`src/web/app.js`) — score below which a comment auto-folds.
 - **`MAX_DEPTH = 4`** (`src/web/app.js`) — beyond this, comment replies fold into a `+ N more` summary.
 - **`COMMENT_PREVIEW_CHARS = 280`** (`src/web/app.js`) — long-comment fold threshold; matches the post-preview cap on the home page.
-- **`AUTO_HIDE_THRESHOLD = 3`** (`src/content/flag.js`) — distinct flaggers needed to auto-collapse pending mod review. M5 will make this per-sub.
+- **`AUTO_HIDE_THRESHOLD = 3`** (`src/content/flag.js`) — distinct flaggers needed to auto-collapse pending mod review. Per-sub override is a follow-up.
+- **`RATE_LIMIT_FLOOR`** (`src/content/rateLimit.js`) — PRD-locked floor for per-account + per-sub rate limits. Operator can tighten via `config.json`; loosening throws at boot.
+- **`LINK_CAP_FLOOR`** (`src/content/linkCap.js`) — PRD-locked floor for per-post outbound link cap (1/3/5 by tier).
 - **`NEW_ACCOUNT_WINDOW_MS = 7 days`** (`src/content/vote.js`) — how long a fresh handle is treated as "new" (half vote weight, no comment voting, posts < 24h only).
 - **`YOUNG_POST_WINDOW_MS = 24h`** — companion to the new-account rules.
 
@@ -182,6 +189,31 @@ For column drops or type changes, follow SQLite's table-rebuild dance with `defe
 | `KNOWLESS_SMTP_PORT` | yes | — | SMTP port. |
 | `PORT` | no | 8080 | HTTP listen port. |
 | `DB_PATH` | no | `./forum.db` | SQLite file location. |
+
+### Operator config (`config.json`)
+
+Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wherever `PLATO_CONFIG=` points. Every numeric value is **tighten-only** — overrides must be ≤ floor; bad config throws at boot.
+
+```jsonc
+{
+  "rateLimits": {
+    "perAccount": {
+      "new":    { "postsPerHour": 1, "postsPerDay": 3,  "commentsPerDay": 10 },
+      "recent": { "postsPerHour": 3, "postsPerDay": 10, "commentsPerDay": 30 }
+    },
+    "perSubDay": { "newish": 5, "trusted": 20 }
+  },
+  "linkCaps":         { "new": 1, "recent": 3, "established": 5 },
+  "spamPatternsFile": "spam-patterns.txt",
+  "urlhausCacheFile": "data/urlhaus.txt"
+}
+```
+
+Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds today, NSFW banner + flag-threshold override later).
+
+`spam-patterns.txt` is the operator's per-instance regex set, one line per pattern, `#` comments, blank-line tolerant. Bad regex skips with a stderr warning. Restart picks up edits.
+
+`bin/refresh-urlhaus.js` is a standalone fetcher meant for system cron (`0 * * * *`). Restart plato to pick up a fresh fetch — the host set is built once at boot.
 
 ### Per-sub settings (set via `/sub/create` form)
 
@@ -300,7 +332,7 @@ sqlite3 -header -column forum.db "
 "
 ```
 
-M5 ships a mod-side queue page; until then, SQL.
+Or, since M5 shipped: visit `/modlog?sub=forever-friends&mode=open` for the same view in the unified mod surface.
 
 ### Recipe 6: Hot-fix a hardcoded constant
 
@@ -328,10 +360,39 @@ KNOWLESS_SECRET=<same as before> npm start
 
 If `KNOWLESS_SECRET` changes, existing sessions invalidate but stored handles remain valid (handles were derived once and persist). New logins will re-derive — for the same email, a different secret yields a different handle, so the user looks like a new account. Don't rotate `KNOWLESS_SECRET` unless you intend a full identity reset.
 
-### Recipe 8: Check the build status
+### Recipe 8: Tighten rate limits for an unannounced public trial
+
+```jsonc
+// config.json
+{
+  "rateLimits": {
+    "perAccount": {
+      "new":    { "postsPerHour": 1, "postsPerDay": 1, "commentsPerDay": 5 }
+    },
+    "perSubDay": { "newish": 2 }
+  },
+  "linkCaps": { "new": 0, "recent": 1, "established": 3 }
+}
+```
+
+`linkCaps.new: 0` means new accounts can't post links at all — ratchets back during the soak window and relax after. Boot validates that no value exceeds the floor.
+
+### Recipe 9: Append a spam pattern after observing a wave
+
+```
+# spam-patterns.txt
+# ...existing patterns...
+
+# 2026-05 wave: fake "AI tutor" recruitment
+\bAI tutor\b.{0,80}\$?\d{2,4}.{0,30}/hour
+```
+
+Restart plato. Matching posts auto-collapse and surface in `/modlog?mode=open`. Mods rule via the open-mode form.
+
+### Recipe 10: Check the build status
 
 ```bash
-npm test            # 245 tests, ~3s
+npm test            # 298 tests, ~3s
 npm run migrate     # idempotent; no-op if up to date
 node --check bin/server.js     # syntax check without starting
 ```
