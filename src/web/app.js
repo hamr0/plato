@@ -15,7 +15,6 @@ import {
 import {
   createSub,
   getSubByName,
-  listActiveSubs,
   validateSubName,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
@@ -75,6 +74,19 @@ function listPostableSubs(db) {
   return db.prepare(
     "SELECT name FROM subs WHERE name != 'general' ORDER BY name ASC"
   ).all();
+}
+
+// Subs nav data: every postable sub plus its last-24h post count, hottest
+// first. Used by the home-page strip — top 3 always visible, the rest
+// collapse behind a "+ show all" <details>.
+function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {}) {
+  return db.prepare(
+    `SELECT s.name,
+       (SELECT COUNT(*) FROM posts p WHERE p.sub_name = s.name AND p.created_at >= ?) AS post_count
+     FROM subs s
+     WHERE s.name != 'general'
+     ORDER BY post_count DESC, s.name ASC`
+  ).all(sinceMs);
 }
 
 function loginStatusFor(db, currentHandle) {
@@ -234,23 +246,47 @@ function buildPreviews(posts, postsDir, maxChars) {
   return map;
 }
 
-function activeSubsView(active) {
-  if (active.length === 0) {
-    return html`<p class="muted">no active subs in the last 24 hours.</p>`;
+function subEntry(s) {
+  return html`<a href="/sub/${s.name}">/sub/${s.name}${s.post_count > 0
+    ? html` <span class="count">${s.post_count}</span>`
+    : html``}</a>`;
+}
+
+function subsStripView({ subs, currentHandle }) {
+  if (subs.length === 0) {
+    return html`<div class="subs-strip">
+      <span class="label">subs</span>
+      <span class="muted"><em>none yet</em></span>
+      ${currentHandle
+        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
+        : html``}
+    </div>`;
   }
-  return html`<ul class="subs">
-    ${active.map((s) => html`<li>
-      <a href="/sub/${s.name}">/sub/${s.name}</a>
-      <span class="muted">· ${s.post_count} post${s.post_count === 1 ? '' : 's'}</span>
-    </li>`)}
-  </ul>`;
+
+  const top = subs.slice(0, 3);
+  const rest = subs.slice(3);
+
+  return html`<div class="subs-strip">
+    <span class="label">subs</span>
+    ${top.map(subEntry)}
+    ${rest.length > 0
+      ? html`<details class="subs-more"><summary>+ show all (${rest.length})</summary>
+          <div class="subs-grid">
+            ${rest.map(subEntry)}
+          </div>
+        </details>`
+      : html``}
+    ${currentHandle
+      ? html`<a class="new-sub" href="/sub/create">+ new</a>`
+      : html``}
+  </div>`;
 }
 
 function renderHome(req, res, { db, auth, postsDir }) {
   const posts = listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
-  const active = listActiveSubs(db);
+  const subsNav = listSubsForNav(db);
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 280);
@@ -262,11 +298,7 @@ function renderHome(req, res, { db, auth, postsDir }) {
     layout('plato', html`
       ${siteHeader({ db, currentHandle, subtitle: 'a forum that lives at one URL' })}
       ${anonHintFor(currentHandle)}
-      <h3 class="section">// active subs</h3>
-      ${activeSubsView(active)}
-      ${currentHandle
-        ? html`<p class="muted"><a href="/sub/create">+ create a sub</a></p>`
-        : html``}
+      ${subsStripView({ subs: subsNav, currentHandle })}
       <h3 class="section">// new post</h3>
       ${postFormFor({ currentHandle, postableSubs })}
       <h3 class="section">// recent (2 per sub)</h3>

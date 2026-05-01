@@ -477,6 +477,59 @@ test('M2: /draft to unknown sub returns 400', async (t) => {
   assert.match(await res.text(), /doesn't exist/);
 });
 
+test('home subs strip: shows top 3 inline, rest behind <details>', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  // Five real subs, ranked by 24h post count.
+  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon']) {
+    db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run(name, Date.now());
+  }
+  const handle = 'h'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'strip-test', Date.now() - 10000);
+  // Give 'alpha', 'beta', 'gamma' recent posts so they rank top by count.
+  for (const [name, n] of [['alpha', 5], ['beta', 3], ['gamma', 1]]) {
+    for (let i = 0; i < n; i++) {
+      db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(`${name[0]}${i}`.padStart(16, '0'), name, handle, `t-${i}`, `posts/${name}${i}.md`, Date.now());
+    }
+  }
+
+  const res = await fetch(baseUrl + '/');
+  const body = await res.text();
+
+  // Strip wrapper present, top 3 sub links rendered.
+  assert.match(body, /class="subs-strip"/);
+  assert.match(body, /\/sub\/alpha/);
+  assert.match(body, /\/sub\/beta/);
+  assert.match(body, /\/sub\/gamma/);
+
+  // The two non-top subs go inside the <details> with summary "+ show all (2)".
+  assert.match(body, /\+ show all \(2\)/);
+  assert.match(body, /\/sub\/delta/);
+  assert.match(body, /\/sub\/epsilon/);
+
+  // Order check: alpha (top) appears before delta (in show-all).
+  assert.ok(body.indexOf('/sub/alpha') < body.indexOf('/sub/delta'));
+});
+
+test('home subs strip: hides "+ show all" when ≤ 3 subs', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('alpha', Date.now());
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('beta', Date.now());
+
+  const res = await fetch(baseUrl + '/');
+  const body = await res.text();
+  assert.match(body, /class="subs-strip"/);
+  assert.doesNotMatch(body, /\+ show all/);
+});
+
 test('M3: legacy /post/<id> 301 redirects to /sub/<name>/post/<id>', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

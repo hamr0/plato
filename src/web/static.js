@@ -10,6 +10,8 @@ const TYPES = {
   '.ico': 'image/x-icon',
   '.png': 'image/png',
   '.txt': 'text/plain; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
 };
 
 export async function applyStaticRoute(req, res) {
