@@ -26,6 +26,7 @@ import {
 } from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
 import { canModerate, recordAction, listModActions, MOD_ACTIONS } from '../content/mod.js';
+import { submitFlag, FLAG_CATEGORIES } from '../content/flag.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 
@@ -258,10 +259,15 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
                 ? html` <a href="${link}" class="more">read more →</a>`
                 : html``}</div>`
             : html``}
-        ${modRole && subName === post.sub_name ? modControls({
-          subName, targetType: 'post', targetId: post.id,
-          collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
-        }) : html``}
+        <div class="post-actions">
+          ${currentHandle && post.removed_at == null
+            ? flagButton({ targetType: 'post', targetId: post.id, returnTo: perPostReturn })
+            : html``}
+          ${modRole && subName === post.sub_name ? modControls({
+            subName, targetType: 'post', targetId: post.id,
+            collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
+          }) : html``}
+        </div>
       </div>
     </div>`;
   });
@@ -658,10 +664,15 @@ function commentNodeView(node, ctx, depth) {
       </div>
     </div>
     ${inner}
-    ${ctx.modRole ? modControls({
-      subName: ctx.subName, targetType: 'comment', targetId: node.id,
-      collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
-    }) : html``}
+    <div class="post-actions">
+      ${ctx.currentHandle && !removed
+        ? flagButton({ targetType: 'comment', targetId: node.id, returnTo: `${ctx.returnTo}#comment-${node.id}` })
+        : html``}
+      ${ctx.modRole ? modControls({
+        subName: ctx.subName, targetType: 'comment', targetId: node.id,
+        collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
+      }) : html``}
+    </div>
     ${replyForm}
     ${repliesView}
   </div>`;
@@ -725,10 +736,15 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         <div class="body">
           <h1>${post.title}</h1>
           ${authorMeta(post, pseudonyms.get(post.handle))}
-          ${modRole ? modControls({
-            subName, targetType: 'post', targetId: postId,
-            collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
-          }) : html``}
+          <div class="post-actions">
+            ${currentHandle && post.removed_at == null
+              ? flagButton({ targetType: 'post', targetId: postId, returnTo })
+              : html``}
+            ${modRole ? modControls({
+              subName, targetType: 'post', targetId: postId,
+              collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
+            }) : html``}
+          </div>
           ${post.removed_at != null
             ? html`<article class="muted post-removed">[removed by mod]</article>`
             : post.collapsed_at != null
@@ -880,6 +896,49 @@ function modControls({ subName, targetType, targetId, collapsedAt, removedAt, re
   </div>`;
 }
 
+// Flag button — every logged-in user can flag any post/comment for mod
+// review. PRD §Spam 7: flagging is separate from downvote; categories
+// are a closed list. Threshold-based auto-hide lives in the flag module.
+function flagButton({ targetType, targetId, returnTo }) {
+  return html`<details class="flag-form-wrap">
+    <summary class="flag-trigger muted">flag</summary>
+    <form method="POST" action="/flag" class="flag-form">
+      <input type="hidden" name="target_type" value="${targetType}">
+      <input type="hidden" name="target_id" value="${targetId}">
+      <input type="hidden" name="return_to" value="${returnTo}">
+      <select name="category" required>
+        ${FLAG_CATEGORIES.map((c) => html`<option value="${c}">${c.replace('_', ' ')}</option>`)}
+      </select>
+      <input name="note" placeholder="optional note" maxlength="280">
+      <button>submit flag</button>
+    </form>
+  </details>`;
+}
+
+async function handleFlag(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to flag.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { target_type: targetType, target_id: targetId, category, note, return_to: returnTo } = form;
+  try {
+    submitFlag(db, {
+      targetType, targetId, flaggerHandle: handle, category,
+      note: note && note.trim().length > 0 ? note.trim() : null,
+    });
+  } catch (err) {
+    // UNIQUE collision = same user re-flagging the same target. Treat as
+    // success-ish (their concern is registered) so the redirect is clean.
+    if (!/UNIQUE/.test(err.message)) {
+      return send(res, 400, layout('flag failed', html`<p class="muted">${err.message}</p>`));
+    }
+  }
+  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/';
+  redirect(res, safeReturn);
+}
+
 async function handleModAction(req, res, { db, auth }, subName) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
@@ -961,6 +1020,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
+      if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });
       if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { auth });
       if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
 

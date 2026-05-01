@@ -157,6 +157,36 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
 .mod-action-unremove, .mod-action-unban,
 .mod-action-promote_mod, .mod-action-demote_mod, .mod-action-transfer_owner { color: var(--accent); }
 
+/* Flag button — small details dropdown next to the mod controls. PRD
+ * §Spam 7: separate from downvote, category-driven. Closed list of 5
+ * categories; optional 280-char note. */
+.post-actions { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.3rem; flex-wrap: wrap; }
+.flag-form-wrap { display: inline-block; }
+.flag-trigger {
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  color: var(--text-dim);
+}
+.flag-trigger::-webkit-details-marker { display: none; }
+.flag-trigger:hover { color: var(--accent-warm); border-color: var(--accent-warm); }
+.flag-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+  flex-wrap: wrap;
+}
+.flag-form select, .flag-form input { font-size: 0.78rem; padding: 0.2rem 0.4rem; }
+.flag-form button { font-size: 0.78rem; padding: 0.2rem 0.7rem; }
+
 /* Site footer — the ∴plato attribution mark. Stays in every fork: the
  * operator can change wordmark + quote pool but keeps the glyph + "plato"
  * as upstream lineage. */

@@ -947,3 +947,74 @@ test('M4: owner POSTs collapse → post is collapsed + action logged', async (t)
   assert.equal(log.length, 1);
   assert.equal(log[0].action, 'collapse');
 });
+
+test('M4: POST /flag requires login', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+  const res = await fetch(baseUrl + '/flag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ target_type: 'post', target_id: 'x', category: 'spam' }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test('M4: logged-in user POSTs /flag → flag row inserted, redirect honored', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+  ensureSub(db, 'lobby');
+
+  const author = 'a'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'author-x', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(author, Date.now());
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'flagger@example.com', { db });
+
+  const res = await jarFetch(jar, baseUrl + '/flag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p1', category: 'spam',
+      note: 'looks like a bot', return_to: '/sub/lobby',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/lobby');
+
+  const flag = db.prepare(`SELECT category, note, resolution FROM flags WHERE target_id = 'p1'`).get();
+  assert.equal(flag.category, 'spam');
+  assert.equal(flag.note, 'looks like a bot');
+  assert.equal(flag.resolution, 'pending');
+});
+
+test('M4: re-flagging same target by same user returns redirect (UNIQUE swallowed)', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+  ensureSub(db, 'lobby');
+
+  const author = 'a'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'author-y', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(author, Date.now());
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'rep-flagger@example.com', { db });
+
+  for (const _ of [0, 1]) {
+    const res = await jarFetch(jar, baseUrl + '/flag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ target_type: 'post', target_id: 'p1', category: 'spam' }),
+    });
+    assert.equal(res.status, 302);
+  }
+  const count = db.prepare(`SELECT count(*) AS n FROM flags WHERE target_id = 'p1'`).get().n;
+  assert.equal(count, 1);
+});
