@@ -1,4 +1,4 @@
-# PRD: Open Web Revival — Two Products
+# PRD: plato — Open Web Forum
 
 > **Companion docs.** This PRD is the *why* — the locked product decisions and their rationale. Day-to-day operator and integration guidance lives alongside it:
 > - [Operator Guide](../02-features/operator-guide.md) — for humans running, customizing, or forking a plato instance: forkable / tunable / locked tiers, day-to-day operations, troubleshooting, FAQ.
@@ -6,9 +6,11 @@
 >
 > If you're touching the implementation, read those two first; this PRD is the constitution they cite.
 
-A coordinated rebuild of two pieces of the pre-platform internet that still work and now matter more than they did in 2005: a **forum** and a **feed reader**. Both shipped as forkable repos with one-command deploy, both no-account, both gitdone-shaped (signed, timestamped, exportable, no platform owns your data).
+> **Historical note.** This document was originally drafted as "Open Web Revival — Two Products" alongside a sibling feed-reader product. The reader was cancelled (mature alternatives already exist in multiple shapes — NetNewsWire, Miniflux, FreshRSS, Reeder, etc.). plato remains the one product this PRD specifies. References below to "Product 2" or "the reader" survived for historical context but the codebase ships only the forum.
 
-The shared thesis: the open web's failures were never technical. The protocols still work. What died was the on-ramp and the defaults. These products restore both, with 2026 UX expectations baked in.
+A rebuild of one piece of the pre-platform internet that still works and now matters more than it did in 2005: a **forum**. Shipped as a forkable repo with one-command deploy, no-account, gitdone-shaped (signed, timestamped, exportable, no platform owns your data).
+
+The thesis: the open web's failures were never technical. The protocols still work. What died was the on-ramp and the defaults. plato restores both, with 2026 UX expectations baked in.
 
 ---
 
@@ -29,7 +31,7 @@ These apply to both products. Anything that violates a principle needs an explic
 
 ---
 
-# Product 1: Forum
+# plato
 
 ## What it is
 
@@ -195,9 +197,9 @@ ntfy is **never the default** and **never used for sensitive content**. Email re
 
 ### Per-sub RSS
 
-Every sub publishes an RSS feed at `/sub/<name>/feed.xml`. This composes with the reader product (Product 2) — a user can subscribe to forum subs in their RSS reader alongside blogs, newsletters, and watched URLs. The "follow a sub" mechanism inside the forum and the "subscribe via RSS" mechanism outside the forum coexist; users pick whichever fits their workflow.
+Every sub publishes an RSS feed at `/sub/<name>/feed.xml`. Users subscribe in any standard reader (NetNewsWire, Miniflux, FreshRSS, Reeder, etc.) alongside blogs, newsletters, and watched URLs. The "follow a sub" mechanism inside the forum and the "subscribe via RSS" mechanism outside it coexist; users pick whichever fits their workflow. RSS is the open-web staying-current pattern plato wires into by default — there's no in-house reader to ship.
 
-This is the clean composition of the two products: the forum's job ends at "publish RSS for each sub"; the reader picks up from there if the user wants cross-source aggregation. Most users will use sub subscriptions for the forum and RSS for everything else. Power users can do either. Both work.
+plato's job ends at "publish RSS for each sub"; whatever reader the user picks handles cross-source aggregation. Most users will use in-forum sub subscriptions for plato and RSS for everything else. Power users can do either. Both work.
 
 ## Authentication Flow
 
@@ -570,7 +572,7 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Self-hostable docker-compose, plus reference hosted version
 - Search (Postgres full-text)
 - Dark mode, mobile-responsive web
-- RSS feed per sub (composes with Product 2)
+- RSS feed per sub (subscribable in any standard reader)
 
 ## What's explicitly out of v1
 
@@ -612,195 +614,9 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 
 ---
 
-# Product 2: Reader
-
-## What it is
-
-A feed aggregator for the post-algorithm web. Take a list of URLs (your daily reading), get a chronological reader. Subscribe to newsletters as feeds. Generate feeds for sites that don't publish them. Filter by user-defined rules. Export everything as a standard OPML file. No algorithm, no follow graph, no engagement metrics.
-
-## What it explicitly is not
-
-- Not social ("see what your friends are reading" rebuilds the follower trap).
-- Not algorithmic (no recommendations, no "for you").
-- Not a read-it-later app (those exist; integrate, don't rebuild).
-- Not a notification system (you visit when you want).
-
-## User Model
-
-- **Identity**: email + magic link, or fully local (no account at all if self-hosted).
-- **Subscription list**: an OPML file. Yours, exportable, portable into any standard reader.
-- **Read state**: synced via a portable file you control. Stored server-side if hosted, locally if self-hosted.
-
-## Core Features
-
-### Feed sources
-
-- **Direct RSS/Atom URLs**: the standard case.
-- **Site URLs without explicit feed**: the reader auto-discovers (most CMSes still expose feeds even when the site doesn't link to them).
-- **Sites with no feed at all**: scraper generates one. The user gives a homepage URL; the reader figures out the post pattern and produces a feed. (RSS-Bridge is the open-source reference for this; we bake it in rather than asking users to set it up.)
-- **Email newsletters**: each user gets a unique inbox address (e.g. `you-x7k2@reader.example`). Subscribe to Substack/Beehiiv/whatever with that address. Newsletters arrive as feed items in the reader.
-- **Watched URLs (change monitor)**: for pages that have no feed, no post pattern, and just *change in place* — a product page, a policy page, a single paragraph, a PDF on a council site. The reader fetches the page on a schedule, diffs it against the last fetch, and treats meaningful changes as new feed items. See the *Change Monitor* section below for mechanics.
-- **Other readers' OPML**: import any OPML file to add its feeds to yours.
-
-### Change Monitor (folded into the reader, not a separate product)
-
-When a user adds a URL, the reader first tries the standard pipeline: explicit feed → auto-discover → generated feed. If none of those produce useful results, the reader offers: *"This page has no feed. Watch it for changes instead?"*
-
-If yes, the URL becomes a watched source. Same UI, same notifications as feeds, different mechanism underneath.
-
-**Design discipline: keep it as dumb as RSS.**
-
-RSS worked for 25 years because it was simple — fetch a URL, parse the response, compare to last time. No browsers, no DOM walking, no rendering. The watcher follows the same rule. Anything that requires a headless browser or fancy parsing is out of scope.
-
-**How it works:**
-
-1. **Fetch.** Plain HTTP GET with a normal user-agent. Same as `curl`. Same as any feed reader.
-2. **Strip.** Remove `<script>`, `<style>`, and HTML tags. What's left is plain text.
-3. **Compare.** Diff the new plain text against the last fetch's plain text.
-4. **Notify.** If different, generate a feed item showing what changed (added text, removed text). Save the new version as the baseline.
-
-That's the whole loop. Maybe 100 lines of code.
-
-**Per-URL options the user can set:**
-
-- **Cadence**: how often to re-fetch. Default daily; user can pick hourly or weekly.
-- **Match string**: optional substring or simple regex. The watcher only notifies if the matching part of the text changed. Kills 95% of false positives without needing CSS selectors. Examples: `In stock`, `Updated:`, `\$[0-9]+\.[0-9]{2}`.
-- **Minimum change size**: ignore changes smaller than N characters (filters typo fixes on long pages).
-
-**What's intentionally not handled:**
-
-- **JavaScript-rendered pages.** If `curl` can't see the content, the watcher can't either. That's fine — most pages worth watching (government sites, blogs, docs, Wikipedia, council PDFs, retailer pages) render content in plain HTML. JS-rendered pages tend to be ad-tech-heavy modern sites that are hostile to readers anyway.
-- **Auth-protected pages.** Out of scope for v1. The user can put a public URL behind a watcher; private pages they can read themselves.
-- **Visual changes.** A pixel-diff watcher is a different product. This one watches text.
-
-**PDFs**: if the URL ends in `.pdf`, run `pdftotext` after fetching, then proceed normally. Single shell call, no library, no fancy handling.
-
-**Why this lives in the reader, not as a separate product:**
-
-The user-facing question is the same — "tell me when something on the web has new stuff for me." Whether the underlying mechanism is RSS parsing, feed generation, newsletter intake, or page diffing is plumbing the user shouldn't have to think about. One UI, four mechanisms, all routed to the same chronological reading surface.
-
-**Use cases this unlocks that pure RSS doesn't:**
-
-- Product back-in-stock alerts (with a match string for `In stock`).
-- Government policy page edits (whole-page diff).
-- Council/school-board PDF replacements.
-- A specific person's bio or homepage updating.
-- Job listings on company career pages that don't publish feeds.
-- Wikipedia article changes (whole article; for paragraph-level use Wikipedia's own watch tool).
-
-### ntfy push (opt-in, per-source)
-
-By default, the reader has no notifications. You visit when you want. That's the principle and it stays.
-
-For users who want immediate alerts on specific sources — most often a watched URL where timing matters (back-in-stock, breaking change to a watched policy page) — the reader supports [ntfy](https://ntfy.sh) as an opt-in push channel.
-
-Same model as in the forum:
-
-- The user installs the ntfy app, picks a private-ish topic name, and pastes their topic URL into the reader's per-feed or per-watcher settings.
-- When the trigger fires (new feed item, watcher detects a change), the reader does one HTTP POST to the user's topic URL with a title and click-back link.
-- That's the entire integration. No ntfy SDK, no library, no state beyond the user's preference.
-- The user can mark each feed and each watched URL independently for ntfy push. Most stay silent; a few that genuinely matter get push.
-
-This preserves the "you check when you want" default for the bulk of reading, while letting users opt specific sources into immediate alerts. Same protocol-shaped, no-account, self-hostable discipline as everything else in the stack.
-
-ntfy is **never the default** and **never required**. The reader works fully without it.
-
-### Reading
-
-- **Chronological by default**, reverse-chronological optional. No other sort.
-- **Full-text fetched**: where the feed publishes only excerpts, the reader fetches the full article and inlines it. (Mercury / Readability extraction.)
-- **Reading view**: distraction-free, user-controlled fonts and width.
-- **Mark-as-read** is the only interaction. No likes, no shares, no annotations in v1.
-
-### Filters (user-defined, not algorithmic)
-
-- Per-feed filters: "from this feed, only items containing X" or "hide items containing Y."
-- Per-feed cadence: tag a feed as real-time, daily-digest, or weekly-summary. High-volume feeds don't drown low-volume ones.
-- Per-feed trust: mark a feed as low-trust to apply heavier slop-filtering.
-
-### Slop defenses (2026-specific)
-
-- AI-generated content detection (heuristic, not perfect): flagged in the UI, not auto-removed.
-- User-curated slop-domain blocklist (subscribable, not mandatory). One way to opt into community-shared lists without a follower graph.
-- Per-feed "this is mostly slop, hide" toggle.
-
-### Export
-
-- OPML export of subscriptions: always, one click.
-- Read-state export as a portable JSON file.
-- Full archive export (every item ever fetched) as a folder of HTML or markdown.
-
-## Authentication
-
-- Self-hosted: no auth at all if running locally on your own machine.
-- Hosted: magic-link to email, same as the forum. Session token persists 30 days.
-
-## What's in v1
-
-- All of the above.
-- Mobile-responsive web reader (no app).
-- Per-feed and per-user filtering.
-- Newsletter inbox (one address per user).
-- Auto-discovery and feed generation.
-- Watched URLs (change monitoring): plain HTTP fetch, strip-and-diff, optional match string, optional PDF support. No headless browser.
-- Optional ntfy push per feed and per watched URL. Off by default. User provides their own ntfy topic URL.
-- OPML import/export.
-- Full-text fetching.
-- Self-hostable in one command.
-- Optional hosted version.
-
-## What's out of v1
-
-- Mobile apps
-- Push notifications
-- Social features (friends, sharing, likes)
-- Recommendations
-- Built-in payments / micropayments to creators
-- Real-time websocket updates (poll-based is fine)
-- Browser extension (v2)
-- AI summarization of articles (sounds nice, adds dependency, killable later)
-
-## Technical Stack
-
-Same boring choices as the forum.
-
-- **Backend**: Go or Python.
-- **Database**: SQLite for self-hosted single-user; PostgreSQL for hosted multi-user.
-- **Feed parsing**: standard libraries (feedparser, gofeed).
-- **Article extraction**: Readability port.
-- **Email inbound**: per-user addresses on a single inbound domain, parsed and converted to feed items.
-- **Change monitoring**: scheduled `curl`-equivalent fetch, HTML tag stripping (regex or standard library), text diff library, `pdftotext` shell-out for PDFs. No headless browser, no DOM parser, no selector engine.
-- **Storage**: feed items as markdown + JSON in a per-user directory. Watched-page snapshots as plain text alongside their metadata. Database indexes over files.
-
-## Success Criteria
-
-- A user with a list of 10 sites they check daily can replace that ritual with the reader in 5 minutes.
-- A user can subscribe to 5 newsletters via the reader and read them outside their email inbox in the same session.
-- A user can watch 10 feed-less pages (product pages, policy pages, PDFs) and only get notified on real changes, not noise.
-- The reader runs on a Raspberry Pi at home with 100 feeds and 10 watched pages and zero noticeable lag.
-- One-sentence description: *"Take back your information diet from the algorithm. Your sites, your newsletters, the pages that just change in place — all in chronological order, no recommendations."*
-
----
-
-# Shared Build Plan
-
-## Phase 1: Reader (smaller, ships first)
-
-The reader has fewer moving parts, no community to bootstrap, immediate single-user value, and proves the deployment / forkability pattern. Ship in 4-6 weekends.
-
-## Phase 2: Forum
-
-The forum is bigger, harder, has moderation surface, has community-bootstrapping problem. Reuse deployment and forkability patterns from the reader. Ship in 3-4 months of focused work.
-
-## Phase 3: Cross-pollination
-
-Once both ship: forum's per-sub RSS feed becomes a first-class subscription source in the reader. A user can read their favorite subs in their reader, post via the forum web, and never touch a third-party platform.
-
----
-
 # Other Old-Web Things Worth Rebuilding
 
-These didn't make this PRD because the conversation focused on RSS and forums, but they sit in the same family and would compose with these two if built. Listed in rough order of leverage.
+These didn't make this PRD because the conversation focused on the forum, but they sit in the same family and would compose with plato if built. Listed in rough order of leverage.
 
 ## Personal homepage as a service
 

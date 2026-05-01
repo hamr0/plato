@@ -53,10 +53,13 @@ The result is a forum that loads instantly on any device, on any connection, in 
 
 - **Markdown source on disk.** Every post is a real file on real disk. The database is an index. Lose either, regenerate from the other.
 - **One-command export.** Take your full history. Take a sub's archive. The format is plain markdown plus a JSON manifest — readable in any text editor.
-- **Per-sub RSS feeds.** Drop the URL into any reader. Subscribe without an account.
 - **Apache 2.0 license.** Fork the code, fork the archive, run your own. You don't need permission.
 
 The word "interoperable" gets misused on most platforms. On plato it's the architecture: every artifact is a plain file, every protocol is one a 25-year-old mail server understands.
+
+### Stay current with RSS, the way the web was meant to
+
+Every sub publishes a feed at `/sub/<name>/feed.xml`. **If you want to stay up to date with a sub, point any RSS reader at it** — [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), [Reeder](https://reederapp.com), or whatever you already use — and posts arrive in your reader alongside blogs, newsletters, and other feeds. No notification system to fight with. No app to install. No account. RSS is the open-web pattern for staying current; plato wires into it by default rather than building yet another in-app feed.
 
 ### Lightweight, on purpose
 
