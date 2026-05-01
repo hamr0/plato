@@ -14,6 +14,7 @@
 // the cache the read path checks.
 
 import { randomBytes } from 'node:crypto';
+import { SYSTEM_HANDLE } from './spamPatterns.js';
 
 const ID_BYTES = 8;
 const newId = () => randomBytes(ID_BYTES).toString('hex');
@@ -192,7 +193,8 @@ function buildAuditClause(subNames, { since, actions, modHandle, targetHandle } 
     params.push(...actions);
   }
   if (modHandle === 'system') {
-    where.push('mod_handle IS NULL');
+    where.push('mod_handle = ?');
+    params.push(SYSTEM_HANDLE);
   } else if (typeof modHandle === 'string' && modHandle.length > 0) {
     where.push('mod_handle = ?');
     params.push(modHandle);

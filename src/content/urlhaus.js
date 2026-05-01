@@ -51,28 +51,30 @@ export function loadUrlhausCache(filePath) {
 // strings whose hosts are in the blocklist. Empty array means clean.
 const URL_RE = /https?:\/\/[^\s)\]]+/gi;
 
-// Same shape as applySpamMatches in spamPatterns.js, but with a
-// distinct note prefix so mods can tell URLhaus hits from regex hits
-// at a glance in /modlog open mode. The UNIQUE constraint on flags
-// dedupes per (target, flagger) — if a target already has a
-// system-handle flag (from a prior spam-regex match in the same
-// publish), this insert is a no-op. Acceptable: the post is already
-// in the queue.
+// Same shape as applySpamMatches: collapse, dedup-flag, and (when we
+// actually flipped state) write a system-attributed audit row.
 import { randomBytes } from 'node:crypto';
 import { SYSTEM_HANDLE } from './spamPatterns.js';
 
-export function applyUrlhausMatches(db, { targetType, targetId, matchedHosts, now = Date.now() }) {
+export function applyUrlhausMatches(db, { targetType, targetId, subName, matchedHosts, now = Date.now() }) {
   if (!matchedHosts || matchedHosts.length === 0) return { hidden: false };
   const table = targetType === 'post' ? 'posts' : 'comments';
-  db.prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
+  const result = db
+    .prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
     .run(now, targetId);
-  const id = randomBytes(8).toString('hex');
   const note = `blocked-url: ${matchedHosts.join(', ')}`;
   db.prepare(
     `INSERT OR IGNORE INTO flags
        (id, target_type, target_id, flagger_handle, category, note, created_at)
      VALUES (?, ?, ?, ?, 'spam', ?, ?)`
-  ).run(id, targetType, targetId, SYSTEM_HANDLE, note, now);
+  ).run(randomBytes(8).toString('hex'), targetType, targetId, SYSTEM_HANDLE, note, now);
+  if (result.changes > 0 && subName) {
+    db.prepare(
+      `INSERT INTO mod_actions
+         (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+       VALUES (?, ?, ?, 'collapse', ?, ?, ?, ?)`
+    ).run(randomBytes(8).toString('hex'), subName, SYSTEM_HANDLE, targetType, targetId, note, now);
+  }
   return { hidden: true, matchedHosts };
 }
 

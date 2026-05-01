@@ -37,35 +37,31 @@ export function loadSpamPatterns(filePath) {
   return out;
 }
 
-// Apply matched patterns to a target: collapse it + insert one
-// system-attributed flag per matched pattern. Idempotent on the
-// flag-insert via the existing UNIQUE(target_type, target_id,
-// flagger_handle) — since the system handle is the same, only one row
-// per target gets through (note carries the first matched pattern). To
-// preserve every matched pattern, we vary the note within that single
-// row by joining sources. Caller passes target_type, target_id, and
-// the matched array (from matchSpamPatterns).
+// Collapse target + insert one system flag (UNIQUE-deduped) + write a
+// system-attributed audit row when we actually flipped state.
 import { randomBytes } from 'node:crypto';
 
 const ID_BYTES = 8;
 
-export function applySpamMatches(db, { targetType, targetId, matched, now = Date.now() }) {
+export function applySpamMatches(db, { targetType, targetId, subName, matched, now = Date.now() }) {
   if (!matched || matched.length === 0) return { hidden: false };
   const table = targetType === 'post' ? 'posts' : 'comments';
-  // Collapse only if not already collapsed.
-  db.prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
+  const result = db
+    .prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
     .run(now, targetId);
-  // Insert a system flag. UNIQUE(target_type, target_id, flagger_handle)
-  // prevents duplicates if the same target hits the regex twice (edits,
-  // re-publish). On conflict we leave the original row in place — its
-  // note records the first match, which is enough for mod review.
-  const id = randomBytes(ID_BYTES).toString('hex');
   const note = `pattern: ${matched.join(' | ')}`;
   db.prepare(
     `INSERT OR IGNORE INTO flags
        (id, target_type, target_id, flagger_handle, category, note, created_at)
      VALUES (?, ?, ?, ?, 'spam', ?, ?)`
-  ).run(id, targetType, targetId, SYSTEM_HANDLE, note, now);
+  ).run(randomBytes(ID_BYTES).toString('hex'), targetType, targetId, SYSTEM_HANDLE, note, now);
+  if (result.changes > 0 && subName) {
+    db.prepare(
+      `INSERT INTO mod_actions
+         (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+       VALUES (?, ?, ?, 'collapse', ?, ?, ?, ?)`
+    ).run(randomBytes(ID_BYTES).toString('hex'), subName, SYSTEM_HANDLE, targetType, targetId, note, now);
+  }
   return { hidden: true, matched };
 }
 

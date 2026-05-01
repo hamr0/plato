@@ -38,7 +38,7 @@ import {
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 import { checkPostRate, checkPostRatePerSub, checkCommentRate, resolveRateLimitConfig } from '../content/rateLimit.js';
-import { loadSpamPatterns, matchSpamPatterns, applySpamMatches } from '../content/spamPatterns.js';
+import { loadSpamPatterns, matchSpamPatterns, applySpamMatches, SYSTEM_HANDLE } from '../content/spamPatterns.js';
 import { checkLinkCap, resolveLinkCapConfig } from '../content/linkCap.js';
 import { loadUrlhausCache, matchUrlhaus, applyUrlhausMatches } from '../content/urlhaus.js';
 
@@ -633,25 +633,20 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       // they revisit the sub.
       const matched = matchSpamPatterns(`${title}\n${postBody}`, spamPatterns);
       if (matched.length > 0) {
-        applySpamMatches(db, { targetType: 'post', targetId: postId, matched });
+        applySpamMatches(db, { targetType: 'post', targetId: postId, subName: published, matched });
       }
       const matchedHosts = matchUrlhaus(`${title}\n${postBody}`, urlhausHosts);
       if (matchedHosts.length > 0) {
-        applyUrlhausMatches(db, { targetType: 'post', targetId: postId, matchedHosts });
+        applyUrlhausMatches(db, { targetType: 'post', targetId: postId, subName: published, matchedHosts });
       }
       return redirect(res, `/sub/${published}`);
     } catch (err) {
-      // Most common case: ban check in finalizeDraft. Render a friendly
-      // error instead of crashing the process. Other DB-layer errors
-      // (FK miss, write failure) also land here with their own message.
-      return send(
-        res,
-        400,
-        layout(
-          'post failed',
-          html`<p class="muted">${err.message} <a href="/sub/${subName}">back to /sub/${subName}</a></p>`
-        )
-      );
+      const banMatch = /banned from ([a-z0-9-]+)/.exec(err.message);
+      const target = banMatch ? banMatch[1] : subName;
+      return send(res, 400, errorPage(req, { db, auth }, {
+        title: 'post failed', message: err.message,
+        links: html`<p><a href="/sub/${target}">← back to /sub/${target}</a></p>`,
+      }));
     }
   }
 
@@ -764,16 +759,16 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
 
   // Spam regex + URLhaus checks post-publish. The draft body lives in
   // the drafts table until finalize; pull it back to feed both matchers.
-  const draftBody = db.prepare('SELECT title, body FROM drafts WHERE id = ?').get(draftId);
+  const draftBody = db.prepare('SELECT title, body, sub_name FROM drafts WHERE id = ?').get(draftId);
   if (draftBody) {
     const text = `${draftBody.title}\n${draftBody.body}`;
     const matched = matchSpamPatterns(text, spamPatterns);
     if (matched.length > 0) {
-      applySpamMatches(db, { targetType: 'post', targetId: result.postId, matched });
+      applySpamMatches(db, { targetType: 'post', targetId: result.postId, subName: draftBody.sub_name, matched });
     }
     const matchedHosts = matchUrlhaus(text, urlhausHosts);
     if (matchedHosts.length > 0) {
-      applyUrlhausMatches(db, { targetType: 'post', targetId: result.postId, matchedHosts });
+      applyUrlhausMatches(db, { targetType: 'post', targetId: result.postId, subName: draftBody.sub_name, matchedHosts });
     }
   }
 
@@ -1033,11 +1028,11 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
   // Spam regex + URLhaus checks post-publish. Comments have body only.
   const matched = matchSpamPatterns(commentBody, spamPatterns);
   if (matched.length > 0) {
-    applySpamMatches(db, { targetType: 'comment', targetId: result.commentId, matched });
+    applySpamMatches(db, { targetType: 'comment', targetId: result.commentId, subName, matched });
   }
   const matchedHosts = matchUrlhaus(commentBody, urlhausHosts);
   if (matchedHosts.length > 0) {
-    applyUrlhausMatches(db, { targetType: 'comment', targetId: result.commentId, matchedHosts });
+    applyUrlhausMatches(db, { targetType: 'comment', targetId: result.commentId, subName, matchedHosts });
   }
   // JSON branch: client-side comment.js inserts the rendered fragment
   // in-place so the page doesn't reload. Loading-dots wave shows during
@@ -1450,7 +1445,7 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
     return html`<a class="${cls}" href="${subModlogHref(next)}">${label}</a>`;
   };
   const modCell = (a) => {
-    if (a.mod_handle == null) {
+    if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, modParam);
     }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
@@ -1674,7 +1669,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`<a class="${cls}" href="${modlogHref(next)}">${label}</a>`;
   };
   const modCell = (a) => {
-    if (a.mod_handle == null) {
+    if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
     }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
@@ -1974,7 +1969,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`<a class="${cls}" href="${modlogHref(next)}">${label}</a>`;
   };
   const modCell = (a) => {
-    if (a.mod_handle == null) {
+    if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
     }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
