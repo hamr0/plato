@@ -8,66 +8,80 @@
 
 ---
 
-**plato is a forum.** One URL, one operator, one SQLite file. Reddit-shaped community discussion — subs, hierarchical comments, upvotes — without the parts of Reddit that broke discourse: no algorithm, no karma, no follower counts, no ads, no surveillance. The reader can leave at any time with a one-command export. The operator can be replaced at any time by anyone forking the archive.
+**plato is a forum.** A community-owned discussion site, shaped like the best parts of Reddit — sub-communities, threaded conversations, upvotes — without the parts that broke discourse.
 
-This is what a community-owned forum looks like when you start over and refuse the patterns the last fifteen years taught everyone to copy.
+No ads. No algorithm. No tracking. No karma. No follower count. No real-name pressure. No image-and-video arms race. No company that owns your conversations and changes the rules every quarter.
 
----
-
-## The headline features
-
-### No email. No ads. No tracking.
-
-You sign in with a magic link. The server takes your email, sends one message, and immediately discards the plaintext. What it stores is an HMAC — a one-way hash that's useless to anyone who steals the database, and that yields a *different* identity on every plato instance. There is no advertising, no third-party JavaScript, no tracking pixel, no analytics service, no telemetry of any kind. Server logs are the only record, and they live on the operator's machine.
-
-### Checks and balances on moderation
-
-Moderators have two tools, and one is reversible by the community.
-
-- **Soft removal.** A mod can collapse a post or comment behind a `[+] [collapsed by mod]` chip. The body is still readable to anyone who clicks. Reason is optional. The action is logged. **If the soft-removed item accumulates enough net upvotes after the collapse — 50 for posts, 20 for comments by default — the system auto-lifts the collapse and writes "community overruled" to the public log.** No appeal queue, no mod confrontation, no email. The community simply outvotes the call. Soft moderation is the default tool, and capricious soft moderation gets reversed by readers.
-- **Hard removal.** A mod can replace the body with a `[− removed by mod]` stub. Reason is *required*. Cannot be auto-reverted by votes — this is for content the mod has decided no one should see (harassment, doxxing, illegal). Reversible only by another mod, and the reversal is itself logged.
-
-Every moderator action — soft, hard, ban, system override — appears in `/sub/<name>/modlog`, public to anyone visiting the URL. There is no private mod chat that determines what stays up. The audit trail is the social pressure that keeps mods honest.
-
-### Comments only. Text only.
-
-Markdown for post bodies. Hyperlinks render as links. That's the whole content model. plato hosts no images, no videos, no files, no embeds, no preview cards, no auto-played anything. Markdown image syntax is rewritten as a plain link to whatever host you picked. The site never holds a single byte of media; you can read it on a 1995 modem.
-
-### Lightweight
-
-One Node process. One SQLite file. One HTTP port. No frontend framework, no template engine, no build step, no client-side JavaScript in the v1 path. The whole forum runs on a $5 VPS and serves tens of thousands of daily-active users without breaking a sweat. Backups are `cp forum.db forum.db.bak` and `rsync` of the `posts/` folder.
-
-### Retro
-
-Terminal-honest aesthetic — monospace font, dark by default, three-blue-dot logo doubling as the loading animation, clean lines, no skeumorphism, no glassmorphism, no rounded-corner-app-store-icon energy. The look says: this is a piece of infrastructure, not a product extracting your time.
-
-### Interoperable from day one
-
-- **RSS per sub.** Drop the URL into any feed reader.
-- **Markdown source on disk.** Posts live as `posts/<date>-<id>.md` files with frontmatter. The database is an index regenerable from the file tree. Lose the DB, regenerate. Lose the disk, restore from backup. The source-of-truth is plain files.
-- **One-command export.** A user can take their full history. A community can take its archive. Apache 2.0 license — fork without asking.
-- **Magic-link via standard SMTP.** Operate it on whatever mail infrastructure you already trust. No vendor.
-
-The "interoperable" word, on most modern platforms, is marketing. On plato it's the literal architecture: every artifact is a plain file, every protocol is one a 25-year-old MTA understands.
+A forum that loads in a heartbeat, looks like a tool not a product, lets you walk away with everything you wrote, and can be replaced by the next operator the day yours stops listening.
 
 ---
 
-## What it deliberately does not do
+## Why this exists
 
-These aren't on the roadmap. They're decisions.
+The internet had forums that lasted decades. Mailing lists, phpBB boards, Usenet, early Reddit. Then everything moved to platforms that needed your attention to stay alive, and slowly the conversations got worse. Recommendation feeds replaced friends. Karma replaced thinking. Followers replaced trust. Real names replaced honesty.
 
-- **No algorithmic feed.** Hot, new, top, old. Same shape for every visitor. No personalization, no engagement optimization, no "you might also like." You see what's recent and what's voted up, and that's the entire ranking surface.
-- **No karma, no follower counts, no post counts, no "online now" badges, no leaderboards.** Nothing to grind. Pseudonyms come from a deterministic two-word generator; identicons are auto-rendered. There's no profile to fill, no badge to chase, no number that goes up next to your name.
-- **No DMs.** The forum is the venue. Private channels happen elsewhere.
-- **No ask for your real name, phone, photo, location, or anything identifying.** None of it. Ever.
-- **No image or video uploads.** Markdown image syntax becomes a plain link. plato hosts text.
-- **No tags or hashtags.** Per-sub flairs (closed list, owner-curated) ship in M5 — no taxonomy chaos, no hashtag-spam vector.
-- **No private subs.** Different product, different security model. Not on the roadmap.
-- **No password auth, no OAuth, no SSO.** Magic link is the only path. The auth surface is one form field.
-- **No NSFW age verification.** That's an operator-layer concern. M5 adds a per-sub NSFW banner; that's the extent of plato's involvement.
-- **No federation.** Forking is the answer to "what if the operator goes bad." Not ActivityPub.
+plato is the bet that the structural defaults were what mattered all along.
 
-Each item on the list is a place where a current platform sells you the *illusion* — interoperability you can't actually use, privacy that's a settings page hiding a tracker, control that ends at the suspension button, ownership of content the platform can revoke. plato refuses each illusion by giving you the structural property instead: actual files, actual export, actual fork rights, actual no-tracking, actual public moderation log.
+---
+
+## What you get
+
+### Sign in without giving your email
+
+You enter your email, plato sends you a one-time link. The moment that link goes out, plato forgets your address. What's stored is a one-way hash that yields a *different* identity on every plato site — useless to anyone who steals the database, useless for cross-site tracking, useless to a government request.
+
+This works because of [**knowless**](https://github.com/hamr0/knowless), an open-source library built specifically to do passwordless email auth without storing email. It's the same primitive any other plato-shaped project can drop in.
+
+No password, no account recovery flow, no profile to fill, no second factor, no captcha. One field, one click, you're in.
+
+### A moderation system that watches the moderators
+
+Two tools, one is reversible by the community:
+
+- **Soft removal** — folds the post behind a clickable chip; body still readable on click; reason optional; auto-lifts if the community upvotes it back.
+- **Hard removal** — replaces the body with a stub; reason required; reversible only by another mod.
+
+Every action lands in a public log per sub. No private mod chat decides what stays up — the audit trail is the social pressure.
+
+### Text only — and that's the whole point
+
+Markdown for post bodies. Hyperlinks for everything else. plato does not host images, videos, files, embeds, or auto-played anything. Markdown image syntax becomes a plain link to wherever you parked the picture.
+
+The result is a forum that loads instantly on any device, on any connection, in any decade, without depending on twelve content-delivery networks staying in business.
+
+### You own what you write
+
+- **Markdown source on disk.** Every post is a real file on real disk. The database is an index. Lose either, regenerate from the other.
+- **One-command export.** Take your full history. Take a sub's archive. The format is plain markdown plus a JSON manifest — readable in any text editor.
+- **Per-sub RSS feeds.** Drop the URL into any reader. Subscribe without an account.
+- **Apache 2.0 license.** Fork the code, fork the archive, run your own. You don't need permission.
+
+The word "interoperable" gets misused on most platforms. On plato it's the architecture: every artifact is a plain file, every protocol is one a 25-year-old mail server understands.
+
+### Lightweight, on purpose
+
+One process, one database file, one HTTP port. Runs on a $5 VPS. Backups are two `cp` commands. No frontend framework, no build step, no client-side JavaScript in the basic path. The whole thing fits on a thumb drive.
+
+### Retro, on purpose
+
+Monospace font. Dark by default. Terminal-honest. Three-blue-dot logo that doubles as the loading animation. The visual language says: this is infrastructure, not a product designed to extract your time.
+
+---
+
+## What plato will never do
+
+These are decisions, not roadmap items.
+
+- Show ads. Run analytics. Drop tracking pixels. Embed third-party JavaScript.
+- Personalize your feed by what an algorithm thinks you want.
+- Show karma scores, follower counts, post counts, "online now" badges, leaderboards, or any other status game.
+- Ask for your real name, phone number, photo, location, or anything identifying.
+- Host images, videos, or files you upload.
+- Add tags, hashtags, or anything that grows into spam-bait.
+- Allow private subs, DMs, or hidden side-channels that bypass the public mod log.
+- Add password auth, OAuth, SSO, or anything other than the magic link.
+
+Each refusal maps to an illusion modern platforms sell — interoperability you can't actually use, privacy that's a settings toggle hiding a tracker, control that ends at the suspension button, ownership of content the platform can revoke. plato gives you the structural property instead.
 
 ---
 
@@ -75,36 +89,24 @@ Each item on the list is a place where a current platform sells you the *illusio
 
 | | Reddit | plato |
 |---|---|---|
-| Owner | Public company | One operator (you can fork) |
-| Sign-up | Email + password | Magic link, plaintext email forgotten |
-| Identity | Real name optional, persistent username | Pseudonym derived from email HMAC |
-| Karma | Yes, central status game | None |
-| Follower / friend graph | Yes | None |
+| Owner | Public company | One operator (forkable) |
+| Sign-up | Email + password | One-time link, email forgotten |
+| Identity | Persistent username | Pseudonym derived from your email |
+| Karma | Yes | None |
+| Follower graph | Yes | None |
 | Algorithmic feed | Yes (default) | None |
-| Image/video hosting | Yes | None — link out |
+| Image / video hosting | Yes | None — link out |
 | Mod actions | Mostly invisible | Public log per sub |
-| Soft-removal community override | None | Yes — auto at per-sub threshold |
+| Community override of mod | None | Yes — auto, on cumulative votes |
 | Ads | Yes | None |
-| Tracking | Yes (extensive) | None |
-| Export | Limited, slow | One command, full archive |
-| Where data lives | Their servers | Your SQLite + markdown files |
-| What happens if the operator goes bad | You leave the platform | You fork the archive |
-
-The bet: a forum that gets these defaults right outlasts any forum that doesn't, because defaults are what determine whether discourse decays.
+| Tracking | Yes | None |
+| Export | Limited | One command, full archive |
+| Where data lives | Their servers | Plain files, your machine |
+| When the operator goes bad | You leave the platform | You fork the archive |
 
 ---
 
-## Status
-
-In active development. **M1–M4 shipped.** Magic-link auth works end-to-end. Subs, posts, hierarchical comments, vote-weighted by account age, hot/new/top/old sort. Two-tier moderation with a public log per sub. Community auto-uncollapse on cumulative votes. 245 tests, all green on every commit.
-
-**M5 next:** spam defenses (per-sub rate limits, link cap with URLhaus, regex patterns), per-sub flairs (closed-list, owner-curated), per-sub NSFW banner, "my mod decisions" mod-self-review panel.
-
-See the [build plan](docs/01-product/build-plan.md) and the [Open-web revival PRD](docs/01-product/prd-open-web-revival.md) for the full roadmap and the rationale behind every locked-in decision.
-
----
-
-## Try it locally
+## Try it
 
 ```bash
 git clone https://github.com/hamr0/plato
@@ -112,7 +114,7 @@ cd plato
 npm install
 cp .env.example .env
 
-# generate a knowless secret (zsh-safe)
+# generate a one-time secret for this instance
 SECRET=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))") \
   && sed -i '/^KNOWLESS_SECRET=$/d' .env \
   && echo "KNOWLESS_SECRET=$SECRET" >> .env
@@ -121,29 +123,19 @@ npm run migrate
 npm start
 ```
 
-Then open http://localhost:8080.
+Open http://localhost:8080 and post.
 
-Magic-link emails go through your local SMTP. For development, the easiest setup is [Mailpit](https://github.com/axllent/mailpit) on port 1025 — captures all outgoing mail in a web UI at http://localhost:8025. For production, use Postfix per the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
+For magic-link emails in development, [Mailpit](https://github.com/axllent/mailpit) on port 1025 is the easiest setup — it catches every outgoing mail and shows it in a browser. For production, follow the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 
 ---
 
 ## Documentation
 
-- [Operator Guide](docs/02-features/operator-guide.md) — for humans running, customizing, or forking a plato instance. Forkable vs tunable vs locked, day-to-day ops, moderation philosophy, FAQ.
-- [Integration Guide](docs/02-features/plato.context.md) — for AI assistants and developers wiring plato. Routes, settings, recipes, forking checklist.
-- [Forum PRD](docs/01-product/prd-forum.md) — the spec.
-- [Open-web revival PRD](docs/01-product/prd-open-web-revival.md) — design decisions and rationale for every locked-in choice.
+- [Operator Guide](docs/02-features/operator-guide.md) — running and customizing your instance.
+- [Integration Guide](docs/02-features/plato.context.md) — for developers and AI assistants wiring plato into a project.
+- [Open-web revival PRD](docs/01-product/prd-open-web-revival.md) — the spec, design decisions, and rationale for every locked-in choice.
 - [Build plan](docs/01-product/build-plan.md) — milestone roadmap.
-- [Visual reference](docs/design/) — aesthetic samples explored before locking the terminal style.
-- [Changelog](CHANGELOG.md) — what has been built.
-
-## Built on
-
-- [knowless](https://github.com/hamr0/knowless) — passwordless email auth
-- [marked](https://marked.js.org), [unique-names-generator](https://github.com/andreasonny83/unique-names-generator), [dicebear](https://www.dicebear.com)
-- Node.js stdlib: `node:http`, `node:sqlite`, `node:test`
-
-No frontend framework. No template engine. No client-side JavaScript in the v1 path.
+- [Changelog](CHANGELOG.md) — what has shipped.
 
 ## License
 
