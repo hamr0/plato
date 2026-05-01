@@ -326,6 +326,101 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
   font-weight: 600;
 }
 .mod-subs .sub-toggle-active:hover { color: var(--accent-warm); text-decoration: line-through; }
+
+/* Generalized click-to-filter toggle for mod and user labels in the
+ * /modlog audit table. Same affordance as the subs strip — click again
+ * (warm) to drop the filter. */
+.filter-toggle { color: var(--text); text-decoration: none; }
+.filter-toggle:hover { color: var(--accent); }
+.filter-toggle-active {
+  color: var(--accent-warm);
+  font-weight: 600;
+}
+.filter-toggle-active:hover { color: var(--accent-warm); text-decoration: line-through; }
+
+/* /modlog mode + filter bar buttons. Bordered pills, active = warm. */
+.modlog-modes, .modlog-filters {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.6rem 0;
+}
+.mode-btn, .filter-btn {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.mode-btn:hover, .filter-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.mode-btn-active, .filter-btn-active {
+  color: var(--accent-warm);
+  border-color: var(--accent-warm);
+  font-weight: 600;
+}
+.modlog-filters .filter-sep { color: var(--text-dim); padding: 0 0.2rem; }
+.modlog-summary { margin: 0.4rem 0; }
+.event-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-warm);
+  font-weight: 600;
+}
+
+/* /modlog open mode — vertical <details> list. The whole summary line
+ * is the click target so an expand affordance can't be missed. Layout:
+ * sub · when · user · target · pending count · chevron. Hard remove
+ * button wears `.warn` for restraint. */
+.modlog-open-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.modlog-open-row {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+}
+.modlog-open-row > summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.5rem 0.7rem;
+  list-style: none;
+}
+.modlog-open-row > summary::-webkit-details-marker { display: none; }
+.modlog-open-row > summary:hover { background: var(--bg); }
+.modlog-open-row[open] > summary {
+  color: var(--accent-warm);
+  border-bottom: 1px solid var(--border);
+}
+.modlog-open-row[open] .open-row-chevron { transform: rotate(180deg); }
+.open-row-chevron { margin-left: auto; transition: transform 0.15s ease; }
+.open-row-target { flex: 1 1 auto; }
+
+.modlog-body-wrap { margin-bottom: 0.5rem; }
+.modlog-body-excerpt {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+}
+.modlog-resolve-body {
+  padding: 0.5rem;
+  margin-top: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+}
+.modlog-resolve-form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.4rem; }
+.modlog-resolve-form input[type="text"] { width: 100%; }
+.modlog-resolve-buttons { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.modlog-resolve-buttons button { font-size: 0.78rem; padding: 0.2rem 0.6rem; }
+.modlog-resolve-buttons button.warn { color: var(--accent-warm); border-color: var(--accent-warm); }
 .flag-form {
   display: flex;
   gap: 0.4rem;

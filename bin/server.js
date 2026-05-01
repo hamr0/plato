@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db/index.js';
@@ -14,6 +15,17 @@ const BASE_URL = process.env.KNOWLESS_BASE_URL ?? `http://localhost:${PORT}`;
 const DB_PATH = process.env.DB_PATH ?? resolve(ROOT, 'forum.db');
 const POSTS_DIR = resolve(ROOT, 'posts');
 const DISPOSABLE_PATH = resolve(ROOT, 'disposable-domains.txt');
+const CONFIG_PATH = process.env.PLATO_CONFIG ?? resolve(ROOT, 'config.json');
+const SPAM_PATTERNS_PATH = process.env.PLATO_SPAM_PATTERNS ?? resolve(ROOT, 'spam-patterns.txt');
+const URLHAUS_CACHE_PATH = process.env.PLATO_URLHAUS_CACHE ?? resolve(ROOT, 'data/urlhaus.txt');
+
+// Operator config is optional. When config.json is present, parse it
+// and forward to createApp. createApp validates it against the floor
+// and throws on illegal values — bad config kills the boot rather
+// than silently weakening protections.
+const operatorConfig = existsSync(CONFIG_PATH)
+  ? JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
+  : {};
 
 const db = openDb(DB_PATH);
 const auth = createAuth(process.env, {
@@ -21,7 +33,14 @@ const auth = createAuth(process.env, {
 });
 const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
 
-const handler = createApp({ db, auth, disposableDomains, postsDir: POSTS_DIR, baseUrl: BASE_URL });
+const handler = createApp({
+  db, auth, disposableDomains,
+  postsDir: POSTS_DIR, baseUrl: BASE_URL,
+  rateLimits: operatorConfig.rateLimits ?? {},
+  spamPatternsFile: operatorConfig.spamPatternsFile ?? SPAM_PATTERNS_PATH,
+  linkCaps: operatorConfig.linkCaps ?? {},
+  urlhausCacheFile: operatorConfig.urlhausCacheFile ?? URLHAUS_CACHE_PATH,
+});
 
 const server = http.createServer(handler);
 

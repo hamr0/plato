@@ -210,6 +210,7 @@ test('logged-in user posts directly without re-doing magic link', async (t) => {
   assert.equal(res.status, 302);
   res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
   assert.equal(res.status, 302);
+  ageFreshHandles(db);
 
   // Home page now shows the form without an email input.
   res = await jarFetch(jar, baseUrl + '/');
@@ -338,6 +339,18 @@ async function loginVia(jar, baseUrl, mailer, email, { db }) {
   assert.equal(res.status, 302);
   res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
   assert.equal(res.status, 302);  // /draft/<id>/finalize → /sub/<name>
+
+  ageFreshHandles(db);
+}
+
+// Backdate every just-created handle so subsequent posts in the same
+// test don't trip the new-account rate limit (1 post/hour for <24h
+// accounts). Tests assert app flows, not spam-throttling. The
+// rateLimit module has its own focused coverage.
+function ageFreshHandles(db) {
+  const tenDaysAgo = Date.now() - 10 * 24 * 60 * 60 * 1000;
+  db.prepare('UPDATE handles SET first_seen_at = ? WHERE first_seen_at > ?')
+    .run(tenDaysAgo, tenDaysAgo);
 }
 
 test('M2: logged-in user creates a sub and posts in it', async (t) => {
@@ -874,7 +887,7 @@ test('M4: GET /sub/<name>/modlog renders the action log (public)', async (t) => 
   const res = await fetch(baseUrl + '/sub/lobby/modlog');
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.match(body, /mod log/);
+  assert.match(body, /modlog/);
   assert.match(body, /collapse/);
   assert.match(body, /pinned-test/);
 });

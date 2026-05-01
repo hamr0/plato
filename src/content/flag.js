@@ -108,12 +108,18 @@ export function resolveFlag(db, { flagId, resolverHandle, resolution, now = Date
 // Used by render to dim the flag button on visible posts/comments where
 // the current user has already submitted a flag — avoids the silent
 // double-submit-then-UNIQUE-collision flow. Returns a Set of target ids.
+//
+// Scoped to PENDING flags only: once a mod resolves (uphold or dismiss),
+// the flagger's UI shouldn't keep showing "you flagged this" — the
+// concern was registered and adjudicated. Re-flagging a still-visible
+// dismissed-then-recurring item is allowed.
 export function flaggedTargetsByHandle(db, targetType, targetIds, handle) {
   if (!handle || !targetIds || targetIds.length === 0) return new Set();
   const placeholders = targetIds.map(() => '?').join(',');
   const rows = db.prepare(
     `SELECT target_id FROM flags
      WHERE target_type = ? AND flagger_handle = ?
+       AND resolution = 'pending'
        AND target_id IN (${placeholders})`
   ).all(targetType, handle, ...targetIds);
   return new Set(rows.map((r) => r.target_id));
@@ -143,4 +149,73 @@ export function pendingFlagsForSub(db, subName) {
        ORDER BY last_flagged_at DESC`
     )
     .all(subName);
+}
+
+// Cross-sub variant for the unified /modlog open mode. Each row carries
+// the sub_name and the target's author handle so the renderer can fill
+// the user column without a second pass. Scoped to the calling mod's
+// sub set — a mod never sees pending flags from a sub they don't run.
+export function pendingFlagsAcrossSubs(db, subNames) {
+  if (!subNames || subNames.length === 0) return [];
+  const placeholders = subNames.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT
+         f.target_type,
+         f.target_id,
+         COALESCE(p.sub_name, cp.sub_name)            AS sub_name,
+         COALESCE(p.handle,   c.handle)               AS author_handle,
+         count(*)                                     AS pending,
+         max(f.created_at)                            AS last_flagged_at
+       FROM flags f
+       LEFT JOIN posts    p  ON f.target_type = 'post'    AND f.target_id = p.id
+       LEFT JOIN comments c  ON f.target_type = 'comment' AND f.target_id = c.id
+       LEFT JOIN posts    cp ON f.target_type = 'comment' AND c.post_id    = cp.id
+       WHERE f.resolution = 'pending'
+         AND COALESCE(p.sub_name, cp.sub_name) IN (${placeholders})
+       GROUP BY f.target_type, f.target_id
+       ORDER BY last_flagged_at DESC`
+    )
+    .all(...subNames);
+}
+
+// Per-target breakdown for the row-expansion view: flagger handles +
+// categories, in submission order. Batched across all visible targets
+// in one query — a busy /modlog page might render 50 pending targets,
+// and a per-row query would be N round-trips.
+export function flagBreakdownsForTargets(db, targets) {
+  if (!targets || targets.length === 0) return new Map();
+  // Build (target_type, target_id) tuple matcher via OR of pairs.
+  const conds = targets.map(() => '(target_type = ? AND target_id = ?)').join(' OR ');
+  const params = targets.flatMap((t) => [t.target_type, t.target_id]);
+  const rows = db.prepare(
+    `SELECT target_type, target_id, flagger_handle, category, note, created_at
+     FROM flags
+     WHERE resolution = 'pending' AND (${conds})
+     ORDER BY created_at ASC`
+  ).all(...params);
+  const out = new Map();
+  for (const r of rows) {
+    const key = `${r.target_type}:${r.target_id}`;
+    if (!out.has(key)) out.set(key, []);
+    out.get(key).push(r);
+  }
+  return out;
+}
+
+// Resolve every pending flag on a target in one shot. Used when a mod
+// decides on the row in /modlog open mode — the action button fires one
+// resolution that closes out all flags for that target. Returns the
+// number of flags resolved.
+export function resolveFlagsForTarget(db, { targetType, targetId, resolverHandle, resolution, now = Date.now() }) {
+  if (!['upheld', 'dismissed'].includes(resolution)) {
+    throw new Error(`resolveFlagsForTarget: resolution must be upheld|dismissed, got ${resolution}`);
+  }
+  const result = db
+    .prepare(
+      `UPDATE flags SET resolution = ?, resolver_handle = ?, resolved_at = ?
+       WHERE target_type = ? AND target_id = ? AND resolution = 'pending'`
+    )
+    .run(resolution, resolverHandle, now, targetType, targetId);
+  return result.changes;
 }

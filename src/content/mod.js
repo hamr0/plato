@@ -170,26 +170,104 @@ export function listSubsModeratedBy(db, handle) {
 
 // Cross-sub mod actions for a multi-sub mod. Includes sub_name in each row
 // so the unified modlog view can render it as the first column. Pagination
-// is required because a busy mod can rack up hundreds of actions; 25/page
-// is the operator-ergonomic default surfaced in the UI.
-export function listModActionsAcrossSubs(db, subNames, { limit = 25, offset = 0 } = {}) {
-  if (!subNames || subNames.length === 0) return [];
+// is required because a busy mod can rack up hundreds of actions.
+//
+// Filters (all optional, used by the unified /modlog audit view):
+//   since         — unix-ms; rows with created_at > since
+//   actions       — array of action enum values to include (e.g. ['ban','unban'])
+//   modHandle     — exact mod_handle match; pass the literal string 'system'
+//                   to match NULL rows (auto events)
+//   targetHandle  — match rows where target_type='handle' AND target_id=<handle>;
+//                   used by the user-click-to-filter on ban rows
+function buildAuditClause(subNames, { since, actions, modHandle, targetHandle } = {}) {
   const placeholders = subNames.map(() => '?').join(',');
+  const where = [`sub_name IN (${placeholders})`];
+  const params = [...subNames];
+  if (Number.isFinite(since)) {
+    where.push('created_at > ?');
+    params.push(since);
+  }
+  if (Array.isArray(actions) && actions.length > 0) {
+    where.push(`action IN (${actions.map(() => '?').join(',')})`);
+    params.push(...actions);
+  }
+  if (modHandle === 'system') {
+    where.push('mod_handle IS NULL');
+  } else if (typeof modHandle === 'string' && modHandle.length > 0) {
+    where.push('mod_handle = ?');
+    params.push(modHandle);
+  }
+  if (typeof targetHandle === 'string' && targetHandle.length > 0) {
+    // Match across all target types: ban rows (target_id IS the handle)
+    // plus post/comment rows whose author is this handle. Subqueries over
+    // posts.handle / comments.handle let the audit table's user column be
+    // a real filter for content as well as bans.
+    where.push(`(
+      (target_type = 'handle' AND target_id = ?)
+      OR (target_type = 'post' AND target_id IN (SELECT id FROM posts WHERE handle = ?))
+      OR (target_type = 'comment' AND target_id IN (SELECT id FROM comments WHERE handle = ?))
+    )`);
+    params.push(targetHandle, targetHandle, targetHandle);
+  }
+  return { where: where.join(' AND '), params };
+}
+
+export function listModActionsAcrossSubs(db, subNames, { limit = 25, offset = 0, ...filters } = {}) {
+  if (!subNames || subNames.length === 0) return [];
+  const { where, params } = buildAuditClause(subNames, filters);
   return db.prepare(
     `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at
      FROM mod_actions
-     WHERE sub_name IN (${placeholders})
+     WHERE ${where}
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`
-  ).all(...subNames, limit, offset);
+  ).all(...params, limit, offset);
 }
 
-export function countModActionsAcrossSubs(db, subNames) {
+export function countModActionsAcrossSubs(db, subNames, filters = {}) {
   if (!subNames || subNames.length === 0) return 0;
-  const placeholders = subNames.map(() => '?').join(',');
+  const { where, params } = buildAuditClause(subNames, filters);
   return db.prepare(
-    `SELECT COUNT(*) AS n FROM mod_actions WHERE sub_name IN (${placeholders})`
-  ).get(...subNames).n;
+    `SELECT COUNT(*) AS n FROM mod_actions WHERE ${where}`
+  ).get(...params).n;
+}
+
+// Inbox mode: deduped target view. One row per (target_type, target_id)
+// after the same filters as audit. The row carries the latest event's
+// fields plus event_count so the renderer can show a "[banned] · 4
+// events" badge that surfaces mod ping-pong patterns at a glance.
+//
+// Dedup happens AFTER filtering — `?type=banned` collapses to "the
+// latest ban-or-unban per user" rather than "the latest anything per
+// user, then filter for bans" (which would lose users whose latest
+// event was a remove). See M5 spec discussion.
+export function listInboxAcrossSubs(db, subNames, { limit = 50, offset = 0, ...filters } = {}) {
+  if (!subNames || subNames.length === 0) return [];
+  const { where, params } = buildAuditClause(subNames, filters);
+  return db.prepare(
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, event_count
+     FROM (
+       SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at,
+              ROW_NUMBER() OVER (PARTITION BY target_type, target_id ORDER BY created_at DESC) AS rn,
+              COUNT(*)     OVER (PARTITION BY target_type, target_id)                         AS event_count
+       FROM mod_actions
+       WHERE ${where}
+     )
+     WHERE rn = 1
+     ORDER BY created_at DESC
+     LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
+}
+
+export function countInboxAcrossSubs(db, subNames, filters = {}) {
+  if (!subNames || subNames.length === 0) return 0;
+  const { where, params } = buildAuditClause(subNames, filters);
+  return db.prepare(
+    `SELECT COUNT(*) AS n FROM (
+       SELECT 1 FROM mod_actions WHERE ${where}
+       GROUP BY target_type, target_id
+     )`
+  ).get(...params).n;
 }
 
 export function isBanned(db, subName, handle) {

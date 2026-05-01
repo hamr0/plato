@@ -28,11 +28,19 @@ import { castVote, getVote } from '../content/vote.js';
 import {
   canModerate, recordAction, listModActions, MOD_ACTIONS,
   listSubsModeratedBy, listModActionsAcrossSubs, countModActionsAcrossSubs,
+  listInboxAcrossSubs, countInboxAcrossSubs,
   isBanned,
 } from '../content/mod.js';
-import { submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle } from '../content/flag.js';
+import {
+  submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle,
+  pendingFlagsAcrossSubs, flagBreakdownsForTargets, resolveFlagsForTarget,
+} from '../content/flag.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
+import { checkPostRate, checkPostRatePerSub, checkCommentRate, resolveRateLimitConfig } from '../content/rateLimit.js';
+import { loadSpamPatterns, matchSpamPatterns, applySpamMatches } from '../content/spamPatterns.js';
+import { checkLinkCap, resolveLinkCapConfig } from '../content/linkCap.js';
+import { loadUrlhausCache, matchUrlhaus, applyUrlhausMatches } from '../content/urlhaus.js';
 
 const HANDLE_RE = /^[0-9a-f]{1,128}$/;
 
@@ -85,6 +93,21 @@ function siteFooter() {
     <a href="/" class="logo-home">${logoMark({ size: 22 })}<span class="wordmark">plato</span></a>
     <span class="quote muted">— "${PLATO_TAGLINE}"</span>
   </footer>`;
+}
+
+// Error pages should keep the user oriented — the top siteHeader (logo,
+// nav, sub strip) plus the bottom siteFooter (logo + tagline) sandwich
+// every error message so the user can always click home or pick a sub.
+// Pass `links` to surface specific recovery actions (e.g. "try again").
+function errorPage(req, { db, auth }, { title, message, links }) {
+  const currentHandle = auth?.handleFromRequest(req);
+  return layout(title, html`
+    ${siteHeader({ db, currentHandle })}
+    <p><a href="/">← home</a></p>
+    <h2>// ${title}</h2>
+    <p class="muted">${message}</p>
+    ${links ?? html``}
+  `);
 }
 
 function relativeTime(ms) {
@@ -177,10 +200,20 @@ function anonHintFor(currentHandle) {
 }
 
 function siteHeader({ db, currentHandle, title, subtitle }) {
+  // The site-wide default header: logo + "plato" wordmark + the tagline-
+  // subtitle "a forum that lives at one URL". Pages that want their own
+  // identity (per-sub feed) pass `title` and optionally `subtitle`. When
+  // a page passes neither, it gets the home default — every error or
+  // listing page reads the same so the user is always sure where they
+  // are in the app.
+  const effectiveTitle = title ?? html`plato`;
+  const effectiveSubtitle = title === undefined && subtitle === undefined
+    ? 'a forum that lives at one URL'
+    : subtitle;
   return html`<header class="site">
     <div class="brand">
-      <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${title ?? html`plato`}</a></h1>
-      ${subtitle ? html`<div class="nav muted">${subtitle}</div>` : html``}
+      <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${effectiveTitle}</a></h1>
+      ${effectiveSubtitle ? html`<div class="nav muted">${effectiveSubtitle}</div>` : html``}
     </div>
     ${loginStatusFor(db, currentHandle)}
   </header>`;
@@ -442,7 +475,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
         title: html`/sub/${subName}`,
         subtitle: sub.description || null,
       })}
-      <p><a href="/">← home</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a></p>
       ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
@@ -493,7 +526,9 @@ function renderSubCreate(req, res, { auth }) {
 async function handleSubCreate(req, res, { db, auth }) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
-    return send(res, 401, layout('login required', html`<p class="muted">login first.</p>`));
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in first to create a sub.',
+    }));
   }
   const body = await readBody(req);
   const form = parseForm(body);
@@ -501,14 +536,13 @@ async function handleSubCreate(req, res, { db, auth }) {
   const autoUncollapsePost = Number.parseInt(form.autoUncollapsePost ?? '50', 10);
   const autoUncollapseComment = Number.parseInt(form.autoUncollapseComment ?? '20', 10);
 
+  const tryAgain = html`<p><a href="/sub/create">← try again</a></p>`;
   try {
     validateSubName(name);
   } catch (err) {
-    return send(
-      res,
-      400,
-      layout('invalid name', html`<p class="muted">${err.message} <a href="/sub/create">try again</a></p>`)
-    );
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'invalid name', message: err.message, links: tryAgain,
+    }));
   }
 
   try {
@@ -520,17 +554,15 @@ async function handleSubCreate(req, res, { db, auth }) {
       autoUncollapseComment,
     });
   } catch (err) {
-    return send(
-      res,
-      400,
-      layout('create failed', html`<p class="muted">${err.message} <a href="/sub/create">try again</a></p>`)
-    );
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'create failed', message: err.message, links: tryAgain,
+    }));
   }
 
   redirect(res, `/sub/${name}`);
 }
 
-async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir }) {
+async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
@@ -571,9 +603,42 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   }
 
   if (currentHandle) {
+    const linkBlock = checkLinkCap(db, currentHandle, `${title}\n${postBody}`, Date.now(), linkCapConfig);
+    if (linkBlock) {
+      return send(res, 400, errorPage(req, { db, auth }, {
+        title: 'too many links', message: linkBlock.message,
+        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+      }));
+    }
+    const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig);
+    if (rateBlock) {
+      return send(res, 429, errorPage(req, { db, auth }, {
+        title: 'rate limited', message: rateBlock.message,
+        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+      }));
+    }
+    const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
+    if (subBlock) {
+      return send(res, 429, errorPage(req, { db, auth }, {
+        title: 'rate limited', message: subBlock.message,
+        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+      }));
+    }
     try {
       const { draftId } = submitDraft(db, { title, body: postBody, subName });
-      const { subName: published } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
+      const { subName: published, postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
+      // Spam regex check post-publish: match against title + body and,
+      // if any pattern hits, auto-collapse + flag for mod review. The
+      // post still exists; the author sees the collapsed state when
+      // they revisit the sub.
+      const matched = matchSpamPatterns(`${title}\n${postBody}`, spamPatterns);
+      if (matched.length > 0) {
+        applySpamMatches(db, { targetType: 'post', targetId: postId, matched });
+      }
+      const matchedHosts = matchUrlhaus(`${title}\n${postBody}`, urlhausHosts);
+      if (matchedHosts.length > 0) {
+        applyUrlhausMatches(db, { targetType: 'post', targetId: postId, matchedHosts });
+      }
       return redirect(res, `/sub/${published}`);
     } catch (err) {
       // Most common case: ban check in finalizeDraft. Render a friendly
@@ -626,7 +691,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   );
 }
 
-function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
+function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, draftId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
     return send(
@@ -639,20 +704,77 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
     );
   }
 
+  // Rate-limit the publish step, not draft creation. New accounts
+  // confirming their email shouldn't be silently swallowed by the
+  // limiter. The 429 surfaces a clear message + the home link.
+  const rateBlock = checkPostRate(db, handle, Date.now(), rateLimitConfig);
+  if (rateBlock) {
+    return send(res, 429, errorPage(req, { db, auth }, {
+      title: 'rate limited', message: rateBlock.message,
+    }));
+  }
+  // Per-sub topic-flood limit. Look up the draft's target sub before
+  // finalizing so we can reject before the file write.
+  const draftRow = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
+  if (draftRow) {
+    const subBlock = checkPostRatePerSub(db, handle, draftRow.sub_name, Date.now(), rateLimitConfig);
+    if (subBlock) {
+      return send(res, 429, errorPage(req, { db, auth }, {
+        title: 'rate limited', message: subBlock.message,
+        links: html`<p><a href="/sub/${draftRow.sub_name}">← back to /sub/${draftRow.sub_name}</a></p>`,
+      }));
+    }
+  }
+
+  // Link-cap gate. Pull the draft's title+body once and check against
+  // the handle's tier. Reject with a clear count + cap before writing
+  // anything; the user can edit the draft via a fresh /draft submit.
+  const draftFull = db.prepare('SELECT title, body, sub_name FROM drafts WHERE id = ?').get(draftId);
+  if (draftFull) {
+    const linkBlock = checkLinkCap(db, handle, `${draftFull.title}\n${draftFull.body}`, Date.now(), linkCapConfig);
+    if (linkBlock) {
+      return send(res, 400, errorPage(req, { db, auth }, {
+        title: 'too many links', message: linkBlock.message,
+        links: html`<p><a href="/sub/${draftFull.sub_name}">← back to /sub/${draftFull.sub_name}</a></p>`,
+      }));
+    }
+  }
+
   let result;
   try {
     result = finalizeDraft(db, { draftId, handle, postsDir });
   } catch (err) {
     if (/draft .* not found/.test(err.message)) {
-      return send(res, 404, layout('not found', html`<p class="muted">draft expired or not found.</p>`));
+      return send(res, 404, errorPage(req, { db, auth }, {
+        title: 'not found', message: 'draft expired or not found.',
+      }));
     }
     // Bans applied between draft submission and magic-link click also
     // surface here. Render the message; don't crash the process.
-    return send(
-      res,
-      400,
-      layout('post failed', html`<p class="muted">${err.message} <a href="/">home</a></p>`)
-    );
+    // Extract the sub name from a "banned from <sub>" error to surface
+    // a "back to /sub/<name>" recovery link.
+    const banMatch = /banned from ([a-z0-9-]+)/.exec(err.message);
+    const links = banMatch
+      ? html`<p><a href="/sub/${banMatch[1]}">← back to /sub/${banMatch[1]}</a></p>`
+      : html``;
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'post failed', message: err.message, links,
+    }));
+  }
+
+  // Spam regex + URLhaus checks post-publish. The draft body lives in
+  // the drafts table until finalize; pull it back to feed both matchers.
+  const draftBody = db.prepare('SELECT title, body FROM drafts WHERE id = ?').get(draftId);
+  if (draftBody) {
+    const text = `${draftBody.title}\n${draftBody.body}`;
+    const matched = matchSpamPatterns(text, spamPatterns);
+    if (matched.length > 0) {
+      applySpamMatches(db, { targetType: 'post', targetId: result.postId, matched });
+    }
+    const matchedHosts = matchUrlhaus(text, urlhausHosts);
+    if (matchedHosts.length > 0) {
+      applyUrlhausMatches(db, { targetType: 'post', targetId: result.postId, matchedHosts });
+    }
   }
 
   redirect(res, `/sub/${result.subName}`);
@@ -834,7 +956,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     res,
     200,
     layout(post.title, html`
-      ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
+      ${siteHeader({ db, currentHandle })}
       <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
@@ -877,7 +999,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
   );
 }
 
-async function handleAddComment(req, res, { db, auth }, subName, postId) {
+async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, subName, postId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
     return send(res, 401, layout('login required', html`<p class="muted">log in to comment.</p>`));
@@ -886,14 +1008,36 @@ async function handleAddComment(req, res, { db, auth }, subName, postId) {
   const form = parseForm(body);
   const { body: commentBody, parent_id: parentId } = form;
   if (!commentBody || commentBody.trim().length === 0) {
-    return send(res, 400, layout('empty', html`<p class="muted">comment body required.</p>`));
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'empty', message: 'comment body required.',
+    }));
+  }
+  const rateBlock = checkCommentRate(db, handle, Date.now(), rateLimitConfig);
+  if (rateBlock) {
+    if (wantsJson(req)) return sendJson(res, 429, { error: rateBlock.message });
+    return send(res, 429, errorPage(req, { db, auth }, {
+      title: 'rate limited', message: rateBlock.message,
+      links: html`<p><a href="/sub/${subName}/post/${postId}">← back to the post</a></p>`,
+    }));
   }
   let result;
   try {
     result = addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
   } catch (err) {
     if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
-    return send(res, 400, layout('comment failed', html`<p class="muted">${err.message}</p>`));
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'comment failed', message: err.message,
+      links: html`<p><a href="/sub/${subName}/post/${postId}">← back to the post</a></p>`,
+    }));
+  }
+  // Spam regex + URLhaus checks post-publish. Comments have body only.
+  const matched = matchSpamPatterns(commentBody, spamPatterns);
+  if (matched.length > 0) {
+    applySpamMatches(db, { targetType: 'comment', targetId: result.commentId, matched });
+  }
+  const matchedHosts = matchUrlhaus(commentBody, urlhausHosts);
+  if (matchedHosts.length > 0) {
+    applyUrlhausMatches(db, { targetType: 'comment', targetId: result.commentId, matchedHosts });
   }
   // JSON branch: client-side comment.js inserts the rendered fragment
   // in-place so the page doesn't reload. Loading-dots wave shows during
@@ -1125,57 +1269,148 @@ async function handleFlag(req, res, { db, auth }) {
 async function handleModAction(req, res, { db, auth }, subName) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to moderate.</p>`));
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to moderate.',
+    }));
   }
   const body = await readBody(req);
   const form = parseForm(body);
   const { action, target_type: targetType, target_id: targetId, reason, return_to: returnTo } = form;
   if (!MOD_ACTIONS.includes(action)) {
-    return send(res, 400, layout('bad action', html`<p class="muted">unknown mod action.</p>`));
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'bad action', message: 'unknown mod action.',
+    }));
   }
   const trimmedReason = reason && reason.trim().length > 0 ? reason.trim() : null;
   // Hard removal (the destructive direction) requires a written reason —
   // self-discipline gate per "every mod action is auditable" + reason
   // captures intent for the modlog so future reviewers can judge it.
   if (action === 'remove' && !trimmedReason) {
-    return send(res, 400, layout('reason required', html`<p class="muted">hard removal requires a reason.</p>`));
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'reason required', message: 'hard removal requires a reason.',
+    }));
   }
   try {
     recordAction(db, {
       subName, modHandle: handle, action, targetType, targetId, reason: trimmedReason,
     });
   } catch (err) {
-    return send(res, 400, layout('mod failed', html`<p class="muted">${err.message}</p>`));
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'mod failed', message: err.message,
+    }));
   }
   const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : `/sub/${subName}`;
   redirect(res, safeReturn);
 }
 
-function renderModLog(req, res, { db, auth }, subName) {
+// Resolve every pending flag on a target plus (when upholding) record
+// the corresponding mod_action. One transaction so a pending flag set
+// can never be partly resolved on a server crash. Mod must moderate the
+// sub the target lives in — otherwise this is rejected as a 403, even
+// if a crafted form names a sub the caller doesn't run.
+async function handleModlogResolve(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to moderate.',
+    }));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { target_type: targetType, target_id: targetId, sub_name: subName, decision, reason, return_to: returnTo } = form;
+  const backToModlog = html`<p><a href="/modlog">← back to /modlog</a></p>`;
+  if (!['post', 'comment'].includes(targetType)) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'bad target', message: 'invalid target.', links: backToModlog,
+    }));
+  }
+  if (!['uphold-soft', 'uphold-hard', 'dismiss'].includes(decision)) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'bad decision', message: 'unknown decision.', links: backToModlog,
+    }));
+  }
+  if (!canModerate(db, subName, handle)) {
+    return send(res, 403, errorPage(req, { db, auth }, {
+      title: 'not a mod', message: "you don't moderate this sub.", links: backToModlog,
+    }));
+  }
+  const trimmedReason = reason && reason.trim().length > 0 ? reason.trim() : null;
+  if (decision === 'uphold-hard' && !trimmedReason) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'reason required', message: 'hard removal requires a reason.', links: backToModlog,
+    }));
+  }
+  // recordAction wraps each call in its own BEGIN/COMMIT (see mod.js),
+  // and SQLite has no nested transactions, so we sequence the two
+  // operations rather than wrap them. If resolveFlagsForTarget throws
+  // after recordAction succeeded, the mod_action persists with flags
+  // still pending — visible to the mod, recoverable by re-clicking.
+  try {
+    if (decision === 'uphold-soft') {
+      recordAction(db, { subName, modHandle: handle, action: 'collapse', targetType, targetId, reason: trimmedReason });
+      resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'upheld' });
+    } else if (decision === 'uphold-hard') {
+      recordAction(db, { subName, modHandle: handle, action: 'remove', targetType, targetId, reason: trimmedReason });
+      resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'upheld' });
+    } else {
+      // dismiss: close out flags + uncollapse if the auto-hide threshold
+      // had hidden the target (collapsed_at non-null with no mod
+      // collapse on record). recordAction emits an 'uncollapse' so the
+      // public modlog reflects the override.
+      const table = targetType === 'post' ? 'posts' : 'comments';
+      const target = db.prepare(`SELECT collapsed_at FROM ${table} WHERE id = ?`).get(targetId);
+      resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'dismissed' });
+      if (target && target.collapsed_at != null) {
+        recordAction(db, { subName, modHandle: handle, action: 'uncollapse', targetType, targetId, reason: trimmedReason });
+      }
+    }
+  } catch (err) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'resolve failed', message: err.message,
+      links: html`<p><a href="/modlog">← back to /modlog</a></p>`,
+    }));
+  }
+  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/modlog';
+  redirect(res, safeReturn);
+}
+
+// Public per-sub modlog. Audit-only (the trust surface). Same table shape
+// as the mod-only /modlog audit view so a viewer's mental model is one
+// table, not two — minus the mode/sub/date/type bar (this is locked to
+// one sub, audit, all-time) and minus pending data (queries `mod_actions`
+// only, which is upheld actions; pending flags live in the `flags` table
+// and never reach this surface).
+function renderModLog(req, res, { db, auth }, subName, searchParams) {
   const sub = getSubByName(db, subName);
   if (!sub) {
     return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
   }
   const currentHandle = auth.handleFromRequest(req);
-  const actions = listModActions(db, subName, { limit: 100 });
-  const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
-  const pseudonyms = pseudonymsByHandle(db, handles);
-
-  // Resolve target → permalink so each row links back to the affected
-  // content. Posts: direct. Comments: one hop through `comments` to find
-  // the parent post then anchor to the comment id. Handle bans: no link
-  // (the target is a user, not a piece of content). Posts/comments that
-  // were hard-removed still link — the stub still occupies its slot in
-  // the tree per PRD §Moderation Tier 2.
-  const commentIds = actions.filter((a) => a.target_type === 'comment').map((a) => a.target_id);
-  const commentToPost = new Map();
-  if (commentIds.length > 0) {
-    const placeholders = commentIds.map(() => '?').join(',');
-    const rows = db.prepare(
-      `SELECT id, post_id FROM comments WHERE id IN (${placeholders})`
-    ).all(...commentIds);
-    for (const r of rows) commentToPost.set(r.id, r.post_id);
-  }
+  const modParam = searchParams?.get('mod') ?? null;
+  const userParam = searchParams?.get('user') ?? null;
+  const dateParam = searchParams?.get('date') === '24h' ? '24h' : 'all';
+  const rawType = searchParams?.get('type');
+  const typeParam = ['flagged', 'banned', 'removed'].includes(rawType) ? rawType : 'all';
+  const since = dateParam === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : undefined;
+  const actionFilter = MODLOG_TYPES[typeParam] ?? undefined;
+  const actions = listModActionsAcrossSubs(db, [subName], {
+    limit: 100,
+    since,
+    actions: actionFilter,
+    modHandle: modParam ?? undefined,
+    targetHandle: userParam ?? undefined,
+  });
+  const { commentToPost, targetAuthor } = batchTargetLookups(db, actions);
+  const modHandles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
+  const userHandles = [...new Set([
+    ...actions.filter((a) => a.target_type === 'handle').map((a) => a.target_id),
+    ...targetAuthor.values(),
+  ])];
+  // Include filter param handles too so the active-summary line can
+  // resolve the pseudonym even when the filter narrows results to zero.
+  if (modParam && modParam !== 'system') modHandles.push(modParam);
+  if (userParam) userHandles.push(userParam);
+  const pseudonyms = pseudonymsByHandle(db, [...modHandles, ...userHandles]);
   const targetCell = (a) => {
     if (a.target_type === 'post') {
       return html`<a href="/sub/${subName}/post/${a.target_id}">post ${a.target_id.slice(0, 12)}</a>`;
@@ -1186,17 +1421,82 @@ function renderModLog(req, res, { db, auth }, subName) {
         ? html`<a href="/sub/${subName}/post/${postId}#comment-${a.target_id}">comment ${a.target_id.slice(0, 12)}</a>`
         : html`<span class="muted">comment ${a.target_id.slice(0, 12)}</span>`;
     }
-    // 'handle' (ban target) or anything else: no link.
+    if (a.target_type === 'handle') {
+      return html`<span class="muted">${pseudonyms.get(a.target_id) ?? a.target_id.slice(0, 8)}</span>`;
+    }
     return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
   };
 
+  const subModlogHref = (overrides) => {
+    const params = new URLSearchParams();
+    const merged = {
+      mod: modParam,
+      user: userParam,
+      date: dateParam === '24h' ? '24h' : null,
+      type: typeParam !== 'all' ? typeParam : null,
+      ...overrides,
+    };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v == null || v === '' || v === false) continue;
+      params.set(k, String(v));
+    }
+    const qs = params.toString();
+    return qs ? `/sub/${subName}/modlog?${qs}` : `/sub/${subName}/modlog`;
+  };
+  const filterToggle = (key, value, label, currentValue) => {
+    const isActive = currentValue === value;
+    const next = isActive ? { [key]: null } : { [key]: value };
+    const cls = isActive ? 'filter-toggle filter-toggle-active' : 'filter-toggle';
+    return html`<a class="${cls}" href="${subModlogHref(next)}">${label}</a>`;
+  };
+  const modCell = (a) => {
+    if (a.mod_handle == null) {
+      return filterToggle('mod', 'system', html`<em>system</em>`, modParam);
+    }
+    const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
+    return filterToggle('mod', a.mod_handle, label, modParam);
+  };
+  const userCell = (a) => {
+    const handle = a.target_type === 'handle' ? a.target_id : targetAuthor.get(a.target_id);
+    if (!handle) return html`<span class="muted">—</span>`;
+    const label = pseudonyms.get(handle) ?? handle.slice(0, 8);
+    return filterToggle('user', handle, label, userParam);
+  };
+
+  const dateBtn = (val, label) => {
+    const isActive = dateParam === val;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${subModlogHref({ date: val === 'all' ? null : val })}">${label}</a>`;
+  };
+  const typeBtn = (val, label) => {
+    const isActive = typeParam === val;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${subModlogHref({ type: val === 'all' ? null : val })}">${label}</a>`;
+  };
+  const filterBar = html`<p class="modlog-filters muted">
+    ${dateBtn('24h', 'new (24h)')} ${dateBtn('all', 'all-time')}
+    <span class="filter-sep">·</span>
+    ${typeBtn('flagged', 'flagged')} ${typeBtn('banned', 'banned')} ${typeBtn('removed', 'removed')} ${typeBtn('all', 'all')}
+  </p>`;
+
+  const summaryParts = [];
+  if (modParam === 'system') summaryParts.push('mod=system');
+  else if (modParam) summaryParts.push(`mod=${pseudonyms.get(modParam) ?? modParam.slice(0, 8)}`);
+  if (userParam) summaryParts.push(`user=${pseudonyms.get(userParam) ?? userParam.slice(0, 8)}`);
+  if (dateParam === '24h') summaryParts.push('last 24h');
+  if (typeParam !== 'all') summaryParts.push(`type=${typeParam}`);
+  const summary = summaryParts.length === 0
+    ? html``
+    : html`<p class="muted modlog-summary">showing: ${summaryParts.join(', ')} · <a href="/sub/${subName}/modlog">clear all</a></p>`;
+
   const rowsView = actions.length === 0
-    ? html`<p class="muted">no mod actions yet.</p>`
+    ? html`<p class="muted">no mod actions match.</p>`
     : html`<table class="modlog">
-        <thead><tr><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
+        <thead><tr><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
           <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
+          <td>${modCell(a)}</td>
+          <td>${userCell(a)}</td>
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
@@ -1204,52 +1504,146 @@ function renderModLog(req, res, { db, auth }, subName) {
       </table>`;
 
   send(res, 200, layout(`/sub/${subName}/modlog`, html`
-    ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
-    <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a> · modlog</p>
-    <h2>// mod log</h2>
+    ${siteHeader({ db, currentHandle })}
+    <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a> · //modlog</p>
+    <h2>// modlog</h2>
     <p class="muted">every moderator action in this sub. public.</p>
+    ${filterBar}
+    ${summary}
     ${rowsView}
   `));
 }
 
-// Cross-sub modlog for the current user's mod-of subs. Mods of multiple
-// subs get one paginated, sortable view rather than N separate per-sub
-// pages. Sub name is the first column so a multi-sub mod can filter by
-// eye. 25 rows per page.
-const MODLOG_PAGE_SIZE = 25;
+// Cross-sub modlog for the current user's mod-of subs. M5 unifies this
+// surface into three modes (open / inbox / audit) — see
+// docs/01-product/m5-mod-surface-spec.md. This file currently lands the
+// dispatcher + audit mode (steps 1+2 of the spec's implementation order).
+// Open and inbox stub out until steps 3+4. 50 rows per page (up from 25
+// because pending-flag volume will arrive with open mode).
+const MODLOG_PAGE_SIZE = 50;
 
-function renderMyModLog(req, res, { db, auth }, page, subFilter) {
+const MODLOG_MODES = ['open', 'inbox', 'audit'];
+const MODLOG_TYPES = {
+  // Mapping from type-filter chip to the action enum subset it shows in
+  // audit mode. 'flagged' has no clean SQL mapping until flag→action
+  // linkage is added in step 4 (open mode); for now it is a no-op in
+  // audit so the chip is still present in the UI but doesn't constrain.
+  banned:  ['ban', 'unban'],
+  removed: ['collapse', 'uncollapse', 'remove', 'unremove'],
+};
+
+function parseModlogFilters(searchParams, modSubs) {
+  const raw = (k) => searchParams.get(k) ?? null;
+  const mode = MODLOG_MODES.includes(raw('mode')) ? raw('mode') : 'audit';
+  const date = raw('date') === '24h' ? '24h' : 'all';
+  const type = ['flagged', 'banned', 'removed'].includes(raw('type')) ? raw('type') : 'all';
+  const subParam = raw('sub');
+  const sub = subParam && modSubs.includes(subParam) ? subParam : null;
+  // mod=me is resolved by the caller (needs currentHandle); pass through.
+  const mod = raw('mod');
+  const user = raw('user');
+  const page = Math.max(1, Number.parseInt(raw('page') ?? '1', 10) || 1);
+  return { mode, date, type, sub, mod, user, page };
+}
+
+// Batched lookup helper for modlog rows. Comments resolve to their
+// parent post (so the comment cell can be a permalink) and every
+// post/comment row resolves to its author (so the user column reads
+// naturally for soft/hard removals, not just bans).
+function batchTargetLookups(db, actions) {
+  const commentToPost = new Map();
+  const targetAuthor = new Map();
+  const postIds = [...new Set(actions.filter((a) => a.target_type === 'post').map((a) => a.target_id))];
+  const commentIds = [...new Set(actions.filter((a) => a.target_type === 'comment').map((a) => a.target_id))];
+  if (postIds.length > 0) {
+    const ph = postIds.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, handle FROM posts WHERE id IN (${ph})`).all(...postIds)) {
+      targetAuthor.set(r.id, r.handle);
+    }
+  }
+  if (commentIds.length > 0) {
+    const ph = commentIds.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, post_id, handle FROM comments WHERE id IN (${ph})`).all(...commentIds)) {
+      commentToPost.set(r.id, r.post_id);
+      targetAuthor.set(r.id, r.handle);
+    }
+  }
+  return { commentToPost, targetAuthor };
+}
+
+function modlogHref(overrides) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v == null || v === '' || v === false) continue;
+    params.set(k, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `/modlog?${qs}` : '/modlog';
+}
+
+function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
     return send(res, 401, layout('login required', html`<p class="muted">log in to view your mod log.</p>`));
   }
-  const subNames = listSubsModeratedBy(db, currentHandle);
-  if (subNames.length === 0) {
+  const modSubs = listSubsModeratedBy(db, currentHandle);
+  if (modSubs.length === 0) {
     return send(res, 403, layout('not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
   }
-  // Filter toggle: ?sub=<name> narrows the view to one sub. Validated
-  // against the current user's mod-of set so a crafted ?sub=other-sub
-  // can't reveal actions outside their visibility.
-  const activeSub = subFilter && subNames.includes(subFilter) ? subFilter : null;
-  const scopedSubNames = activeSub ? [activeSub] : subNames;
-  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
-  const offset = (safePage - 1) * MODLOG_PAGE_SIZE;
-  const total = countModActionsAcrossSubs(db, scopedSubNames);
-  const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
-  const actions = listModActionsAcrossSubs(db, scopedSubNames, { limit: MODLOG_PAGE_SIZE, offset });
-  const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
-  const pseudonyms = pseudonymsByHandle(db, handles);
-
-  // Comment → post lookup batched once across all rows.
-  const commentIds = actions.filter((a) => a.target_type === 'comment').map((a) => a.target_id);
-  const commentToPost = new Map();
-  if (commentIds.length > 0) {
-    const placeholders = commentIds.map(() => '?').join(',');
-    const rows = db.prepare(
-      `SELECT id, post_id FROM comments WHERE id IN (${placeholders})`
-    ).all(...commentIds);
-    for (const r of rows) commentToPost.set(r.id, r.post_id);
+  const filters = parseModlogFilters(searchParams, modSubs);
+  // Default-mode landing: open if anything is pending, else audit. Spec
+  // calls for inbox as the empty-pending fallback, but inbox is also
+  // empty when there are no events at all — audit gives "your prior
+  // actions" which is the more useful empty state. Only applied when
+  // the URL has no explicit ?mode= (so a clicked tab still wins).
+  if (!searchParams?.get('mode')) {
+    const pendingTotal = pendingFlagsAcrossSubs(db, modSubs).length;
+    if (pendingTotal > 0) filters.mode = 'open';
   }
+  // ?mod=me → resolve to current handle so the URL stays stable across
+  // sessions (the link a mod bookmarks won't break for a different mod).
+  const modHandle = filters.mod === 'me' ? currentHandle : filters.mod;
+  const scopedSubs = filters.sub ? [filters.sub] : modSubs;
+
+  if (filters.mode === 'open') {
+    return renderModlogOpen(res, {
+      currentHandle, db, postsDir, modSubs, scopedSubs, filters,
+    });
+  }
+  if (filters.mode === 'inbox') {
+    return renderModlogInbox(res, {
+      currentHandle, db, modSubs, scopedSubs, filters, modHandle,
+    });
+  }
+  return renderModlogAudit(res, {
+    currentHandle, db, modSubs, scopedSubs, filters, modHandle,
+  });
+}
+
+function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filters, modHandle }) {
+  const since = filters.date === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : null;
+  const actionFilter = MODLOG_TYPES[filters.type] ?? null;
+  const queryOpts = {
+    since: since ?? undefined,
+    actions: actionFilter ?? undefined,
+    modHandle: modHandle ?? undefined,
+    targetHandle: filters.user ?? undefined,
+  };
+
+  const offset = (filters.page - 1) * MODLOG_PAGE_SIZE;
+  const total = countModActionsAcrossSubs(db, scopedSubs, queryOpts);
+  const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
+  const actions = listModActionsAcrossSubs(db, scopedSubs, {
+    ...queryOpts, limit: MODLOG_PAGE_SIZE, offset,
+  });
+
+  const { commentToPost, targetAuthor } = batchTargetLookups(db, actions);
+  const modHandles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
+  const userHandles = [...new Set([
+    ...actions.filter((a) => a.target_type === 'handle').map((a) => a.target_id),
+    ...targetAuthor.values(),
+  ])];
+  const pseudonyms = pseudonymsByHandle(db, [...modHandles, ...userHandles]);
   const targetCell = (a) => {
     if (a.target_type === 'post') {
       return html`<a href="/sub/${a.sub_name}/post/${a.target_id}">post ${a.target_id.slice(0, 12)}</a>`;
@@ -1260,33 +1654,57 @@ function renderMyModLog(req, res, { db, auth }, page, subFilter) {
         ? html`<a href="/sub/${a.sub_name}/post/${postId}#comment-${a.target_id}">comment ${a.target_id.slice(0, 12)}</a>`
         : html`<span class="muted">comment ${a.target_id.slice(0, 12)}</span>`;
     }
+    if (a.target_type === 'handle') {
+      // Ban target: render the user pseudonym as the target so the
+      // 'target' column reads naturally for ban rows.
+      return html`<span class="muted">${pseudonyms.get(a.target_id) ?? a.target_id.slice(0, 8)}</span>`;
+    }
     return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
   };
 
-  // Build pager links that preserve the sub filter.
-  const pageHref = (n) => {
-    const params = new URLSearchParams();
-    if (n > 1) params.set('page', String(n));
-    if (activeSub) params.set('sub', activeSub);
-    const qs = params.toString();
-    return qs ? `/modlog?${qs}` : '/modlog';
+  // Click-to-filter toggle for mod / user columns. The label is the
+  // affordance — clicking it the second time (when warm) drops the
+  // filter. Same pattern as the subs strip (commit 978c85a).
+  const filterToggle = (key, value, label, currentValue) => {
+    const isActive = currentValue === value;
+    const next = isActive
+      ? { ...filters, [key]: null, page: null }
+      : { ...filters, [key]: value, page: null };
+    const cls = isActive ? 'filter-toggle filter-toggle-active' : 'filter-toggle';
+    return html`<a class="${cls}" href="${modlogHref(next)}">${label}</a>`;
   };
+  const modCell = (a) => {
+    if (a.mod_handle == null) {
+      return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
+    }
+    const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
+    return filterToggle('mod', a.mod_handle, label, filters.mod);
+  };
+  const userCell = (a) => {
+    const handle = a.target_type === 'handle' ? a.target_id : targetAuthor.get(a.target_id);
+    if (!handle) return html`<span class="muted">—</span>`;
+    const label = pseudonyms.get(handle) ?? handle.slice(0, 8);
+    return filterToggle('user', handle, label, filters.user);
+  };
+
+  const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
   const pager = totalPages > 1
     ? html`<nav class="pager muted">
-        ${safePage > 1 ? html`<a href="${pageHref(safePage - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
-        <span>page ${safePage} / ${totalPages} · ${total} actions</span>
-        ${safePage < totalPages ? html`<a href="${pageHref(safePage + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
+        <span>page ${filters.page} / ${totalPages} · ${total} actions</span>
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
       </nav>`
     : html`<p class="muted">${total} action${total === 1 ? '' : 's'}.</p>`;
 
   const rowsView = actions.length === 0
-    ? html`<p class="muted">no mod actions yet.</p>`
+    ? html`<p class="muted">no mod actions match.</p>`
     : html`<table class="modlog">
-        <thead><tr><th>sub</th><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
+        <thead><tr><th>sub</th><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
           <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
           <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
+          <td>${modCell(a)}</td>
+          <td>${userCell(a)}</td>
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
@@ -1297,26 +1715,388 @@ function renderMyModLog(req, res, { db, auth }, page, subFilter) {
   // click an unfiltered name to scope to it (?sub=<name>); click the
   // currently-active one to drop the filter (back to all subs). Active
   // sub renders in --accent-warm so the filter state is glanceable.
-  const subStrip = html`<p class="mod-subs muted">${subNames.map((s, i) => {
-    const isActive = activeSub === s;
-    const href = isActive ? '/modlog' : `/modlog?sub=${s}`;
+  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
+    const isActive = filters.sub === s;
+    const href = modlogHref({
+      ...filters,
+      sub: isActive ? null : s,
+      page: null,
+    });
     const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  const caption = activeSub
-    ? html`<p class="muted">scoped to <strong>${activeSub}</strong>. click again to clear.</p>`
-    : html`<p class="muted">every action across the ${subNames.length} sub${subNames.length === 1 ? '' : 's'} you moderate.</p>`;
-
   send(res, 200, layout('/modlog', html`
-    ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
+    ${siteHeader({ db, currentHandle })}
     <p><a href="/">← home</a> · my modlog</p>
-    <h2>// my mod log</h2>
+    <h2>// my modlog</h2>
+    ${modlogModeBar(filters)}
+    ${modlogFilterBar(filters, currentHandle)}
     ${subStrip}
-    ${caption}
+    ${modlogActiveSummary(filters, pseudonyms, modHandle)}
     ${rowsView}
     ${pager}
   `));
+}
+
+function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSubs, filters }) {
+  // Open mode = pending flags grouped by target. Each row is a native
+  // <details> that expands inline to show flag breakdown + an action
+  // form (uphold soft, uphold hard with reason, dismiss). Resolution
+  // POSTs to /modlog/resolve which both records the mod_action and
+  // closes out the flags in one transaction. Pagination is in-memory
+  // for now (the cross-sub query returns all pending; a busy instance
+  // will hit thousands of rows here someday — revisit when it bites).
+  const pending = pendingFlagsAcrossSubs(db, scopedSubs);
+  const since = filters.date === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : null;
+  const filtered = pending.filter((p) => {
+    if (since != null && p.last_flagged_at <= since) return false;
+    if (filters.user && p.author_handle !== filters.user) return false;
+    return true;
+  });
+
+  const offset = (filters.page - 1) * MODLOG_PAGE_SIZE;
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
+  const pageRows = filtered.slice(offset, offset + MODLOG_PAGE_SIZE);
+
+  const breakdowns = flagBreakdownsForTargets(db, pageRows);
+  const allFlaggers = new Set();
+  for (const list of breakdowns.values()) {
+    for (const f of list) allFlaggers.add(f.flagger_handle);
+  }
+  const userHandles = [
+    ...new Set(pageRows.map((p) => p.author_handle).filter((h) => h != null)),
+    ...allFlaggers,
+  ];
+  if (filters.user) userHandles.push(filters.user);
+  const pseudonyms = pseudonymsByHandle(db, userHandles);
+
+  // Batch-load target bodies so the expansion can show the post or
+  // comment in-line — no navigate-away. Posts: re-use getPostPreview
+  // (markdown rendered, ~600 chars, truncated) so the body is XSS-safe
+  // through the same allow-list pipeline as a post page. Comments:
+  // body column directly, escaped, with newlines preserved.
+  const postIds = [...new Set(pageRows.filter((p) => p.target_type === 'post').map((p) => p.target_id))];
+  const commentIds = [...new Set(pageRows.filter((p) => p.target_type === 'comment').map((p) => p.target_id))];
+  const postRows = new Map();
+  const commentBodies = new Map();
+  if (postIds.length > 0) {
+    const ph = postIds.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, file_path, title FROM posts WHERE id IN (${ph})`).all(...postIds)) {
+      postRows.set(r.id, r);
+    }
+  }
+  if (commentIds.length > 0) {
+    const ph = commentIds.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, body, post_id FROM comments WHERE id IN (${ph})`).all(...commentIds)) {
+      commentBodies.set(r.id, r);
+    }
+  }
+  const bodyExcerpt = (p) => {
+    if (p.target_type === 'post') {
+      const row = postRows.get(p.target_id);
+      if (!row) return html`<p class="muted">[post body unavailable]</p>`;
+      const preview = getPostPreview(row, postsDir, { maxChars: 600 });
+      return html`<p class="muted"><strong>${row.title}</strong></p>${raw(preview.html)}`;
+    }
+    if (p.target_type === 'comment') {
+      const row = commentBodies.get(p.target_id);
+      if (!row) return html`<p class="muted">[comment body unavailable]</p>`;
+      return html`<blockquote class="modlog-body-excerpt">${row.body}</blockquote>`;
+    }
+    return html``;
+  };
+
+  const filterToggle = (key, value, label, currentValue) => {
+    const isActive = currentValue === value;
+    const next = isActive
+      ? { ...filters, [key]: null, page: null }
+      : { ...filters, [key]: value, page: null };
+    const cls = isActive ? 'filter-toggle filter-toggle-active' : 'filter-toggle';
+    return html`<a class="${cls}" href="${modlogHref(next)}">${label}</a>`;
+  };
+  const userCell = (p) => {
+    if (!p.author_handle) return html`<span class="muted">—</span>`;
+    const label = pseudonyms.get(p.author_handle) ?? p.author_handle.slice(0, 8);
+    return filterToggle('user', p.author_handle, label, filters.user);
+  };
+  const targetLink = (p) => {
+    if (p.target_type === 'post') {
+      return html`<a href="/sub/${p.sub_name}/post/${p.target_id}">post ${p.target_id.slice(0, 12)}</a>`;
+    }
+    if (p.target_type === 'comment') {
+      // Comment → parent post lookup is one row; do it inline (n=1 per
+      // expanded row, fine for a 50/page surface).
+      const row = db.prepare('SELECT post_id FROM comments WHERE id = ?').get(p.target_id);
+      return row
+        ? html`<a href="/sub/${p.sub_name}/post/${row.post_id}#comment-${p.target_id}">comment ${p.target_id.slice(0, 12)}</a>`
+        : html`<span class="muted">comment ${p.target_id.slice(0, 12)}</span>`;
+    }
+    return html`<span class="muted">${p.target_type} ${p.target_id.slice(0, 12)}</span>`;
+  };
+
+  const breakdownLine = (key) => {
+    const flags = breakdowns.get(key) ?? [];
+    if (flags.length === 0) return html`<span class="muted">no flag detail</span>`;
+    const counts = new Map();
+    for (const f of flags) counts.set(f.category, (counts.get(f.category) ?? 0) + 1);
+    const cats = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([cat, n]) => `${cat} (${n})`)
+      .join(', ');
+    const flaggers = [...new Set(flags.map((f) => f.flagger_handle))]
+      .map((h) => pseudonyms.get(h) ?? h.slice(0, 8))
+      .join(', ');
+    return html`<span class="muted">flagged for: ${cats} · by ${flaggers}</span>`;
+  };
+
+  const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
+  const pager = totalPages > 1
+    ? html`<nav class="pager muted">
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
+        <span>page ${filters.page} / ${totalPages} · ${total} pending</span>
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+      </nav>`
+    : html`<p class="muted">${total} pending.</p>`;
+
+  // Open-mode rows are vertical <details> blocks rather than a table —
+  // the entire summary line is the click target so the expand affordance
+  // is the row itself, not a tiny "decide" cell. Each summary lays out
+  // sub · when · user · target · pending count, then expands into the
+  // flag breakdown + decision form. Native <details>; no JS.
+  const rowsView = pageRows.length === 0
+    ? html`<p class="muted">no pending flags.</p>`
+    : html`<div class="modlog-open-list">${pageRows.map((p) => {
+        const key = `${p.target_type}:${p.target_id}`;
+        const returnTo = modlogHref({ ...filters });
+        return html`<details class="modlog-open-row">
+          <summary>
+            <span class="open-row-sub"><a href="/sub/${p.sub_name}/modlog">${p.sub_name}</a></span>
+            <span class="open-row-when muted">${relativeTime(p.last_flagged_at)}</span>
+            <span class="open-row-user">${userCell(p)}</span>
+            <span class="open-row-target">${targetLink(p)}</span>
+            <span class="open-row-count"><span class="event-count">${p.pending}× flags</span></span>
+            <span class="open-row-chevron muted">▾</span>
+          </summary>
+          <div class="modlog-resolve-body">
+            <div class="modlog-body-wrap">${bodyExcerpt(p)}</div>
+            <p>${breakdownLine(key)}</p>
+            <form method="post" action="/modlog/resolve" class="modlog-resolve-form">
+              <input type="hidden" name="target_type" value="${p.target_type}">
+              <input type="hidden" name="target_id" value="${p.target_id}">
+              <input type="hidden" name="sub_name" value="${p.sub_name}">
+              <input type="hidden" name="return_to" value="${returnTo}">
+              <label>reason (required for hard removal):
+                <input type="text" name="reason" placeholder="why?" maxlength="200">
+              </label>
+              <div class="modlog-resolve-buttons">
+                <button type="submit" name="decision" value="uphold-soft">soft remove</button>
+                <button type="submit" name="decision" value="uphold-hard" class="warn">hard remove</button>
+                <button type="submit" name="decision" value="dismiss">dismiss flags</button>
+              </div>
+            </form>
+          </div>
+        </details>`;
+      })}</div>`;
+
+  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
+    const isActive = filters.sub === s;
+    const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
+    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
+    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
+  })}</p>`;
+
+  send(res, 200, layout('/modlog', html`
+    ${siteHeader({ db, currentHandle })}
+    <p><a href="/">← home</a> · my modlog</p>
+    <h2>// my modlog</h2>
+    ${modlogModeBar(filters)}
+    ${modlogFilterBar(filters, currentHandle)}
+    ${subStrip}
+    ${modlogActiveSummary(filters, pseudonyms, null)}
+    <p class="muted">user-flagged content awaiting your decision. expand a row to see who flagged it and why, then rule.</p>
+    ${rowsView}
+    ${pager}
+  `));
+}
+
+function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filters, modHandle }) {
+  // Mirrors renderModlogAudit but queries the deduped inbox view and
+  // adds an event-count badge per row. Will share more code with audit
+  // once step 4 (open mode) lands and row-expansion forces a refactor.
+  const since = filters.date === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : null;
+  const actionFilter = MODLOG_TYPES[filters.type] ?? null;
+  const queryOpts = {
+    since: since ?? undefined,
+    actions: actionFilter ?? undefined,
+    modHandle: modHandle ?? undefined,
+    targetHandle: filters.user ?? undefined,
+  };
+
+  const offset = (filters.page - 1) * MODLOG_PAGE_SIZE;
+  const total = countInboxAcrossSubs(db, scopedSubs, queryOpts);
+  const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
+  const actions = listInboxAcrossSubs(db, scopedSubs, {
+    ...queryOpts, limit: MODLOG_PAGE_SIZE, offset,
+  });
+
+  const { commentToPost, targetAuthor } = batchTargetLookups(db, actions);
+  const modHandles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
+  const userHandles = [...new Set([
+    ...actions.filter((a) => a.target_type === 'handle').map((a) => a.target_id),
+    ...targetAuthor.values(),
+  ])];
+  const pseudonyms = pseudonymsByHandle(db, [...modHandles, ...userHandles]);
+
+  const targetCell = (a) => {
+    if (a.target_type === 'post') {
+      return html`<a href="/sub/${a.sub_name}/post/${a.target_id}">post ${a.target_id.slice(0, 12)}</a>`;
+    }
+    if (a.target_type === 'comment') {
+      const postId = commentToPost.get(a.target_id);
+      return postId
+        ? html`<a href="/sub/${a.sub_name}/post/${postId}#comment-${a.target_id}">comment ${a.target_id.slice(0, 12)}</a>`
+        : html`<span class="muted">comment ${a.target_id.slice(0, 12)}</span>`;
+    }
+    if (a.target_type === 'handle') {
+      return html`<span class="muted">${pseudonyms.get(a.target_id) ?? a.target_id.slice(0, 8)}</span>`;
+    }
+    return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
+  };
+
+  const filterToggle = (key, value, label, currentValue) => {
+    const isActive = currentValue === value;
+    const next = isActive
+      ? { ...filters, [key]: null, page: null }
+      : { ...filters, [key]: value, page: null };
+    const cls = isActive ? 'filter-toggle filter-toggle-active' : 'filter-toggle';
+    return html`<a class="${cls}" href="${modlogHref(next)}">${label}</a>`;
+  };
+  const modCell = (a) => {
+    if (a.mod_handle == null) {
+      return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
+    }
+    const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
+    return filterToggle('mod', a.mod_handle, label, filters.mod);
+  };
+  const userCell = (a) => {
+    const handle = a.target_type === 'handle' ? a.target_id : targetAuthor.get(a.target_id);
+    if (!handle) return html`<span class="muted">—</span>`;
+    const label = pseudonyms.get(handle) ?? handle.slice(0, 8);
+    return filterToggle('user', handle, label, filters.user);
+  };
+
+  const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
+  const pager = totalPages > 1
+    ? html`<nav class="pager muted">
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
+        <span>page ${filters.page} / ${totalPages} · ${total} target${total === 1 ? '' : 's'}</span>
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+      </nav>`
+    : html`<p class="muted">${total} target${total === 1 ? '' : 's'}.</p>`;
+
+  const rowsView = actions.length === 0
+    ? html`<p class="muted">no targets match.</p>`
+    : html`<table class="modlog">
+        <thead><tr><th>sub</th><th>last event</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>events</th><th>reason</th></tr></thead>
+        <tbody>${actions.map((a) => html`<tr>
+          <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
+          <td class="muted">${relativeTime(a.created_at)}</td>
+          <td>${modCell(a)}</td>
+          <td>${userCell(a)}</td>
+          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
+          <td>${targetCell(a)}</td>
+          <td class="muted">${a.event_count > 1 ? html`<span class="event-count">${a.event_count}×</span>` : ''}</td>
+          <td class="muted">${a.reason ?? ''}</td>
+        </tr>`)}</tbody>
+      </table>`;
+
+  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
+    const isActive = filters.sub === s;
+    const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
+    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
+    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
+  })}</p>`;
+
+  send(res, 200, layout('/modlog', html`
+    ${siteHeader({ db, currentHandle })}
+    <p><a href="/">← home</a> · my modlog</p>
+    <h2>// my modlog</h2>
+    ${modlogModeBar(filters)}
+    ${modlogFilterBar(filters, currentHandle)}
+    ${subStrip}
+    ${modlogActiveSummary(filters, pseudonyms, modHandle)}
+    <p class="muted">deduped — one row per affected user or piece of content. click ${actions.length === 0 ? 'audit' : 'a row'} for the per-target history (coming with row expansion in next step).</p>
+    ${rowsView}
+    ${pager}
+  `));
+}
+
+function modlogModeBar(filters) {
+  // Three-way mode toggle. Clicking the active mode is a no-op (kept
+  // visually distinct). Switching mode resets pagination.
+  const btn = (mode, label) => {
+    const isActive = filters.mode === mode;
+    const cls = isActive ? 'mode-btn mode-btn-active' : 'mode-btn';
+    const href = modlogHref({ ...filters, mode, page: null });
+    return html`<a class="${cls}" href="${href}">${label}</a>`;
+  };
+  return html`<p class="modlog-modes">
+    ${btn('open', 'open')} ${btn('inbox', 'inbox')} ${btn('audit', 'audit')}
+  </p>`;
+}
+
+function modlogFilterBar(filters, currentHandle) {
+  const dateBtn = (val, label) => {
+    const isActive = filters.date === val;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${modlogHref({ ...filters, date: val === 'all' ? null : val, page: null })}">${label}</a>`;
+  };
+  const typeBtn = (val, label) => {
+    const isActive = filters.type === val;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${modlogHref({ ...filters, type: val === 'all' ? null : val, page: null })}">${label}</a>`;
+  };
+  const meIsActive = filters.mod === 'me' || filters.mod === currentHandle;
+  const meHref = modlogHref({
+    ...filters,
+    mod: meIsActive ? null : 'me',
+    page: null,
+  });
+  const meCls = meIsActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+  return html`<p class="modlog-filters muted">
+    ${dateBtn('24h', 'new (24h)')} ${dateBtn('all', 'all-time')}
+    <span class="filter-sep">·</span>
+    ${typeBtn('flagged', 'flagged')} ${typeBtn('banned', 'banned')} ${typeBtn('removed', 'removed')} ${typeBtn('all', 'all')}
+    <span class="filter-sep">·</span>
+    <a class="${meCls}" href="${meHref}">[me]</a>
+  </p>`;
+}
+
+function modlogActiveSummary(filters, pseudonyms, resolvedModHandle) {
+  // Reads back the active filters in plain English under the bar. Only
+  // shown when something is scoped — silent when wide-open.
+  const parts = [];
+  if (filters.sub) parts.push(`sub=${filters.sub}`);
+  if (filters.mod) {
+    if (filters.mod === 'system') {
+      parts.push('mod=system');
+    } else if (filters.mod === 'me') {
+      parts.push('mod=me');
+    } else {
+      const label = pseudonyms.get(resolvedModHandle) ?? resolvedModHandle?.slice(0, 8) ?? filters.mod;
+      parts.push(`mod=${label}`);
+    }
+  }
+  if (filters.user) {
+    const label = pseudonyms.get(filters.user) ?? filters.user.slice(0, 8);
+    parts.push(`user=${label}`);
+  }
+  if (filters.date === '24h') parts.push('last 24h');
+  if (filters.type !== 'all') parts.push(`type=${filters.type}`);
+  if (parts.length === 0) return html``;
+  return html`<p class="muted modlog-summary">showing: ${parts.join(', ')} · <a href="/modlog">clear all</a></p>`;
 }
 
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
@@ -1392,7 +2172,19 @@ async function handleLogout(req, res, { auth }) {
 }
 
 
-export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
+export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null }) {
+  // Resolve operator overrides against the floor at boot. Bad config
+  // throws here, so the operator sees the error before serving any
+  // request rather than at the moment a user happens to trip a check.
+  const rateLimitConfig = resolveRateLimitConfig(rateLimits);
+  const linkCapConfig = resolveLinkCapConfig(linkCaps);
+  // Spam patterns: load once at boot. File path is operator-supplied;
+  // when missing or empty, the matcher returns no matches (a no-op).
+  const spamPatterns = loadSpamPatterns(spamPatternsFile);
+  // URLhaus blocklist host set: pulled hourly by bin/refresh-urlhaus.js
+  // and read fresh at app boot. Restart picks up new entries; an empty
+  // cache means the matcher is a no-op (safe default for fresh installs).
+  const urlhausHosts = loadUrlhausCache(urlhausCacheFile);
   return async function handler(req, res) {
     try {
       const url = new URL(req.url, baseUrl);
@@ -1409,7 +2201,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir });
       if (path === '/draft' && method === 'POST') {
-        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
+        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts });
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });
@@ -1418,18 +2210,19 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
 
       let m;
       if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
-        return handleAddComment(req, res, { db, auth }, m[1], m[2]);
+        return handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, m[1], m[2]);
       }
       if ((m = path.match(SUB_MOD_PATH_RE)) && method === 'POST') {
         return handleModAction(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
-        return renderModLog(req, res, { db, auth }, m[1]);
+        return renderModLog(req, res, { db, auth }, m[1], url.searchParams);
       }
       if (path === '/modlog' && method === 'GET') {
-        const page = Number.parseInt(url.searchParams.get('page') ?? '1', 10);
-        const subFilter = url.searchParams.get('sub');
-        return renderMyModLog(req, res, { db, auth }, page, subFilter);
+        return renderMyModLog(req, res, { db, auth, postsDir }, url.searchParams);
+      }
+      if (path === '/modlog/resolve' && method === 'POST') {
+        return handleModlogResolve(req, res, { db, auth });
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));
@@ -1438,7 +2231,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'));
       }
       if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
-        return handleFinalize(req, res, { db, auth, postsDir }, m[1]);
+        return handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, m[1]);
       }
       if ((m = path.match(/^\/post\/([0-9a-f]{16})$/)) && method === 'GET') {
         return redirectLegacyPost(req, res, { db }, m[1]);
