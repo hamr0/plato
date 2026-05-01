@@ -849,3 +849,101 @@ test('SECURITY: title with HTML is escaped on home page', async (t) => {
   assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/, 'title HTML must be escaped');
   assert.match(html, /&lt;script&gt;/);
 });
+
+// --- M4 routes ---
+
+test('M4: GET /sub/<name>/modlog renders the action log (public)', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
+  const owner = 'a'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(owner, 'owner-x', Date.now());
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = 'lobby'`).run(owner);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(owner, Date.now());
+
+  const { recordAction } = await import('../../src/content/mod.js');
+  recordAction(db, {
+    subName: 'lobby', modHandle: owner, action: 'collapse',
+    targetType: 'post', targetId: 'p1', reason: 'pinned-test',
+  });
+
+  const res = await fetch(baseUrl + '/sub/lobby/modlog');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /mod log/);
+  assert.match(body, /collapse/);
+  assert.match(body, /pinned-test/);
+});
+
+test('M4: POST /sub/<name>/mod requires login', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+  const res = await fetch(baseUrl + '/sub/lobby/mod', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'collapse', target_type: 'post', target_id: 'x' }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test('M4: POST /sub/<name>/mod rejects non-mods', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+  ensureSub(db, 'lobby');
+  // Add a post for the rando to try to collapse.
+  const someone = 'e'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(someone, 'someone-x', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(someone, Date.now());
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'rando@example.com', { db });
+
+  const res = await jarFetch(jar, baseUrl + '/sub/lobby/mod', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'collapse', target_type: 'post', target_id: 'p1' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.text();
+  assert.match(body, /not a mod/);
+});
+
+test('M4: owner POSTs collapse → post is collapsed + action logged', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'mod@example.com', { db });
+  // Promote the just-logged-in user to owner of lobby.
+  const owner = db.prepare(`SELECT handle FROM handles WHERE pseudonym IS NOT NULL ORDER BY first_seen_at DESC LIMIT 1`).get().handle;
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = 'lobby'`).run(owner);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(owner, Date.now());
+
+  const res = await jarFetch(jar, baseUrl + '/sub/lobby/mod', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      action: 'collapse', target_type: 'post', target_id: 'p1', return_to: '/sub/lobby',
+    }),
+    redirect: 'manual',
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/lobby');
+
+  const post = db.prepare(`SELECT collapsed_at FROM posts WHERE id = 'p1'`).get();
+  assert.ok(post.collapsed_at > 0);
+  const log = db.prepare(`SELECT action FROM mod_actions WHERE sub_name = 'lobby'`).all();
+  assert.equal(log.length, 1);
+  assert.equal(log[0].action, 'collapse');
+});

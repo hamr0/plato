@@ -119,6 +119,44 @@ header h1 .logo-mark {
   margin-left: 0.4rem;
 }
 
+/* Inline mod controls — small, muted, sit at the bottom of post and
+ * comment slots. Only rendered when canModerate(db, sub, handle) is
+ * truthy on the server. The buttons are <button> in tiny forms; CSS
+ * undoes the default accent button styling so they read as muted text
+ * actions, not primary CTAs. */
+.mod-controls {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+}
+.mod-controls .mod-form { display: inline; margin: 0; }
+.mod-controls .mod-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: normal;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.mod-controls .mod-btn:hover {
+  color: var(--accent-warm);
+  border-color: var(--accent-warm);
+  filter: none;
+}
+
+/* Mod log table — chronological public audit per PRD §Public mod log. */
+table.modlog { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
+table.modlog th, table.modlog td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
+table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.mod-action { font-weight: 600; }
+.mod-action-collapse, .mod-action-uncollapse { color: var(--text-dim); }
+.mod-action-remove, .mod-action-ban         { color: var(--accent-warm); }
+.mod-action-unremove, .mod-action-unban,
+.mod-action-promote_mod, .mod-action-demote_mod, .mod-action-transfer_owner { color: var(--accent); }
+
 /* Site footer — the ∴plato attribution mark. Stays in every fork: the
  * operator can change wordmark + quote pool but keeps the glyph + "plato"
  * as upstream lineage. */

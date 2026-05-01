@@ -25,6 +25,7 @@ import {
   COMMENT_SORTS,
 } from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
+import { canModerate, recordAction, listModActions, MOD_ACTIONS } from '../content/mod.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 
@@ -225,7 +226,7 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
   </div>`;
 }
 
-function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo }) {
+function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName }) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
@@ -257,6 +258,10 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
                 ? html` <a href="${link}" class="more">read more →</a>`
                 : html``}</div>`
             : html``}
+        ${modRole && subName === post.sub_name ? modControls({
+          subName, targetType: 'post', targetId: post.id,
+          collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
+        }) : html``}
       </div>
     </div>`;
   });
@@ -364,6 +369,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
   const previews = buildPreviews(posts, postsDir, 600);
   const voteState = votesForPostList(db, posts, currentHandle);
   const returnTo = `/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}`;
+  const modRole = canModerate(db, subName, currentHandle);
 
   const sortNav = html`<div class="sort-nav muted">
     ${SUB_SORTS.map((s) => {
@@ -384,13 +390,13 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
         title: html`/sub/${subName}`,
         subtitle: sub.description || null,
       })}
-      <p><a href="/">← home</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">modlog</a></p>
       ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
-      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo })}
+      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName })}
     `)
   );
 }
@@ -652,6 +658,10 @@ function commentNodeView(node, ctx, depth) {
       </div>
     </div>
     ${inner}
+    ${ctx.modRole ? modControls({
+      subName: ctx.subName, targetType: 'comment', targetId: node.id,
+      collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
+    }) : html``}
     ${replyForm}
     ${repliesView}
   </div>`;
@@ -692,7 +702,8 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
   const postVote = currentHandle
     ? getVote(db, { targetType: 'post', targetId: postId, voterHandle: currentHandle })
     : null;
-  const treeCtx = { pseudonyms, commentVotes, currentHandle, subName, postId, returnTo };
+  const modRole = canModerate(db, subName, currentHandle);
+  const treeCtx = { pseudonyms, commentVotes, currentHandle, subName, postId, returnTo, modRole };
 
   const commentSortNav = html`<div class="sort-nav muted">
     ${COMMENT_SORTS.map((s) => {
@@ -708,12 +719,16 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     200,
     layout(post.title, html`
       ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
-      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a> · <a href="/sub/${subName}/modlog">modlog</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
           <h1>${post.title}</h1>
           ${authorMeta(post, pseudonyms.get(post.handle))}
+          ${modRole ? modControls({
+            subName, targetType: 'post', targetId: postId,
+            collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
+          }) : html``}
           ${post.removed_at != null
             ? html`<article class="muted post-removed">[removed by mod]</article>`
             : post.collapsed_at != null
@@ -847,7 +862,82 @@ function renderAvatar(res, handle) {
   res.end(avatarSvg(handle));
 }
 
+// Inline mod controls. Rendered next to a post or comment when the
+// current user is owner or co-mod of the sub. The buttons toggle the
+// soft-state column via POST /sub/<name>/mod. State-aware: shows
+// "uncollapse" if collapsed, "unremove" if removed, etc.
+function modControls({ subName, targetType, targetId, collapsedAt, removedAt, returnTo }) {
+  const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
+  const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
+  return html`<div class="mod-controls">
+    ${[collapseAction, removeAction].map((action) => html`<form method="POST" action="/sub/${subName}/mod" class="mod-form">
+      <input type="hidden" name="action" value="${action}">
+      <input type="hidden" name="target_type" value="${targetType}">
+      <input type="hidden" name="target_id" value="${targetId}">
+      <input type="hidden" name="return_to" value="${returnTo}">
+      <button class="mod-btn">${action}</button>
+    </form>`)}
+  </div>`;
+}
+
+async function handleModAction(req, res, { db, auth }, subName) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to moderate.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { action, target_type: targetType, target_id: targetId, reason, return_to: returnTo } = form;
+  if (!MOD_ACTIONS.includes(action)) {
+    return send(res, 400, layout('bad action', html`<p class="muted">unknown mod action.</p>`));
+  }
+  try {
+    recordAction(db, {
+      subName, modHandle: handle, action, targetType, targetId,
+      reason: reason && reason.trim().length > 0 ? reason : null,
+    });
+  } catch (err) {
+    return send(res, 400, layout('mod failed', html`<p class="muted">${err.message}</p>`));
+  }
+  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : `/sub/${subName}`;
+  redirect(res, safeReturn);
+}
+
+function renderModLog(req, res, { db, auth }, subName) {
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
+  }
+  const currentHandle = auth.handleFromRequest(req);
+  const actions = listModActions(db, subName, { limit: 100 });
+  const handles = [...new Set(actions.map((a) => a.mod_handle))];
+  const pseudonyms = pseudonymsByHandle(db, handles);
+
+  const rowsView = actions.length === 0
+    ? html`<p class="muted">no mod actions yet.</p>`
+    : html`<table class="modlog">
+        <thead><tr><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
+        <tbody>${actions.map((a) => html`<tr>
+          <td class="muted">${relativeTime(a.created_at)}</td>
+          <td>${pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8)}</td>
+          <td><span class="mod-action mod-action-${a.action}">${a.action}</span></td>
+          <td class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</td>
+          <td class="muted">${a.reason ?? ''}</td>
+        </tr>`)}</tbody>
+      </table>`;
+
+  send(res, 200, layout(`/sub/${subName}/modlog`, html`
+    ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
+    <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a> · modlog</p>
+    <h2>// mod log</h2>
+    <p class="muted">every moderator action in this sub, public per PRD §Public mod log.</p>
+    ${rowsView}
+  `));
+}
+
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
+const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
+const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
 const SUB_POST_COMMENT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/comment$/;
 
@@ -877,6 +967,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       let m;
       if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
         return handleAddComment(req, res, { db, auth }, m[1], m[2]);
+      }
+      if ((m = path.match(SUB_MOD_PATH_RE)) && method === 'POST') {
+        return handleModAction(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
+        return renderModLog(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));
