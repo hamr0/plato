@@ -267,7 +267,7 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
               : html``}</div>`
           : html`` })}
         <div class="post-actions">
-          ${currentHandle && post.removed_at == null
+          ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
             ? flagButton({ targetType: 'post', targetId: post.id, returnTo: perPostReturn })
             : html``}
           ${modRole && subName === post.sub_name ? modControls({
@@ -690,7 +690,7 @@ function commentNodeView(node, ctx, depth) {
     </div>
     ${inner}
     <div class="post-actions">
-      ${ctx.currentHandle && !removed
+      ${ctx.currentHandle && !removed && !ctx.modRole
         ? flagButton({ targetType: 'comment', targetId: node.id, returnTo: `${ctx.returnTo}#comment-${node.id}` })
         : html``}
       ${ctx.modRole ? modControls({
@@ -763,7 +763,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
           ${authorMeta(post, pseudonyms.get(post.handle))}
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
           <div class="post-actions">
-            ${currentHandle && post.removed_at == null
+            ${currentHandle && post.removed_at == null && !modRole
               ? flagButton({ targetType: 'post', targetId: postId, returnTo })
               : html``}
             ${modRole ? modControls({
@@ -927,7 +927,14 @@ function modStateView({ removedAt, collapsedAt, body }) {
 // requires a reason; soft removal (collapse) makes it optional. The
 // expand-form pattern is the friction that makes hard moderation
 // deliberate without needing a JS modal.
-function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired }) {
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled }) {
+  if (disabled) {
+    // Dimmed marker: only one mod-state should be active at a time. When
+    // the target is hard-removed, the collapse/uncollapse pair is meaningless
+    // (the body is gone), so we render a non-interactive label in place of
+    // the <details> button. The mod must `unremove` first to re-enable.
+    return html`<span class="mod-btn mod-btn-disabled" aria-disabled="true" title="not available while ${MOD_ACTION_LABELS.remove ?? 'removed'}">${action}</span>`;
+  }
   return html`<details class="mod-confirm">
     <summary class="mod-btn">${action}</summary>
     <form method="POST" action="/sub/${subName}/mod" class="mod-form">
@@ -944,12 +951,18 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
 function modControls({ subName, targetType, targetId, collapsedAt, removedAt, returnTo }) {
   const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
   const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
+  // Mutual exclusion: hard-removal supersedes soft-collapse. While the item
+  // is hard-removed, dim the collapse pair — the body is gone, so toggling a
+  // collapse on/off is a no-op. A mod escalating from collapse → remove is
+  // still allowed (remove pair stays live when collapsed_at is set).
   // Reason required only on the destructive direction: 'remove'. uncollapse,
   // unremove, and collapse all leave content readable, so the deliberation
   // gate is lighter.
   return html`<div class="mod-controls">
-    ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo, reasonRequired: false })}
-    ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo, reasonRequired: removeAction === 'remove' })}
+    ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo,
+      reasonRequired: false, disabled: removedAt != null })}
+    ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo,
+      reasonRequired: removeAction === 'remove' })}
   </div>`;
 }
 
@@ -1035,6 +1048,35 @@ function renderModLog(req, res, { db, auth }, subName) {
   const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
   const pseudonyms = pseudonymsByHandle(db, handles);
 
+  // Resolve target → permalink so each row links back to the affected
+  // content. Posts: direct. Comments: one hop through `comments` to find
+  // the parent post then anchor to the comment id. Handle bans: no link
+  // (the target is a user, not a piece of content). Posts/comments that
+  // were hard-removed still link — the stub still occupies its slot in
+  // the tree per PRD §Moderation Tier 2.
+  const commentIds = actions.filter((a) => a.target_type === 'comment').map((a) => a.target_id);
+  const commentToPost = new Map();
+  if (commentIds.length > 0) {
+    const placeholders = commentIds.map(() => '?').join(',');
+    const rows = db.prepare(
+      `SELECT id, post_id FROM comments WHERE id IN (${placeholders})`
+    ).all(...commentIds);
+    for (const r of rows) commentToPost.set(r.id, r.post_id);
+  }
+  const targetCell = (a) => {
+    if (a.target_type === 'post') {
+      return html`<a href="/sub/${subName}/post/${a.target_id}">post ${a.target_id.slice(0, 12)}</a>`;
+    }
+    if (a.target_type === 'comment') {
+      const postId = commentToPost.get(a.target_id);
+      return postId
+        ? html`<a href="/sub/${subName}/post/${postId}#comment-${a.target_id}">comment ${a.target_id.slice(0, 12)}</a>`
+        : html`<span class="muted">comment ${a.target_id.slice(0, 12)}</span>`;
+    }
+    // 'handle' (ban target) or anything else: no link.
+    return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
+  };
+
   const rowsView = actions.length === 0
     ? html`<p class="muted">no mod actions yet.</p>`
     : html`<table class="modlog">
@@ -1043,7 +1085,7 @@ function renderModLog(req, res, { db, auth }, subName) {
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
-          <td class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</td>
+          <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
         </tr>`)}</tbody>
       </table>`;

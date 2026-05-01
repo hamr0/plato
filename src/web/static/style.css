@@ -161,6 +161,14 @@ header h1 .logo-mark {
   border-color: var(--accent-warm);
   filter: none;
 }
+.mod-controls .mod-btn-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.mod-controls .mod-btn-disabled:hover {
+  color: var(--text-dim);
+  border-color: var(--border);
+}
 
 /* Mod confirm form: each action button (remove, collapse, etc.) is a
  * <details> summary; clicking expands a small reason form below. Hard
