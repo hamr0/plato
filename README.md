@@ -37,7 +37,7 @@ Social media corrupted attention, manufactured followers, and turned discourse i
 
 ## Status
 
-In active development. M1 (foundation, identity, post lifecycle), M2 (multi-tenant subs, sub creation, front-page cap, per-sub URL paths) and M3 (hierarchical comments, upvote/downvote with new-account weighting, hot/new/top/old sort) have shipped. Magic-link works end-to-end, posts and comments render with deterministic pseudonyms and identicons, and all writes go through `npm test` (191 tests). See the [build plan](docs/01-product/build-plan.md) for what's queued next (M4 moderation).
+In active development. M1 (foundation, identity, post lifecycle), M2 (multi-tenant subs), M3 (hierarchical comments, upvote/downvote, hot/new/top/old sort) and **M4 (two-tier moderation, flag system, public mod log, community auto-uncollapse with per-sub thresholds)** have shipped. Magic-link works end-to-end, posts and comments render with deterministic pseudonyms and identicons, and all writes go through `npm test` (245 tests). See the [build plan](docs/01-product/build-plan.md) for what's queued next (M5 spam defenses + per-sub flairs).
 
 ## Try it locally
 
