@@ -74,13 +74,17 @@ Once a mod resolves a flag (upheld → produces a `mod_actions` row, or dismisse
 
 Defaults to "all subs you mod" on `/modlog`. On `/sub/<name>/modlog` this filter is fixed to that sub.
 
-### Click-to-filter chips
+### Click-to-filter — the source label is the toggle
 
 Click a pseudonym in the **mod** column → adds `?mod=<handle>`. Click a pseudonym in the **user** column → adds `?user=<handle>`. Click `system` in the mod column → adds `?mod=system`. Filters compose.
 
-A `[me]` quick-filter in the bar sets `?mod=<currentHandle>` — replaces the originally-planned "my mod decisions" panel.
+A `[me]` quick-filter button in the bar sets `?mod=<currentHandle>` — replaces the originally-planned "my mod decisions" panel.
 
-Active chips show as dismissible pills in the filter bar; click ✕ to remove.
+**Toggle, not chip.** When a filter is active, the source label that triggered it renders in `--accent-warm` (warm-highlighted). Clicking the warm label again drops the filter. There is no separate dismissible chip with an ✕. The label *is* the affordance; clicking on it the second time turns it off. Symmetric, one mental model.
+
+A read-only summary line under the filter bar says what's currently scoped, e.g., *"showing: sub=cooking, user=spammer-x"* — useful when multiple filters compound. To clear, click the warm-highlighted source labels in the table or the filter bar.
+
+Already shipped (commit 2119fa7+): the subs strip on `/modlog` uses this toggle pattern. The same pattern extends to mod and user labels in M5.
 
 ## Columns
 
@@ -182,3 +186,4 @@ None. All locked in this round.
 - 2026-05-01 — 50/page (up from 25, to accommodate pending-flag volume)
 - 2026-05-01 — last 5 events in expansion, "show all N" if more
 - 2026-05-01 — cross-sub user history line in ban-row expansion (scoped to subs the current mod sees)
+- 2026-05-01 — click-to-filter is a TOGGLE (label is the affordance, click again to drop). No separate dismissible-chip UI.

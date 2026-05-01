@@ -1218,7 +1218,7 @@ function renderModLog(req, res, { db, auth }, subName) {
 // eye. 25 rows per page.
 const MODLOG_PAGE_SIZE = 25;
 
-function renderMyModLog(req, res, { db, auth }, page) {
+function renderMyModLog(req, res, { db, auth }, page, subFilter) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
     return send(res, 401, layout('login required', html`<p class="muted">log in to view your mod log.</p>`));
@@ -1227,11 +1227,16 @@ function renderMyModLog(req, res, { db, auth }, page) {
   if (subNames.length === 0) {
     return send(res, 403, layout('not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
   }
+  // Filter toggle: ?sub=<name> narrows the view to one sub. Validated
+  // against the current user's mod-of set so a crafted ?sub=other-sub
+  // can't reveal actions outside their visibility.
+  const activeSub = subFilter && subNames.includes(subFilter) ? subFilter : null;
+  const scopedSubNames = activeSub ? [activeSub] : subNames;
   const safePage = Number.isInteger(page) && page > 0 ? page : 1;
   const offset = (safePage - 1) * MODLOG_PAGE_SIZE;
-  const total = countModActionsAcrossSubs(db, subNames);
+  const total = countModActionsAcrossSubs(db, scopedSubNames);
   const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
-  const actions = listModActionsAcrossSubs(db, subNames, { limit: MODLOG_PAGE_SIZE, offset });
+  const actions = listModActionsAcrossSubs(db, scopedSubNames, { limit: MODLOG_PAGE_SIZE, offset });
   const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
   const pseudonyms = pseudonymsByHandle(db, handles);
 
@@ -1258,11 +1263,19 @@ function renderMyModLog(req, res, { db, auth }, page) {
     return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
   };
 
+  // Build pager links that preserve the sub filter.
+  const pageHref = (n) => {
+    const params = new URLSearchParams();
+    if (n > 1) params.set('page', String(n));
+    if (activeSub) params.set('sub', activeSub);
+    const qs = params.toString();
+    return qs ? `/modlog?${qs}` : '/modlog';
+  };
   const pager = totalPages > 1
     ? html`<nav class="pager muted">
-        ${safePage > 1 ? html`<a href="/modlog?page=${safePage - 1}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
+        ${safePage > 1 ? html`<a href="${pageHref(safePage - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
         <span>page ${safePage} / ${totalPages} · ${total} actions</span>
-        ${safePage < totalPages ? html`<a href="/modlog?page=${safePage + 1}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+        ${safePage < totalPages ? html`<a href="${pageHref(safePage + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
       </nav>`
     : html`<p class="muted">${total} action${total === 1 ? '' : 's'}.</p>`;
 
@@ -1280,17 +1293,27 @@ function renderMyModLog(req, res, { db, auth }, page) {
         </tr>`)}</tbody>
       </table>`;
 
-  // Subs-i-mod strip under the heading: links to each per-sub modlog so a
-  // mod can drill into one sub's audit feed in one click. Also makes the
-  // "you mod 3 subs" claim concrete instead of an abstract count.
-  const subStrip = html`<p class="mod-subs muted">${subNames.map((s, i) => html`${i > 0 ? raw(' · ') : raw('')}<a href="/sub/${s}/modlog">${s}</a>`)}</p>`;
+  // Subs-i-mod strip under the heading. Each name is a filter toggle:
+  // click an unfiltered name to scope to it (?sub=<name>); click the
+  // currently-active one to drop the filter (back to all subs). Active
+  // sub renders in --accent-warm so the filter state is glanceable.
+  const subStrip = html`<p class="mod-subs muted">${subNames.map((s, i) => {
+    const isActive = activeSub === s;
+    const href = isActive ? '/modlog' : `/modlog?sub=${s}`;
+    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
+    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
+  })}</p>`;
+
+  const caption = activeSub
+    ? html`<p class="muted">scoped to <strong>${activeSub}</strong>. click again to clear.</p>`
+    : html`<p class="muted">every action across the ${subNames.length} sub${subNames.length === 1 ? '' : 's'} you moderate.</p>`;
 
   send(res, 200, layout('/modlog', html`
     ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my mod log</h2>
     ${subStrip}
-    <p class="muted">every action across the ${subNames.length} sub${subNames.length === 1 ? '' : 's'} you moderate.</p>
+    ${caption}
     ${rowsView}
     ${pager}
   `));
@@ -1405,7 +1428,8 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       }
       if (path === '/modlog' && method === 'GET') {
         const page = Number.parseInt(url.searchParams.get('page') ?? '1', 10);
-        return renderMyModLog(req, res, { db, auth }, page);
+        const subFilter = url.searchParams.get('sub');
+        return renderMyModLog(req, res, { db, auth }, page, subFilter);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));

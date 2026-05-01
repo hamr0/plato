@@ -314,6 +314,18 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
   font-size: 0.85rem;
 }
 .pager .pager-disabled { opacity: 0.4; }
+
+/* Click-to-filter toggles in the modlog header. The label is the
+ * affordance — click an inactive name to scope; click the active one
+ * (warm) to drop the filter. Same pattern lands on user/mod chips in
+ * M5 (m5-mod-surface-spec.md). */
+.mod-subs .sub-toggle { color: var(--text-dim); }
+.mod-subs .sub-toggle:hover { color: var(--accent); text-decoration: none; }
+.mod-subs .sub-toggle-active {
+  color: var(--accent-warm);
+  font-weight: 600;
+}
+.mod-subs .sub-toggle-active:hover { color: var(--accent-warm); text-decoration: line-through; }
 .flag-form {
   display: flex;
   gap: 0.4rem;
