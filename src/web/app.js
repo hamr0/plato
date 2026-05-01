@@ -33,6 +33,7 @@ function layout(title, body) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <link rel="stylesheet" href="/static/style.css">
+<script src="/static/vote.js" defer></script>
 </head>
 <body>${body}</body>
 </html>`);
@@ -654,21 +655,34 @@ async function handleAddComment(req, res, { db, auth }, subName, postId) {
   redirect(res, `/sub/${subName}/post/${postId}`);
 }
 
+function wantsJson(req) {
+  return (req.headers.accept || '').includes('application/json');
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body));
+}
+
 async function handleVote(req, res, { db, auth }) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
+    if (wantsJson(req)) return sendJson(res, 401, { error: 'login required' });
     return send(res, 401, layout('login required', html`<p class="muted">log in to vote.</p>`));
   }
   const body = await readBody(req);
   const form = parseForm(body);
   const { target_type: targetType, target_id: targetId, direction, return_to: returnTo } = form;
+  let result;
   try {
-    castVote(db, { targetType, targetId, voterHandle: handle, direction });
+    result = castVote(db, { targetType, targetId, voterHandle: handle, direction });
   } catch (err) {
+    if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
     return send(res, 400, layout('vote failed', html`<p class="muted">${err.message}</p>`));
   }
-  // Redirect back to wherever the vote button was clicked. Whitelist the
-  // path to keep an attacker from using /vote as an open redirect.
+  if (wantsJson(req)) return sendJson(res, 200, result);
+  // Native form path: redirect back to where the user came from. Whitelist
+  // the path so /vote can't be weaponized as an open redirect.
   const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/';
   redirect(res, safeReturn);
 }

@@ -679,6 +679,40 @@ test('M3: POST /vote upvote, score updates, redirect honored', async (t) => {
   assert.equal(score, 1.0);
 });
 
+test('M3: POST /vote with Accept: application/json returns JSON, no redirect', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'jsvoter@example.com', { db });
+  db.prepare("UPDATE handles SET first_seen_at = ?")
+    .run(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const author = 'j'.repeat(64);
+  db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'j-author', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const postId = '5'.repeat(16);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(postId, 'lobby', author, 't', 'posts/j.md', Date.now());
+
+  const res = await jarFetch(jar, baseUrl + '/vote', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json',
+    },
+    body: new URLSearchParams({ target_type: 'post', target_id: postId, direction: 'up' }),
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /application\/json/);
+  const data = await res.json();
+  assert.equal(data.vote, 'up');
+  assert.equal(data.score, 1.0);
+});
+
 test('M3: POST /vote requires login', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
