@@ -1,5 +1,11 @@
 # PRD: Open Web Revival — Two Products
 
+> **Companion docs.** This PRD is the *why* — the locked product decisions and their rationale. Day-to-day operator and integration guidance lives alongside it:
+> - [Operator Guide](../02-features/operator-guide.md) — for humans running, customizing, or forking a plato instance: forkable / tunable / locked tiers, day-to-day operations, troubleshooting, FAQ.
+> - [Integration Guide](../02-features/plato.context.md) — for AI assistants and developers: routes, settings reference, recipes, vocabulary cheat-sheet, forking checklist.
+>
+> If you're touching the implementation, read those two first; this PRD is the constitution they cite.
+
 A coordinated rebuild of two pieces of the pre-platform internet that still work and now matter more than they did in 2005: a **forum** and a **feed reader**. Both shipped as forkable repos with one-command deploy, both no-account, both gitdone-shaped (signed, timestamped, exportable, no platform owns your data).
 
 The shared thesis: the open web's failures were never technical. The protocols still work. What died was the on-ramp and the defaults. These products restore both, with 2026 UX expectations baked in.

@@ -62,7 +62,10 @@ Magic-link emails go through your local SMTP. For development, the easiest setup
 
 ## Documentation
 
+- [Operator Guide](docs/02-features/operator-guide.md) — for humans running, customizing, or forking a plato instance. Covers what's forkable vs locked, day-to-day operations, moderation philosophy, FAQ.
+- [Integration Guide](docs/02-features/plato.context.md) — for AI assistants and developers wiring plato. Routes table, settings reference, recipes (re-skin, threshold tuning, flag-queue SQL, backup/restore), forking checklist.
 - [Forum PRD](docs/01-product/prd-forum.md) — the spec
+- [Open-web revival PRD](docs/01-product/prd-open-web-revival.md) — design decisions and rationale for every locked-in choice
 - [Build plan](docs/01-product/build-plan.md) — milestone roadmap and locked decisions
 - [Visual reference](docs/design/) — three aesthetic samples explored before locking the terminal style
 - [Changelog](CHANGELOG.md) — what has been built
