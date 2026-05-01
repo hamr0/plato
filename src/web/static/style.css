@@ -24,7 +24,34 @@
   /* Accents */
   --accent: #58a6ff;       /* primary — links, mark, active states */
   --accent-warm: #d29922;  /* secondary — reserved for flair pills, NSFW badges, mod highlights */
+  /* Vote signal — distinct from accent so the up/down sense is obvious at a glance */
+  --up: #3fb950;           /* upvote active — affirming green */
+  --down: #58a6ff;         /* downvote active — blue, matches the accent family */
 }
+
+/* ------------------------------------------------------------
+ * THEME PRESETS — copy any block over the :root above to swap.
+ * No build step. Reload the page; everything re-skins.
+ * ------------------------------------------------------------ */
+
+/* :root { --bg:#0d1117; --bg-soft:#161b22; --border:#30363d; --text:#c9d1d9; --text-dim:#8b949e; --accent:#58a6ff; --accent-warm:#d29922; --up:#3fb950; --down:#58a6ff; } */
+/* default — github-dark, blue accent (above)                                                                                                                  */
+
+/* :root { --bg:#1a1a1a; --bg-soft:#222;    --border:#333;    --text:#e6e1cf; --text-dim:#a0998c; --accent:#ffb454; --accent-warm:#ff8f40; --up:#7fd962; --down:#73d0ff; } */
+/* warm-amber — ayu-dark, amber accent. Good for mailing-list-style discussion.                                                                                */
+
+/* :root { --bg:#0f1419; --bg-soft:#161e25; --border:#283037; --text:#bfbdb6; --text-dim:#727169; --accent:#39bae6; --accent-warm:#ffb454; --up:#aad94c; --down:#39bae6; } */
+/* cool-cyan — deep ocean palette, cyan accent.                                                                                                                */
+
+/* :root { --bg:#1e1e2e; --bg-soft:#181825; --border:#313244; --text:#cdd6f4; --text-dim:#7f849c; --accent:#cba6f7; --accent-warm:#fab387; --up:#a6e3a1; --down:#89dceb; } */
+/* mocha-purple — catppuccin mocha, purple accent. Higher contrast for long reads.                                                                             */
+
+/* :root { --bg:#2d2a2e; --bg-soft:#221f22; --border:#403e41; --text:#fcfcfa; --text-dim:#939293; --accent:#78dce8; --accent-warm:#fc9867; --up:#a9dc76; --down:#78dce8; } */
+/* monokai-pro — vibrant accents on warm dark bg. Closer to a code-editor aesthetic.                                                                           */
+
+/* :root { --bg:#fafafa; --bg-soft:#f4f4f5; --border:#d4d4d8; --text:#18181b; --text-dim:#71717a; --accent:#0066cc; --accent-warm:#b45309; --up:#15803d; --down:#0066cc; } */
+/* paper-light — light mode preview. M8 will auto-switch via prefers-color-scheme; for now, paste manually.                                                    */
+
 
 * { box-sizing: border-box; }
 
@@ -229,6 +256,24 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
 }
 .flag-trigger::-webkit-details-marker { display: none; }
 .flag-trigger:hover { color: var(--accent-warm); border-color: var(--accent-warm); }
+.flag-trigger-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  display: inline-block;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+.pager .pager-disabled { opacity: 0.4; }
 .flag-form {
   display: flex;
   gap: 0.4rem;
@@ -395,8 +440,8 @@ button:hover { filter: brightness(1.1); }
 }
 .vote .arrow:hover,
 .vote button.arrow:hover { color: var(--accent); }
-.vote .arrow.up.active { color: var(--green); }
-.vote .arrow.down.active { color: var(--amber); }
+.vote .arrow.up.active { color: var(--up); }
+.vote .arrow.down.active { color: var(--down); }
 .vote .arrow.muted { cursor: default; }
 .vote form.inline { display: inline; margin: 0; }
 

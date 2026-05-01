@@ -25,8 +25,12 @@ import {
   COMMENT_SORTS,
 } from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
-import { canModerate, recordAction, listModActions, MOD_ACTIONS } from '../content/mod.js';
-import { submitFlag, FLAG_CATEGORIES } from '../content/flag.js';
+import {
+  canModerate, recordAction, listModActions, MOD_ACTIONS,
+  listSubsModeratedBy, listModActionsAcrossSubs, countModActionsAcrossSubs,
+  isBanned,
+} from '../content/mod.js';
+import { submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle } from '../content/flag.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 
@@ -137,9 +141,16 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
 function loginStatusFor(db, currentHandle) {
   if (!currentHandle) return html``;
   const pseudonym = pseudonymFor(db, currentHandle);
+  // Mods (owner or co) see a unified `modlog` link in the nav. The link
+  // routes to /modlog (cross-sub) so a mod-of-many subs has one place to
+  // review their actions; the per-sub /sub/<name>/modlog stays public.
+  const modSubs = listSubsModeratedBy(db, currentHandle);
+  const modLogLink = modSubs.length > 0
+    ? html` · <a href="/modlog">modlog</a>`
+    : html``;
   return html`<div class="status muted">
     <img src="/avatar/${currentHandle}.svg" width="16" height="16" alt="">
-    <strong>${pseudonym}</strong>
+    <strong>${pseudonym}</strong>${modLogLink} ·
     <form method="POST" action="/logout" class="inline">
       <button class="link">logout</button>
     </form>
@@ -238,7 +249,7 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
   </div>`;
 }
 
-function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName }) {
+function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
@@ -268,11 +279,15 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
           : html`` })}
         <div class="post-actions">
           ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
-            ? flagButton({ targetType: 'post', targetId: post.id, returnTo: perPostReturn })
+            ? flagButton({
+                targetType: 'post', targetId: post.id, returnTo: perPostReturn,
+                alreadyFlagged: flaggedSet?.has(post.id) ?? false,
+              })
             : html``}
           ${modRole && subName === post.sub_name ? modControls({
             subName, targetType: 'post', targetId: post.id,
             collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
+            authorHandle: post.handle, authorBanned: bannedAuthors?.has(post.handle) ?? false,
           }) : html``}
         </div>
       </div>
@@ -353,6 +368,9 @@ function renderHome(req, res, { db, auth, postsDir }) {
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 280);
   const voteState = votesForPostList(db, posts, currentHandle);
+  const flaggedSet = currentHandle
+    ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
+    : new Set();
 
   send(
     res,
@@ -364,7 +382,7 @@ function renderHome(req, res, { db, auth, postsDir }) {
       <h3 class="section">// new post</h3>
       ${postFormFor({ currentHandle, postableSubs })}
       <h3 class="section">// recent (2 per sub)</h3>
-      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/' })}
+      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/', flaggedSet })}
     `)
   );
 }
@@ -383,6 +401,14 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
   const voteState = votesForPostList(db, posts, currentHandle);
   const returnTo = `/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}`;
   const modRole = canModerate(db, subName, currentHandle);
+  // Per-render flag/ban state: dim the flag button on already-flagged posts
+  // and surface the right ban/unban label per author.
+  const flaggedSet = currentHandle && !modRole
+    ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
+    : new Set();
+  const bannedAuthors = modRole
+    ? new Set(posts.filter((p) => isBanned(db, subName, p.handle)).map((p) => p.handle))
+    : new Set();
 
   const sortNav = html`<div class="sort-nav muted">
     ${SUB_SORTS.map((s) => {
@@ -409,7 +435,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
-      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName })}
+      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
     `)
   );
 }
@@ -691,11 +717,16 @@ function commentNodeView(node, ctx, depth) {
     ${inner}
     <div class="post-actions">
       ${ctx.currentHandle && !removed && !ctx.modRole
-        ? flagButton({ targetType: 'comment', targetId: node.id, returnTo: `${ctx.returnTo}#comment-${node.id}` })
+        ? flagButton({
+            targetType: 'comment', targetId: node.id,
+            returnTo: `${ctx.returnTo}#comment-${node.id}`,
+            alreadyFlagged: ctx.flaggedComments?.has(node.id) ?? false,
+          })
         : html``}
       ${ctx.modRole ? modControls({
         subName: ctx.subName, targetType: 'comment', targetId: node.id,
         collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
+        authorHandle: node.handle, authorBanned: ctx.bannedAuthors?.has(node.handle) ?? false,
       }) : html``}
     </div>
     ${replyForm}
@@ -739,7 +770,23 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     ? getVote(db, { targetType: 'post', targetId: postId, voterHandle: currentHandle })
     : null;
   const modRole = canModerate(db, subName, currentHandle);
-  const treeCtx = { pseudonyms, commentVotes, currentHandle, subName, postId, returnTo, modRole };
+  // Flag-already + ban-state lookups for the post and its comments. One
+  // batch each so the per-row render is a Set membership check.
+  const commentIds = comments.map((c) => c.id);
+  const flaggedPosts = currentHandle && !modRole
+    ? flaggedTargetsByHandle(db, 'post', [postId], currentHandle)
+    : new Set();
+  const flaggedComments = currentHandle && !modRole
+    ? flaggedTargetsByHandle(db, 'comment', commentIds, currentHandle)
+    : new Set();
+  const commentAuthors = [...new Set(comments.map((c) => c.handle))];
+  const bannedAuthors = modRole
+    ? new Set([post.handle, ...commentAuthors].filter((h) => isBanned(db, subName, h)))
+    : new Set();
+  const treeCtx = {
+    pseudonyms, commentVotes, currentHandle, subName, postId, returnTo, modRole,
+    flaggedComments, bannedAuthors,
+  };
 
   const commentSortNav = html`<div class="sort-nav muted">
     ${COMMENT_SORTS.map((s) => {
@@ -764,11 +811,15 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
           <div class="post-actions">
             ${currentHandle && post.removed_at == null && !modRole
-              ? flagButton({ targetType: 'post', targetId: postId, returnTo })
+              ? flagButton({
+                  targetType: 'post', targetId: postId, returnTo,
+                  alreadyFlagged: flaggedPosts.has(postId),
+                })
               : html``}
             ${modRole ? modControls({
               subName, targetType: 'post', targetId: postId,
               collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
+              authorHandle: post.handle, authorBanned: bannedAuthors.has(post.handle),
             }) : html``}
           </div>
         </div>
@@ -948,7 +999,10 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
   </details>`;
 }
 
-function modControls({ subName, targetType, targetId, collapsedAt, removedAt, returnTo }) {
+function modControls({
+  subName, targetType, targetId, collapsedAt, removedAt, returnTo,
+  authorHandle, authorBanned,
+}) {
   const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
   const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
   // Mutual exclusion: hard-removal supersedes soft-collapse. While the item
@@ -958,18 +1012,39 @@ function modControls({ subName, targetType, targetId, collapsedAt, removedAt, re
   // Reason required only on the destructive direction: 'remove'. uncollapse,
   // unremove, and collapse all leave content readable, so the deliberation
   // gate is lighter.
+  // Ban: target_type='handle', target_id=author. Reason required on the
+  // ban direction (it cuts a user out of every write path in this sub),
+  // optional on unban. Skipped entirely when authorHandle isn't known.
+  const banForm = authorHandle
+    ? modActionForm({
+        subName,
+        action: authorBanned ? 'unban' : 'ban',
+        targetType: 'handle',
+        targetId: authorHandle,
+        returnTo,
+        reasonRequired: !authorBanned,
+      })
+    : html``;
   return html`<div class="mod-controls">
     ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo,
       reasonRequired: false, disabled: removedAt != null })}
     ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo,
       reasonRequired: removeAction === 'remove' })}
+    ${banForm}
   </div>`;
 }
 
 // Flag button — every logged-in user can flag any post/comment for mod
 // review. PRD §Spam 7: flagging is separate from downvote; categories
 // are a closed list. Threshold-based auto-hide lives in the flag module.
-function flagButton({ targetType, targetId, returnTo }) {
+function flagButton({ targetType, targetId, returnTo, alreadyFlagged }) {
+  if (alreadyFlagged) {
+    // Dimmed marker: the user already submitted a flag on this target. The
+    // UNIQUE on (target_type, target_id, flagger_handle) would silently
+    // collide on resubmit; rendering the dimmed label up front makes the
+    // state visible instead of swallowing the second click.
+    return html`<span class="flag-trigger muted flag-trigger-disabled" title="you flagged this">flagged</span>`;
+  }
   return html`<details class="flag-form-wrap">
     <summary class="flag-trigger muted">flag</summary>
     <form method="POST" action="/flag" class="flag-form">
@@ -1099,6 +1174,84 @@ function renderModLog(req, res, { db, auth }, subName) {
   `));
 }
 
+// Cross-sub modlog for the current user's mod-of subs. Mods of multiple
+// subs get one paginated, sortable view rather than N separate per-sub
+// pages. Sub name is the first column so a multi-sub mod can filter by
+// eye. 25 rows per page.
+const MODLOG_PAGE_SIZE = 25;
+
+function renderMyModLog(req, res, { db, auth }, page) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to view your mod log.</p>`));
+  }
+  const subNames = listSubsModeratedBy(db, currentHandle);
+  if (subNames.length === 0) {
+    return send(res, 403, layout('not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
+  }
+  const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+  const offset = (safePage - 1) * MODLOG_PAGE_SIZE;
+  const total = countModActionsAcrossSubs(db, subNames);
+  const totalPages = Math.max(1, Math.ceil(total / MODLOG_PAGE_SIZE));
+  const actions = listModActionsAcrossSubs(db, subNames, { limit: MODLOG_PAGE_SIZE, offset });
+  const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
+  const pseudonyms = pseudonymsByHandle(db, handles);
+
+  // Comment → post lookup batched once across all rows.
+  const commentIds = actions.filter((a) => a.target_type === 'comment').map((a) => a.target_id);
+  const commentToPost = new Map();
+  if (commentIds.length > 0) {
+    const placeholders = commentIds.map(() => '?').join(',');
+    const rows = db.prepare(
+      `SELECT id, post_id FROM comments WHERE id IN (${placeholders})`
+    ).all(...commentIds);
+    for (const r of rows) commentToPost.set(r.id, r.post_id);
+  }
+  const targetCell = (a) => {
+    if (a.target_type === 'post') {
+      return html`<a href="/sub/${a.sub_name}/post/${a.target_id}">post ${a.target_id.slice(0, 12)}</a>`;
+    }
+    if (a.target_type === 'comment') {
+      const postId = commentToPost.get(a.target_id);
+      return postId
+        ? html`<a href="/sub/${a.sub_name}/post/${postId}#comment-${a.target_id}">comment ${a.target_id.slice(0, 12)}</a>`
+        : html`<span class="muted">comment ${a.target_id.slice(0, 12)}</span>`;
+    }
+    return html`<span class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</span>`;
+  };
+
+  const pager = totalPages > 1
+    ? html`<nav class="pager muted">
+        ${safePage > 1 ? html`<a href="/modlog?page=${safePage - 1}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
+        <span>page ${safePage} / ${totalPages} · ${total} actions</span>
+        ${safePage < totalPages ? html`<a href="/modlog?page=${safePage + 1}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+      </nav>`
+    : html`<p class="muted">${total} action${total === 1 ? '' : 's'}.</p>`;
+
+  const rowsView = actions.length === 0
+    ? html`<p class="muted">no mod actions yet.</p>`
+    : html`<table class="modlog">
+        <thead><tr><th>sub</th><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
+        <tbody>${actions.map((a) => html`<tr>
+          <td><a href="/sub/${a.sub_name}/modlog">/sub/${a.sub_name}</a></td>
+          <td class="muted">${relativeTime(a.created_at)}</td>
+          <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
+          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
+          <td>${targetCell(a)}</td>
+          <td class="muted">${a.reason ?? ''}</td>
+        </tr>`)}</tbody>
+      </table>`;
+
+  send(res, 200, layout('/modlog', html`
+    ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
+    <p><a href="/">← home</a> · my modlog</p>
+    <h2>// my mod log</h2>
+    <p class="muted">every action across the ${subNames.length} sub${subNames.length === 1 ? '' : 's'} you moderate.</p>
+    ${rowsView}
+    ${pager}
+  `));
+}
+
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
@@ -1138,6 +1291,10 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       }
       if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
         return renderModLog(req, res, { db, auth }, m[1]);
+      }
+      if (path === '/modlog' && method === 'GET') {
+        const page = Number.parseInt(url.searchParams.get('page') ?? '1', 10);
+        return renderMyModLog(req, res, { db, auth }, page);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));

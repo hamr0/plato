@@ -150,12 +150,46 @@ export function recordAction(db, {
 
 export function listModActions(db, subName, { limit = 100, offset = 0 } = {}) {
   return db.prepare(
-    `SELECT id, mod_handle, action, target_type, target_id, reason, created_at
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at
      FROM mod_actions
      WHERE sub_name = ?
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`
   ).all(subName, limit, offset);
+}
+
+// Subs (by name) where this handle has any mod role (owner or co). Used to
+// surface a "modlog" link in the header for active mods, and to gate the
+// cross-sub /modlog view to actions in the user's own subs.
+export function listSubsModeratedBy(db, handle) {
+  if (!handle) return [];
+  return db.prepare(
+    `SELECT sub_name FROM sub_mods WHERE handle = ? ORDER BY sub_name ASC`
+  ).all(handle).map((r) => r.sub_name);
+}
+
+// Cross-sub mod actions for a multi-sub mod. Includes sub_name in each row
+// so the unified modlog view can render it as the first column. Pagination
+// is required because a busy mod can rack up hundreds of actions; 25/page
+// is the operator-ergonomic default surfaced in the UI.
+export function listModActionsAcrossSubs(db, subNames, { limit = 25, offset = 0 } = {}) {
+  if (!subNames || subNames.length === 0) return [];
+  const placeholders = subNames.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at
+     FROM mod_actions
+     WHERE sub_name IN (${placeholders})
+     ORDER BY created_at DESC
+     LIMIT ? OFFSET ?`
+  ).all(...subNames, limit, offset);
+}
+
+export function countModActionsAcrossSubs(db, subNames) {
+  if (!subNames || subNames.length === 0) return 0;
+  const placeholders = subNames.map(() => '?').join(',');
+  return db.prepare(
+    `SELECT COUNT(*) AS n FROM mod_actions WHERE sub_name IN (${placeholders})`
+  ).get(...subNames).n;
 }
 
 export function isBanned(db, subName, handle) {

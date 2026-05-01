@@ -104,6 +104,21 @@ export function resolveFlag(db, { flagId, resolverHandle, resolution, now = Date
   }
 }
 
+// Targets the given handle has already flagged among a candidate id list.
+// Used by render to dim the flag button on visible posts/comments where
+// the current user has already submitted a flag — avoids the silent
+// double-submit-then-UNIQUE-collision flow. Returns a Set of target ids.
+export function flaggedTargetsByHandle(db, targetType, targetIds, handle) {
+  if (!handle || !targetIds || targetIds.length === 0) return new Set();
+  const placeholders = targetIds.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT target_id FROM flags
+     WHERE target_type = ? AND flagger_handle = ?
+       AND target_id IN (${placeholders})`
+  ).all(targetType, handle, ...targetIds);
+  return new Set(rows.map((r) => r.target_id));
+}
+
 // Mod queue: pending flags grouped by target, joined with target sub for
 // per-sub scoping. Returns each target once with its pending flag count
 // and the most-recent flag's timestamp for sorting.
