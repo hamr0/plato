@@ -566,6 +566,7 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Push notifications (email digests only)
 - Custom themes per sub
 - AI-assisted moderation
+- **Light mode (deferred to M8 polish, not v1).** `build-plan.md:22, 251` already place dark-mode-via-CSS-variables in M8 production polish, and light mode comes free with the same work — extracting hardcoded hex into a `:root` palette and adding a `@media (prefers-color-scheme: light)` block. Doing it now means doing it twice (current palette → audited palette at M8). Brand identity is still settling (logo + `--accent-warm` locked this milestone, terminal aesthetic locked at M1) — adding light mode today forces a parallel palette decision before the dark palette has shipped to real users. **Working rule until M8:** every new color goes in as a `--*` CSS variable, never hardcoded — that way M8's light-mode work is "add a `@media` block," not "grep the codebase for `#58a6ff`." If a user explicitly asks for light mode before M8, revisit.
 
 ## Permanently out (not a v1 limitation, a design choice)
 
