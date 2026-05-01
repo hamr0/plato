@@ -292,7 +292,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 12. Ban evasion correlation | deferred | post-v1; needs IP /24 grouping infrastructure |
 | 13. No DMs in v1 | locked | DM is permanently out |
 | 14. No media hosting | locked | text-only is permanent |
-| 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` for mods |
+| 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` for mods; M5/B6 surfaces system auto-actions as `system`-attributed audit rows |
 
 The deferred items aren't blockers for an unannounced public trial; the shipped layer is enough that an attacker who gets through magic-link → tiered rate limit → link cap → spam regex → URLhaus has already done more work than spamming a typical small instance is worth.
 

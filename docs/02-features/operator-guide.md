@@ -139,6 +139,8 @@ The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/d
 
 The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch (or wait for the next deploy). Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
 
+**System events in the modlog.** Spam-regex and URLhaus auto-collapses also write a `mod_actions` row attributed to the `system` pseudonym. They appear in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog` so anyone can see when and why the system intervened. Use `/modlog?mod=system` to view only auto-actions; the `reason` column carries the pattern source or blocked host.
+
 ---
 
 ## What's locked in (changing means forking)
@@ -218,7 +220,7 @@ The aesthetic is **terminal-honest**. Mono font where it fits, no emoji unless t
 
 ## What's coming next
 
-- **M5 — Mod surface + spam defenses (mostly done).** Unified `/modlog` (open/inbox/audit) shipped. Forum-wide rate limits, per-sub topic-flood limit, link cap, regex spam-patterns, URLhaus hourly cron all shipped. Still open: per-sub flag-threshold override (currently 3 globally), per-sub flairs (closed-list, owner-curated), per-sub NSFW banner, "new account" tag in mod queue.
+- **M5 — Mod surface + spam defenses (mostly done).** Unified `/modlog` (open/inbox/audit) shipped. Forum-wide rate limits, per-sub topic-flood limit, link cap, regex spam-patterns, URLhaus hourly cron all shipped. M5/B6 added system-attributed audit rows so spam-regex and URLhaus auto-collapses appear in the public modlog with `mod_handle = system`. Still open: per-sub flag-threshold override (currently 3 globally), per-sub flairs (closed-list, owner-curated), per-sub NSFW banner, "new account" tag in mod queue.
 - **M6 — Subscriptions and notifications.** Follow a sub, get a per-sub notification preference (none / new posts / comments on my posts).
 - **M7 — Search.** SQLite FTS5 over post titles and bodies and comments. No external service.
 - **M8 — Operator polish.** Light-mode toggle (forkable tokens already in place). Opinionated Caddy config. Install script. systemd unit.

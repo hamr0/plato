@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.0 (M4 + M5 mod surface + M5 defenses shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.1 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -214,6 +214,8 @@ Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopho
 `spam-patterns.txt` is the operator's per-instance regex set, one line per pattern, `#` comments, blank-line tolerant. Bad regex skips with a stderr warning. Restart picks up edits.
 
 `bin/refresh-urlhaus.js` is a standalone fetcher meant for system cron (`0 * * * *`). Restart plato to pick up a fresh fetch — the host set is built once at boot.
+
+System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` row attributed to `SYSTEM_HANDLE` (pseudonym `system`) in addition to the system flag. They surface in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog`, with the pattern source or blocked host carried in the `reason` column. Filter with `?mod=system` to isolate auto-actions.
 
 ### Per-sub settings (set via `/sub/create` form)
 
