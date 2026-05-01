@@ -477,6 +477,227 @@ test('M2: /draft to unknown sub returns 400', async (t) => {
   assert.match(await res.text(), /doesn't exist/);
 });
 
+test('M3: legacy /post/<id> 301 redirects to /sub/<name>/post/<id>', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
+  const handle = 'h'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'legacy-test', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('1'.repeat(16), 'lobby', handle, 't', 'posts/legacy.md', Date.now());
+
+  const res = await fetch(`${baseUrl}/post/${'1'.repeat(16)}`, { redirect: 'manual' });
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get('location'), `/sub/lobby/post/${'1'.repeat(16)}`);
+});
+
+test('M3: GET /sub/<name>/post/<id> renders post + comment form when logged in', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer, postsDir } = ctx;
+
+  ensureSub(db, 'lobby');
+
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'reader@example.com', { db });
+
+  // Post via the route to get a real file on disk.
+  let res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'lobby', title: 'about plato', body: 'a forum' }),
+  });
+  assert.equal(res.status, 302);
+  const subUrl = res.headers.get('location');
+  assert.match(subUrl, /\/sub\/lobby$/);
+
+  // Pull the post id from the sub page.
+  res = await jarFetch(jar, baseUrl + subUrl);
+  const sub = await res.text();
+  const m = sub.match(/href="(\/sub\/lobby\/post\/[0-9a-f]{16})"/);
+  assert.ok(m, 'permalink found on sub page');
+  const permalink = m[1];
+
+  res = await jarFetch(jar, baseUrl + permalink);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /about plato/, 'title rendered');
+  assert.match(body, /a forum/, 'body rendered');
+  assert.match(body, /comments \(0\)/, 'empty comment header');
+  assert.match(body, /name="body"/, 'comment form exists');
+});
+
+test('M3: POST /sub/<name>/post/<id>/comment adds a comment, redirects back', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'commenter@example.com', { db });
+
+  // Create a post.
+  let res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'lobby', title: 'topic', body: 'discuss' }),
+  });
+  assert.equal(res.status, 302);
+  const postId = db.prepare("SELECT id FROM posts WHERE title = 'topic'").get().id;
+  const permalink = `/sub/lobby/post/${postId}`;
+
+  // Add a top-level comment.
+  res = await jarFetch(jar, baseUrl + `${permalink}/comment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body: 'first reply with **markdown**' }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), permalink);
+
+  res = await jarFetch(jar, baseUrl + permalink);
+  const body = await res.text();
+  assert.match(body, /comments \(1\)/);
+  assert.match(body, /<strong>markdown<\/strong>/);
+});
+
+test('M3: POST /sub/<name>/post/<id>/comment requires login', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
+  const handle = 'k'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'author', Date.now());
+  const postId = '2'.repeat(16);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(postId, 'lobby', handle, 't', 'posts/x.md', Date.now());
+
+  const res = await fetch(`${baseUrl}/sub/lobby/post/${postId}/comment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body: 'b' }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test('M3: POST /vote upvote, score updates, redirect honored', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'voter@example.com', { db });
+  // Voter is brand new (just created via login bootstrap), so half-weight on
+  // a freshly-created post. Backdate first_seen_at to remove that wrinkle.
+  db.prepare("UPDATE handles SET first_seen_at = ? WHERE pseudonym != ?")
+    .run(Date.now() - 30 * 24 * 60 * 60 * 1000, 'never');
+
+  // A post by another author.
+  const author = 'a'.repeat(64);
+  db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'author-x', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const postId = '3'.repeat(16);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(postId, 'lobby', author, 'votable', 'posts/v.md', Date.now());
+
+  let res = await jarFetch(jar, baseUrl + '/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post',
+      target_id: postId,
+      direction: 'up',
+      return_to: '/sub/lobby',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/lobby');
+
+  const score = db.prepare('SELECT score FROM posts WHERE id = ?').get(postId).score;
+  assert.equal(score, 1.0);
+});
+
+test('M3: POST /vote requires login', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+
+  const res = await fetch(baseUrl + '/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ target_type: 'post', target_id: 'x', direction: 'up' }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test('M3: /vote return_to path is whitelisted to local paths', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'voter2@example.com', { db });
+  db.prepare("UPDATE handles SET first_seen_at = ?")
+    .run(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const author = 'q'.repeat(64);
+  db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'q-author', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const postId = '4'.repeat(16);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(postId, 'lobby', author, 't', 'posts/q.md', Date.now());
+
+  const res = await jarFetch(jar, baseUrl + '/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post',
+      target_id: postId,
+      direction: 'up',
+      return_to: 'https://evil.example.com/x',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/', 'malicious external return_to rewritten to /');
+});
+
+test('M3: ?sort=top reorders sub page by score', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
+  const handle = 'z'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'sort-test', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const insertPost = db.prepare(
+    `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, score)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  // newest = lowest score; oldest = highest score
+  insertPost.run('a'.repeat(16), 'lobby', handle, 'fresh-low',  'posts/a.md', Date.now(),         1);
+  insertPost.run('b'.repeat(16), 'lobby', handle, 'old-high',   'posts/b.md', Date.now() - 9999,  10);
+
+  let res = await fetch(baseUrl + '/sub/lobby?sort=new');
+  let body = await res.text();
+  assert.ok(body.indexOf('fresh-low') < body.indexOf('old-high'), 'new: fresh first');
+
+  res = await fetch(baseUrl + '/sub/lobby?sort=top');
+  body = await res.text();
+  assert.ok(body.indexOf('old-high') < body.indexOf('fresh-low'), 'top: high score first');
+});
+
 test('SECURITY: title with HTML is escaped on home page', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

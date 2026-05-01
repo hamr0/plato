@@ -140,10 +140,25 @@ button:hover { filter: brightness(1.1); }
   color: var(--text-dim);
   font-size: 0.75rem;
   min-width: 2.2rem;
+  gap: 1px;
 }
 .vote .score { color: var(--text); font-weight: 600; font-size: 0.9rem; }
-.vote .arrow { font-size: 0.85rem; line-height: 1; padding: 1px 0; cursor: pointer; }
-.vote .arrow:hover { color: var(--accent); }
+.vote .arrow,
+.vote button.arrow {
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 1px 4px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+}
+.vote .arrow:hover,
+.vote button.arrow:hover { color: var(--accent); }
+.vote .arrow.up.active { color: var(--green); }
+.vote .arrow.down.active { color: var(--amber); }
+.vote .arrow.muted { cursor: default; }
+.vote form.inline { display: inline; margin: 0; }
 
 .post .body h2 { margin: 0 0 0.3rem; font-size: 0.95rem; font-weight: 600; }
 .post .body h2 a { color: var(--text); }
@@ -183,6 +198,57 @@ button:hover { filter: brightness(1.1); }
   font-size: 0.82rem;
   color: var(--accent);
 }
+
+.sort-nav {
+  display: flex;
+  gap: 0.9rem;
+  font-size: 0.82rem;
+  margin: 0.3rem 0 0.8rem;
+}
+
+.post-page { border-bottom: 0; }
+.post-page article { margin-top: 1rem; }
+
+.comment {
+  border-left: 1px solid var(--border);
+  padding: 0.6rem 0 0.6rem 0.8rem;
+  margin: 0.6rem 0 0.6rem 0;
+}
+.comment.depth-1 { margin-left: 1.2rem; }
+.comment.depth-2 { margin-left: 2.4rem; }
+.comment.depth-3 { margin-left: 3.6rem; }
+.comment.depth-4 { margin-left: 4.8rem; }
+.comment.depth-5 { margin-left: 6.0rem; }
+.comment.depth-6 { margin-left: 7.2rem; }
+.comment.depth-7 { margin-left: 8.4rem; }
+.comment.depth-8 { margin-left: 9.6rem; }
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.3rem;
+}
+.comment-header .vote {
+  flex-direction: row;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.comment-body {
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+.comment-body p { margin: 0.3rem 0; }
+.comment-body p:first-child { margin-top: 0; }
+.comment-body p:last-child { margin-bottom: 0; }
+
+.comment-collapsed > summary { cursor: pointer; padding: 0.2rem 0; }
+.comment-collapsed[open] > summary { color: var(--text); }
+
+.reply { margin-top: 0.4rem; }
+.reply > summary { cursor: pointer; font-size: 0.82rem; }
+.reply-form { margin-top: 0.4rem; }
+.reply-form textarea { min-height: 60px; }
 
 .meta {
   color: var(--text-dim);

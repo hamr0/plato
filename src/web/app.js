@@ -10,6 +10,7 @@ import {
   getPostPreview,
   listRecentPostsCappedPerSub,
   listPostsInSub,
+  SUB_SORTS,
 } from '../content/post.js';
 import {
   createSub,
@@ -18,6 +19,9 @@ import {
   validateSubName,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
+import { addComment, listCommentsForPost, buildCommentTree } from '../content/comment.js';
+import { castVote, getVote } from '../content/vote.js';
+import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 
 const HANDLE_RE = /^[0-9a-f]{1,128}$/;
@@ -132,30 +136,88 @@ function postFormFor({ currentHandle, defaultSub, postableSubs }) {
   </form>`;
 }
 
-function postRowsView(posts, pseudonyms, previews) {
+function permalinkFor(post) {
+  return `/sub/${post.sub_name}/post/${post.id}`;
+}
+
+function formatScore(n) {
+  // Cached score is REAL (half-weights from new accounts). Show one decimal
+  // only when the value isn't whole; integers render cleanly.
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function voteWidget({ targetType, targetId, score, currentVote, currentHandle, returnTo }) {
+  // No JS: each arrow is its own POST form. Server toggles and redirects.
+  // currentVote is 'up' / 'down' / null — used to highlight the active
+  // arrow. Anonymous users see arrows as muted text (no form, no action).
+  if (!currentHandle) {
+    return html`<div class="vote">
+      <span class="arrow muted">▲</span>
+      <span class="score">${formatScore(score)}</span>
+      <span class="arrow muted">▼</span>
+    </div>`;
+  }
+  const upClass = currentVote === 'up' ? 'arrow up active' : 'arrow up';
+  const downClass = currentVote === 'down' ? 'arrow down active' : 'arrow down';
+  return html`<div class="vote">
+    <form method="POST" action="/vote" class="inline">
+      <input type="hidden" name="target_type" value="${targetType}">
+      <input type="hidden" name="target_id" value="${targetId}">
+      <input type="hidden" name="direction" value="up">
+      <input type="hidden" name="return_to" value="${returnTo}">
+      <button class="${upClass}" title="upvote">▲</button>
+    </form>
+    <span class="score">${formatScore(score)}</span>
+    <form method="POST" action="/vote" class="inline">
+      <input type="hidden" name="target_type" value="${targetType}">
+      <input type="hidden" name="target_id" value="${targetId}">
+      <input type="hidden" name="direction" value="down">
+      <input type="hidden" name="return_to" value="${returnTo}">
+      <button class="${downClass}" title="downvote">▼</button>
+    </form>
+  </div>`;
+}
+
+function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo }) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
   return posts.map((post) => {
     const name = pseudonyms.get(post.handle) ?? post.handle.slice(0, 8);
     const preview = previews?.get(post.id);
+    const link = permalinkFor(post);
     return html`<div class="post">
-      <div class="vote">
-        <span class="arrow">▲</span>
-        <span class="score">0</span>
-        <span class="arrow">▼</span>
-      </div>
+      ${voteWidget({
+        targetType: 'post',
+        targetId: post.id,
+        score: post.score ?? 0,
+        currentVote: voteState?.get(post.id) ?? null,
+        currentHandle,
+        returnTo,
+      })}
       <div class="body">
-        <h2><a href="/post/${post.id}">${post.title}</a></h2>
+        <h2><a href="${link}">${post.title}</a></h2>
         ${authorMeta(post, name)}
         ${preview
           ? html`<div class="preview">${raw(preview.html)}${preview.truncated
-              ? html` <a href="/post/${post.id}" class="more">read more →</a>`
+              ? html` <a href="${link}" class="more">read more →</a>`
               : html``}</div>`
           : html``}
       </div>
     </div>`;
   });
+}
+
+function votesForPostList(db, posts, currentHandle) {
+  if (!currentHandle || posts.length === 0) return new Map();
+  const placeholders = posts.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT target_id, value FROM votes
+     WHERE target_type = 'post' AND handle = ? AND target_id IN (${placeholders})`
+  ).all(currentHandle, ...posts.map((p) => p.id));
+  const map = new Map();
+  for (const r of rows) map.set(r.target_id, r.value > 0 ? 'up' : 'down');
+  return map;
 }
 
 function buildPreviews(posts, postsDir, maxChars) {
@@ -186,6 +248,7 @@ function renderHome(req, res, { db, auth, postsDir }) {
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 280);
+  const voteState = votesForPostList(db, posts, currentHandle);
 
   send(
     res,
@@ -201,23 +264,33 @@ function renderHome(req, res, { db, auth, postsDir }) {
       <h3 class="section">// new post</h3>
       ${postFormFor({ currentHandle, postableSubs })}
       <h3 class="section">// recent (2 per sub)</h3>
-      ${postRowsView(posts, pseudonyms, previews)}
+      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/' })}
     `)
   );
 }
 
-function renderSubPage(req, res, { db, auth, postsDir }, subName) {
+function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
   const sub = getSubByName(db, subName);
   if (!sub) {
     return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
   }
-  const posts = listPostsInSub(db, subName, { limit: 50 });
+  const activeSort = SUB_SORTS.includes(sort) ? sort : 'new';
+  const posts = listPostsInSub(db, subName, { limit: 50, sort: activeSort });
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
-  // Sub page is still scan mode — about double the home preview. Long posts
-  // truncate with "read more →" to the permalink (where comments will live).
   const previews = buildPreviews(posts, postsDir, 600);
+  const voteState = votesForPostList(db, posts, currentHandle);
+  const returnTo = `/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}`;
+
+  const sortNav = html`<div class="sort-nav muted">
+    ${SUB_SORTS.map((s) => {
+      const href = s === 'new' ? `/sub/${subName}` : `/sub/${subName}?sort=${s}`;
+      return s === activeSort
+        ? html`<strong>${s}</strong>`
+        : html`<a href="${href}">${s}</a>`;
+    })}
+  </div>`;
 
   send(
     res,
@@ -233,8 +306,9 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName) {
       ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
-      <h3 class="section">// posts</h3>
-      ${postRowsView(posts, pseudonyms, previews)}
+      <h3 class="section">// posts · sort:</h3>
+      ${sortNav}
+      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo })}
     `)
   );
 }
@@ -404,28 +478,168 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
   redirect(res, `/sub/${result.subName}`);
 }
 
-function renderPost(req, res, { db, postsDir }, postId) {
+// Comment tree render. Depth is unbounded; we cap visual indent at 8 levels
+// so deep replies don't disappear off-screen but still maintain order.
+const COLLAPSE_THRESHOLD = -3;
+const MAX_INDENT_DEPTH = 8;
+
+function commentNodeView(node, ctx, depth) {
+  const pseudonym = ctx.pseudonyms.get(node.handle) ?? node.handle.slice(0, 8);
+  const collapsed = node.score <= COLLAPSE_THRESHOLD;
+  const indent = Math.min(depth, MAX_INDENT_DEPTH);
+  const replyForm = ctx.currentHandle
+    ? html`<details class="reply"><summary class="muted">reply</summary>
+        <form method="POST" action="/sub/${ctx.subName}/post/${ctx.postId}/comment" class="reply-form">
+          <input type="hidden" name="parent_id" value="${node.id}">
+          <textarea name="body" placeholder="markdown reply" required></textarea>
+          <button>reply</button>
+        </form>
+      </details>`
+    : html``;
+
+  const body = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
+
+  const inner = collapsed
+    ? html`<details class="comment-collapsed">
+        <summary class="muted">(score ${formatScore(node.score)}) collapsed comment by ${pseudonym}. show.</summary>
+        ${body}
+      </details>`
+    : body;
+
+  return html`<div class="comment depth-${indent}">
+    <div class="comment-header">
+      ${voteWidget({
+        targetType: 'comment',
+        targetId: node.id,
+        score: node.score,
+        currentVote: ctx.commentVotes.get(node.id) ?? null,
+        currentHandle: ctx.currentHandle,
+        returnTo: ctx.returnTo,
+      })}
+      <div class="meta">
+        <img src="/avatar/${node.handle}.svg" width="16" height="16" alt="">
+        <span class="name">${pseudonym}</span>
+        <span class="when">· ${relativeTime(node.created_at)}</span>
+      </div>
+    </div>
+    ${inner}
+    ${replyForm}
+    ${node.replies.length > 0
+      ? html`<div class="replies">${node.replies.map((r) => commentNodeView(r, ctx, depth + 1))}</div>`
+      : html``}
+  </div>`;
+}
+
+function commentVotesFor(db, comments, currentHandle) {
+  if (!currentHandle || comments.length === 0) return new Map();
+  const placeholders = comments.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT target_id, value FROM votes
+     WHERE target_type = 'comment' AND handle = ? AND target_id IN (${placeholders})`
+  ).all(currentHandle, ...comments.map((c) => c.id));
+  const map = new Map();
+  for (const r of rows) map.set(r.target_id, r.value > 0 ? 'up' : 'down');
+  return map;
+}
+
+function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
+  }
   const result = getPost(db, postId, postsDir);
-  if (!result) {
-    return send(res, 404, layout('not found', html`<p class="muted">post not found.</p>`));
+  if (!result || result.post.sub_name !== subName) {
+    return send(res, 404, layout('not found', html`<p class="muted">post not found in this sub.</p>`));
   }
 
   const { post, bodyHtml } = result;
-  const pseudonym = pseudonymFor(db, post.handle);
+  const currentHandle = auth.handleFromRequest(req);
+  const returnTo = permalinkFor(post);
+
+  const comments = listCommentsForPost(db, postId);
+  const tree = buildCommentTree(comments);
+  const allHandles = [...new Set([post.handle, ...comments.map((c) => c.handle)])];
+  const pseudonyms = pseudonymsByHandle(db, allHandles);
+  const commentVotes = commentVotesFor(db, comments, currentHandle);
+  const postVote = currentHandle
+    ? getVote(db, { targetType: 'post', targetId: postId, voterHandle: currentHandle })
+    : null;
+  const treeCtx = { pseudonyms, commentVotes, currentHandle, subName, postId, returnTo };
 
   send(
     res,
     200,
-    layout(
-      post.title,
-      html`
-        <p><a href="/">← home</a></p>
-        ${authorMeta(post, pseudonym)}
-        <h1>${post.title}</h1>
-        <article>${raw(bodyHtml)}</article>
-      `
-    )
+    layout(post.title, html`
+      ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a></p>
+      <div class="post post-page">
+        ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
+        <div class="body">
+          <h1>${post.title}</h1>
+          ${authorMeta(post, pseudonyms.get(post.handle))}
+          <article>${raw(bodyHtml)}</article>
+        </div>
+      </div>
+
+      <h3 class="section">// comments (${comments.length})</h3>
+      ${currentHandle
+        ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
+            <textarea name="body" placeholder="add a comment in markdown" required></textarea>
+            <button>comment</button>
+          </form>`
+        : html`<p class="muted">log in to comment.</p>`}
+
+      ${tree.length === 0
+        ? html`<p class="muted">no comments yet.</p>`
+        : tree.map((node) => commentNodeView(node, treeCtx, 0))}
+    `)
   );
+}
+
+async function handleAddComment(req, res, { db, auth }, subName, postId) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to comment.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { body: commentBody, parent_id: parentId } = form;
+  if (!commentBody || commentBody.trim().length === 0) {
+    return send(res, 400, layout('empty', html`<p class="muted">comment body required.</p>`));
+  }
+  try {
+    addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
+  } catch (err) {
+    return send(res, 400, layout('comment failed', html`<p class="muted">${err.message}</p>`));
+  }
+  redirect(res, `/sub/${subName}/post/${postId}`);
+}
+
+async function handleVote(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to vote.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { target_type: targetType, target_id: targetId, direction, return_to: returnTo } = form;
+  try {
+    castVote(db, { targetType, targetId, voterHandle: handle, direction });
+  } catch (err) {
+    return send(res, 400, layout('vote failed', html`<p class="muted">${err.message}</p>`));
+  }
+  // Redirect back to wherever the vote button was clicked. Whitelist the
+  // path to keep an attacker from using /vote as an open redirect.
+  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/';
+  redirect(res, safeReturn);
+}
+
+// Legacy /post/<id> from M1/M2: redirect to the canonical sub-namespaced URL.
+function redirectLegacyPost(req, res, { db }, postId) {
+  const post = db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(postId);
+  if (!post) return send(res, 404, layout('not found', html`<p class="muted">post not found.</p>`));
+  res.writeHead(301, { Location: `/sub/${post.sub_name}/post/${postId}` });
+  res.end();
 }
 
 function renderAvatar(res, handle) {
@@ -440,6 +654,8 @@ function renderAvatar(res, handle) {
 }
 
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
+const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
+const SUB_POST_COMMENT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/comment$/;
 
 export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
   return async function handler(req, res) {
@@ -460,18 +676,25 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir });
       }
+      if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { auth });
       if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
 
       let m;
+      if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
+        return handleAddComment(req, res, { db, auth }, m[1], m[2]);
+      }
+      if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
+        return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2]);
+      }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
-        return renderSubPage(req, res, { db, auth, postsDir }, m[1]);
+        return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'));
       }
       if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
         return handleFinalize(req, res, { db, auth, postsDir }, m[1]);
       }
       if ((m = path.match(/^\/post\/([0-9a-f]{16})$/)) && method === 'GET') {
-        return renderPost(req, res, { db, postsDir }, m[1]);
+        return redirectLegacyPost(req, res, { db }, m[1]);
       }
       if ((m = path.match(/^\/avatar\/([0-9a-f]+)\.svg$/)) && method === 'GET') {
         return renderAvatar(res, m[1]);

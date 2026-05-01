@@ -29,7 +29,7 @@ Social media corrupted attention, manufactured followers, and turned discourse i
 
 ## Status
 
-In active development. The architecture is validated end-to-end (a stranger can post via magic link and the post appears under a generated pseudonym, with zero PII stored). Phase 2 implementation is in progress under a milestone plan; see the [build plan](docs/01-product/build-plan.md).
+In active development. M1 (foundation, identity, post lifecycle), M2 (multi-tenant subs, sub creation, front-page cap, per-sub URL paths) and M3 (hierarchical comments, upvote/downvote with new-account weighting, hot/new/top/old sort) have shipped. Magic-link works end-to-end, posts and comments render with deterministic pseudonyms and identicons, and all writes go through `npm test` (191 tests). See the [build plan](docs/01-product/build-plan.md) for what's queued next (M4 moderation).
 
 ## Try it locally
 
