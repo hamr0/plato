@@ -629,6 +629,41 @@ test('M3: POST /sub/<name>/post/<id>/comment adds a comment, redirects back', as
   assert.match(body, /<strong>markdown<\/strong>/);
 });
 
+test('M3: POST /comment with Accept: application/json returns rendered fragment, no redirect', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'json-commenter@example.com', { db });
+
+  let res = await jarFetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'lobby', title: 'json-topic', body: 'go' }),
+  });
+  assert.equal(res.status, 302);
+  const postId = db.prepare("SELECT id FROM posts WHERE title = 'json-topic'").get().id;
+
+  res = await jarFetch(jar, baseUrl + `/sub/lobby/post/${postId}/comment`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
+    },
+    body: new URLSearchParams({ body: 'inline reply' }),
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/json/);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.match(data.commentId, /^[0-9a-f]{16}$/);
+  assert.equal(data.parentId, null);
+  assert.match(data.html, /class="comment"/);
+  assert.match(data.html, /inline reply/);
+});
+
 test('M3: POST /sub/<name>/post/<id>/comment requires login', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

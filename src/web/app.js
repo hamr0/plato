@@ -40,7 +40,8 @@ function layout(title, body) {
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css">
-<script src="/static/vote.js" defer></script>
+<script src="/static/vote.js?v=1" defer></script>
+<script src="/static/comment.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -62,15 +63,9 @@ function logoMark({ size = 22, loading = false } = {}) {
   return html`<svg class="logo-mark" width="${size}" height="${h}" viewBox="0 0 24 8" aria-hidden="true"${attrs}><circle cx="3" cy="4" r="3" opacity="0.4"/><circle cx="12" cy="4" r="3" opacity="0.7"/><circle cx="21" cy="4" r="3"/></svg>`;
 }
 
-// Logo wrapped in a home link. Used in header and footer so clicking
-// anywhere on the brand mark navigates to /.
-function logoHomeLink({ size = 22, withWordmark = false } = {}) {
-  return html`<a href="/" class="logo-home" aria-label="plato — home">${logoMark({ size })}${withWordmark ? html`<span class="wordmark">plato</span>` : html``}</a>`;
-}
-
 function siteFooter() {
   return html`<footer class="site-footer">
-    ${logoHomeLink({ size: 22, withWordmark: true })}
+    <a href="/" class="logo-home">${logoMark({ size: 22 })}<span class="wordmark">plato</span></a>
     <span class="quote muted">— "${PLATO_TAGLINE}"</span>
   </footer>`;
 }
@@ -147,7 +142,7 @@ function anonHintFor(currentHandle) {
 function siteHeader({ db, currentHandle, title, subtitle }) {
   return html`<header class="site">
     <div class="brand">
-      <h1>${logoHomeLink({ size: 32 })}${title ?? html`plato`}</h1>
+      <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${title ?? html`plato`}</a></h1>
       ${subtitle ? html`<div class="nav muted">${subtitle}</div>` : html``}
     </div>
     ${loginStatusFor(db, currentHandle)}
@@ -525,7 +520,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       'check your email',
       html`
         <header>
-          <h1>${logoHomeLink({ size: 32 })}plato · check your email</h1>
+          <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}plato · check your email</a></h1>
         </header>
         <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
         <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
@@ -591,7 +586,7 @@ function commentNodeView(node, ctx, depth) {
     : html``;
 
   const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
-  const isLong = depth > 0 && node.body.length > COMMENT_PREVIEW_CHARS;
+  const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
   const body = isLong
     ? html`<details class="comment-long">
         <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
@@ -735,7 +730,37 @@ async function handleAddComment(req, res, { db, auth }, subName, postId) {
   try {
     result = addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
   } catch (err) {
+    if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
     return send(res, 400, layout('comment failed', html`<p class="muted">${err.message}</p>`));
+  }
+  // JSON branch: client-side comment.js inserts the rendered fragment
+  // in-place so the page doesn't reload. Loading-dots wave shows during
+  // the round-trip. Falls back to native redirect if Accept != JSON.
+  if (wantsJson(req)) {
+    const pseudonym = pseudonymFor(db, handle);
+    const newComment = {
+      id: result.commentId,
+      parent_comment_id: parentId || null,
+      handle,
+      body: commentBody,
+      score: 0,
+      created_at: Date.now(),
+      replies: [],
+    };
+    const ctx = {
+      pseudonyms: new Map([[handle, pseudonym]]),
+      commentVotes: new Map(),
+      currentHandle: handle,
+      subName,
+      postId,
+      returnTo: `/sub/${subName}/post/${postId}`,
+    };
+    return sendJson(res, 200, {
+      ok: true,
+      commentId: result.commentId,
+      parentId: parentId || null,
+      html: render(commentNodeView(newComment, ctx, parentId ? 1 : 0)),
+    });
   }
   // Land on the new comment so the user sees their submission in context
   // instead of the page jumping to the top.

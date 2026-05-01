@@ -6,3 +6,4 @@ node_modules/
 *.db-wal
 posts/
 .claude/
+.barebrowse/

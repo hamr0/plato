@@ -72,6 +72,14 @@ header h1 .logo-mark {
 }
 @media (prefers-reduced-motion: reduce) {
   .logo-mark[data-loading] circle { animation: none; opacity: 1; }
+  .comment-just-added { background: var(--bg-soft); }
+}
+
+/* Newly-inserted comment via comment.js: brief background fade so the
+ * user sees where their submission landed. Removed after 1.5s by JS. */
+.comment-just-added {
+  background: var(--bg-soft);
+  transition: background 1.2s ease-out;
 }
 
 /* Site footer — the ∴plato attribution mark. Stays in every fork: the
