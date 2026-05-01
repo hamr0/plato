@@ -612,6 +612,14 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Spam stays under 1% of total posts with default settings.
 - The product description fits in one tweet: *"A forum that lives at one URL. Magic-link to post. Search and read on the web. Owner moderates; mod actions are public; if it goes bad, fork the archive."*
 
+## Public-trial readiness
+
+The first public deployment is a **demonstration of the architecture**, not a permanent home. The domain plato runs at on day one is interchangeable; the software is the product. Three rules govern launch:
+
+- **Two-name framing.** The software is *plato*. The site is whatever URL it happens to live at this week. Tagline copy and footer line reinforce the split: *"plato — running at terribic.com today, your fork tomorrow."* The impermanence of the domain is the message, not an accident.
+- **Two instances on day one, even if the second one is empty.** Hosting at exactly one URL collapses the message back to "this is a forum at this URL," which is what every other platform also says. A second running instance — even with three posts and no users — is the structural proof that the domain is chrome and the software is the product. Set up before announcing the first.
+- **M5 closes before public trial.** Per-sub flag-threshold override, rate limits, link-cap with URLhaus, regex spam patterns, mod flag-queue UI, per-sub flairs, NSFW banner. Without these, day-one public traffic surfaces problems the UI can't yet handle. M4 made plato safe for an invited beta; M5 makes it safe for an unannounced URL on the open web.
+
 ---
 
 # Other Old-Web Things Worth Rebuilding
