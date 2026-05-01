@@ -164,11 +164,38 @@ export function listRecentPostsCappedPerSub(db, { limit = 50, perSub = 2 } = {})
   ).all(perSub, limit);
 }
 
-export function listPostsInSub(db, subName, { limit = 50, offset = 0 } = {}) {
+// Sub-page post listing with PRD §sort modes: new / old / top / hot.
+// - new: newest first (ORDER BY created_at DESC)
+// - old: oldest first
+// - top: highest cached score, age tiebreaker
+// - hot: HN-shaped formula `score / (age_hours + 2)^1.5`. The +2 floors very
+//   new posts so a single upvote on a 0-min-old post doesn't catapult it
+//   above an established post; the 1.5 exponent makes age decay faster than
+//   linear without being so steep that 4-day-old gold gets buried under
+//   10-min-old shrugs. Tunable in v1.1 if usage suggests it.
+// Time inputs are injectable so tests can assert deterministic ordering
+// against synthetic timestamps without real-clock manipulation.
+const SORT_CLAUSES = {
+  new: 'ORDER BY created_at DESC',
+  old: 'ORDER BY created_at ASC',
+  top: 'ORDER BY score DESC, created_at DESC',
+};
+
+export const SUB_SORTS = ['new', 'old', 'top', 'hot'];
+
+export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'new', now = Date.now() } = {}) {
+  if (!SUB_SORTS.includes(sort)) throw new Error(`listPostsInSub: unknown sort '${sort}'`);
+
+  if (sort === 'hot') {
+    return db.prepare(`
+      SELECT * FROM posts
+      WHERE sub_name = ?
+      ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(subName, now, limit, offset);
+  }
+
   return db.prepare(
-    `SELECT * FROM posts
-     WHERE sub_name = ?
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`
+    `SELECT * FROM posts WHERE sub_name = ? ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
   ).all(subName, limit, offset);
 }
