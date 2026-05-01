@@ -5,6 +5,7 @@
   --text: #c9d1d9;
   --text-dim: #8b949e;
   --accent: #58a6ff;
+  --accent-warm: #d29922;
   --amber: #d29922;
   --green: #56d364;
 }
@@ -36,6 +37,65 @@ header h1 {
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
+}
+header h1 .logo-mark {
+  vertical-align: -1px;
+  margin-right: 0.45rem;
+}
+
+/* Brand mark wrapped in a home link. Clicking anywhere on the dots (or
+ * dots+wordmark in the footer) navigates to /. No underline, color stays
+ * the same on hover (the dots already brighten on the rightmost; we don't
+ * want color-shift fighting that). */
+.logo-home, .logo-home:hover {
+  text-decoration: none;
+  color: inherit;
+}
+.logo-home { display: inline-flex; align-items: center; gap: 0.4rem; }
+.logo-home .wordmark { color: var(--text-dim); letter-spacing: 0.04em; }
+.logo-home:hover .logo-mark circle { opacity: 1; }
+
+/* The plato mark: three blue dots, ascending opacity (0.4 → 0.7 → 1.0).
+ * Reads as "a thought becoming clear" — pairs with the locked tagline
+ * "opinion is the medium between knowledge and ignorance." Animation
+ * budget for the entire app = 1: this mark waving when something is in
+ * flight. Nothing else animates. */
+.logo-mark circle { fill: var(--accent); }
+.logo-mark[data-loading] circle {
+  animation: dot-wave 1.2s infinite ease-in-out;
+}
+.logo-mark[data-loading] circle:nth-child(2) { animation-delay: 0.15s; }
+.logo-mark[data-loading] circle:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dot-wave {
+  0%, 60%, 100% { opacity: 0.35; }
+  30% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-mark[data-loading] circle { animation: none; opacity: 1; }
+}
+
+/* Site footer — the ∴plato attribution mark. Stays in every fork: the
+ * operator can change wordmark + quote pool but keeps the glyph + "plato"
+ * as upstream lineage. */
+.site-footer {
+  max-width: 720px;
+  margin: 3rem auto 1.5rem;
+  padding: 0.8rem 0 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-align: center;
+}
+.site-footer .logo-home { vertical-align: -1px; }
+.site-footer .wordmark {
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.site-footer .quote {
+  display: block;
+  margin-top: 0.3rem;
+  font-style: italic;
+  color: var(--text-dim);
 }
 
 header .nav {
@@ -102,7 +162,7 @@ h3.section {
 /* M1 components — reference: docs/design/1-terminal.html */
 
 form { display: grid; gap: 8px; margin: 1rem 0 1.5rem; }
-input, textarea, button {
+input, textarea, select, button {
   font: inherit;
   background: var(--bg-soft);
   color: var(--text);
@@ -110,7 +170,18 @@ input, textarea, button {
   padding: 0.5rem 0.6rem;
   border-radius: 3px;
 }
-input:focus, textarea:focus, button:focus {
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 1.8rem;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 0.85rem) 50%, calc(100% - 0.55rem) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+select option { background: var(--bg-soft); color: var(--text); }
+input:focus, textarea:focus, select:focus, button:focus {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
 }
@@ -206,27 +277,37 @@ button:hover { filter: brightness(1.1); }
   margin: 0.3rem 0 0.8rem;
 }
 
+.subs-area { margin-bottom: 1.5rem; }
 .subs-strip {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 0.5rem 0.9rem;
   align-items: center;
   padding: 0.55rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-soft);
-  margin-bottom: 1.5rem;
   font-size: 0.85rem;
+  scrollbar-width: thin;
 }
+.subs-area > .subs-strip { margin-bottom: 0; }
+div.subs-strip { margin-bottom: 1.5rem; }
+.subs-strip > * { flex-shrink: 0; white-space: nowrap; }
+summary.subs-strip {
+  cursor: pointer;
+  list-style: none;
+}
+summary.subs-strip::-webkit-details-marker { display: none; }
 .subs-strip .label {
   color: var(--text-dim);
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin-right: 0.2rem;
+  margin-right: 0.1rem;
 }
 .subs-strip a { color: var(--text-dim); }
-.subs-strip a:hover { color: var(--accent); }
+.subs-strip a:hover { color: var(--accent); text-decoration: none; }
 .subs-strip .count {
   color: var(--text);
   font-weight: 600;
@@ -236,29 +317,27 @@ button:hover { filter: brightness(1.1); }
   margin-left: auto;
   color: var(--accent);
 }
-
-.subs-more { display: contents; }
-.subs-more > summary {
-  cursor: pointer;
+.subs-strip .more-toggle {
   color: var(--text-dim);
-  list-style: none;
   font-size: 0.82rem;
 }
-.subs-more > summary::-webkit-details-marker { display: none; }
-.subs-more > summary:hover { color: var(--accent); }
-.subs-more[open] > summary { color: var(--accent); }
-.subs-more > .subs-grid {
-  display: none;
-  flex-basis: 100%;
-  width: 100%;
-  margin-top: 0.6rem;
-  padding-top: 0.55rem;
-  border-top: 1px dashed var(--border);
+summary.subs-strip:hover .more-toggle,
+.subs-area[open] .more-toggle { color: var(--accent); }
+
+.subs-area > .subs-grid { display: none; }
+.subs-area[open] > .subs-grid {
+  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 0.4rem 1rem;
+  margin-top: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  background: var(--bg-soft);
 }
-.subs-more[open] > .subs-grid { display: grid; }
-.subs-grid a { padding: 0.15rem 0; }
+.subs-grid a { padding: 0.15rem 0; color: var(--text-dim); }
+.subs-grid a:hover { color: var(--accent); text-decoration: none; }
 
 .post-page { border-bottom: 0; }
 .post-page article { margin-top: 1rem; }
@@ -333,17 +412,18 @@ button:hover { filter: brightness(1.1); }
  * Top-level only; per-comment replies still use their inline forms. */
 .composer-bar {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 2rem);
+  max-width: 720px;
   background: var(--bg);
-  border-top: 1px solid var(--border);
-  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
   z-index: 100;
 }
 .composer-bar > * {
-  max-width: 720px;
-  margin: 0 auto;
+  margin: 0;
 }
 .composer-bar form {
   display: flex;
@@ -364,6 +444,18 @@ button:hover { filter: brightness(1.1); }
   height: 6rem;
 }
 .composer-bar p { margin: 0; padding: 0.4rem 0; text-align: center; }
+
+/* Long comments collapse behind read-more. summary shows the first ~280
+ * chars; expanding swaps in the full rendered body. Top-level comments
+ * (depth 0) stay uncapped since they're direct replies to the post. */
+.comment-long > summary {
+  cursor: pointer;
+  list-style: none;
+  white-space: pre-wrap;
+}
+.comment-long > summary::-webkit-details-marker { display: none; }
+.comment-long > summary .read-more { color: var(--accent); }
+.comment-long[open] > summary { display: none; }
 .composer-bar button { white-space: nowrap; }
 
 /* Page padding so the last comment isn't hidden behind the bar. Apply to
@@ -414,6 +506,8 @@ body:has(.composer-bar) { padding-bottom: 5rem; }
 }
 .meta .name { color: var(--text); }
 .meta .when { color: var(--text-dim); }
+.meta a { color: var(--text-dim); }
+.meta a:hover { color: var(--accent); text-decoration: none; }
 
 article { line-height: 1.7; margin-top: 1rem; }
 article h1, article h2, article h3 { margin-top: 1.5rem; }

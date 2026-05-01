@@ -16,7 +16,7 @@
 | M2 | Multi-tenant content | Sub creation, joining, listing, content model, front page | ~2 wks |
 | M3 | Discussion | Comments, voting, sorting, post pages | ~2 wks |
 | M4 | Moderation | Two-tier mod, flag system, public mod log | ~2 wks |
-| M5 | Spam defenses | Rules 7-16 (rate limits, link caps, URLhaus, regex patterns, velocity dashboard) | ~2 wks |
+| M5 | Spam defenses + per-sub structure | Rules 7-16 (rate limits, link caps, URLhaus, regex patterns, velocity dashboard) + per-sub flairs + per-sub NSFW flag | ~2 wks |
 | M6 | Subscriptions + notifications | Sub subscribe, my-subs, email digests, ntfy, per-sub RSS | ~2 wks |
 | M7 | Identity + export/import | Per-sub export, per-user export, archive signing, OpenTimestamps, fork flow | ~2 wks |
 | M8 | Production polish | docker-compose, search, dark mode, mobile, deploy docs | ~2 wks |
@@ -238,8 +238,12 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 
 ## M5-M8 (sketch, refined as M1-M4 land)
 
-### M5: Spam defenses
+### M5: Spam defenses + per-sub structure
 Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-account scrutiny, per-sub limits, link cap + URLhaus integration (hourly cron), spam pattern file (regex), velocity alerts dashboard, public mod log already done in M4.
+
+**Per-sub structure adds:**
+- **Flairs** (curated by sub owner). `subs.flairs` JSON column `[{slug, label, color}]` + nullable `posts.flair_slug`. Owner edits the closed list; users pick from it. Optional unless owner sets `flairs_required`. Display: small colored pill in the post-meta line; filter via `/sub/<name>?flair=<slug>`. No global flair index, no user-created flairs, no cross-sub flairs. Chosen over hashtags because: closed list = no spam vector; sub-scoped = no taxonomy drift; removable later by dropping the column. See PRD §Permanently out for the rejected-hashtags rationale.
+- **NSFW per-sub flag.** `subs.nsfw INTEGER NOT NULL DEFAULT 0`. Sets a banner on the sub page and a content advisory in the home strip. Forum does **not** run age verification (operator concern, see PRD §Permanently out). Ties cleanly into M6 subscription preferences (hide NSFW subs from my-subs by default).
 
 ### M6: Subscriptions + notifications
 Sub subscribe/unsubscribe, my-subs page, email digest mode (reuses knowless's Postfix), ntfy push (one-line POST per notification), per-sub RSS feeds. Subscription list export (folds into M7's export format).

@@ -575,6 +575,13 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Public follower / subscriber lists.
 - Algorithmic feed of any kind.
 - Engagement metrics surfaced to users (no view counts, no time-on-page).
+- **Hashtags / user-created tags.** Tagging is voluntary, inconsistent, and creates a parallel taxonomy that competes with subs. The "subs are universes" model breaks if `#laptop` exists in five subs. Search (M8 FTS5) covers the discovery need that hashtags would have served. Sub owners get **per-sub flairs** (curated, closed list — see M5 in build-plan.md) as the structured-categorization escape valve. Flairs are removable; tags would not be.
+- **Private subs (membership-gated read access).** Inverts every load-bearing forum claim: lives at one URL (no longer browseable), public mod log (invisible to non-members), fork-the-archive (members-only export). Also a moderation blind spot — abuse compounds in private spaces because random readers can't report. The WhatsApp-/mailing-list-replacement opportunity is real but is a separate product (different UX shape: real-time vs canonical, room vs sub) and would need its own PRD. Not a flag on existing subs.
+- **Age verification / ID checks for NSFW.** Operator-layer concern, not forum feature. Forum exposes per-sub NSFW flags (M5); if a jurisdiction requires age gates, the operator runs them in a reverse proxy or content gateway in front of the forum. Forum never sees IDs.
+
+## Needs further discussion (parked, not decided)
+
+- **Unlisted subs (obscurity, not privacy).** Toggle that hides a sub from /home, /sub directory, search index, and robots.txt — but keeps `/sub/<name>` URL-readable, mod log public, no membership table. Use cases: book clubs, neighborhood councils, niche hobbies that don't want to be discovered casually. Risk surface: lower than private subs (no auth changes in read path; mod log + flag still work; operator dashboard sees everything), but non-zero — slower spontaneous abuse detection because random readers don't stumble across it, and users may misunderstand "unlisted" as "private" and over-share. Hard NO on adding a membership table — that's the trapdoor to private subs through the side door. Open question: does the obscurity-not-privacy distinction hold up in practice, or does it confuse users badly enough to be net-negative? Revisit before M5.
 
 ## Success Criteria
 

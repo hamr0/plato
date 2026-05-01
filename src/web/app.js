@@ -37,11 +37,42 @@ function layout(title, body) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
+<link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/vote.js" defer></script>
 </head>
-<body>${body}</body>
+<body>${body}${siteFooter()}</body>
 </html>`);
+}
+
+// The plato mark: three dots, blue · amber · blue. The two outer dots
+// (knowledge / ignorance) match; the middle (opinion, the medium between)
+// carries the warm accent. The mark IS the tagline. Logo stays across
+// forks; operator name and tagline can be customized, mark stays.
+const PLATO_TAGLINE = 'opinion is the medium between knowledge and ignorance.';
+
+// Inline SVG of the mark. `loading` adds the wave animation (the only
+// animation in the entire app). aria-hidden because the wordmark next to
+// it carries the meaning for screen readers. ViewBox is sized so dots
+// fill ~75% of width — readable at favicon scales (16px+).
+function logoMark({ size = 22, loading = false } = {}) {
+  const h = Math.round(size * (8 / 24));
+  const attrs = loading ? raw(' data-loading') : raw('');
+  return html`<svg class="logo-mark" width="${size}" height="${h}" viewBox="0 0 24 8" aria-hidden="true"${attrs}><circle cx="3" cy="4" r="3" opacity="0.4"/><circle cx="12" cy="4" r="3" opacity="0.7"/><circle cx="21" cy="4" r="3"/></svg>`;
+}
+
+// Logo wrapped in a home link. Used in header and footer so clicking
+// anywhere on the brand mark navigates to /.
+function logoHomeLink({ size = 22, withWordmark = false } = {}) {
+  return html`<a href="/" class="logo-home" aria-label="plato — home">${logoMark({ size })}${withWordmark ? html`<span class="wordmark">plato</span>` : html``}</a>`;
+}
+
+function siteFooter() {
+  return html`<footer class="site-footer">
+    ${logoHomeLink({ size: 22, withWordmark: true })}
+    <span class="quote muted">— "${PLATO_TAGLINE}"</span>
+  </footer>`;
 }
 
 function relativeTime(ms) {
@@ -116,7 +147,7 @@ function anonHintFor(currentHandle) {
 function siteHeader({ db, currentHandle, title, subtitle }) {
   return html`<header class="site">
     <div class="brand">
-      <h1>${title ?? html`plato · forum`}</h1>
+      <h1>${logoHomeLink({ size: 32 })}${title ?? html`plato`}</h1>
       ${subtitle ? html`<div class="nav muted">${subtitle}</div>` : html``}
     </div>
     ${loginStatusFor(db, currentHandle)}
@@ -261,8 +292,8 @@ function subEntry(s) {
 
 function subsStripView({ subs, currentHandle }) {
   if (subs.length === 0) {
-    return html`<div class="subs-strip">
-      <span class="label">subs · last 24h</span>
+    return html`<div class="subs-strip" title="active subs · last 24h">
+      <span class="label">subs</span>
       <span class="muted"><em>none yet</em></span>
       ${currentHandle
         ? html`<a class="new-sub" href="/sub/create">+ new</a>`
@@ -273,20 +304,27 @@ function subsStripView({ subs, currentHandle }) {
   const top = subs.slice(0, 3);
   const rest = subs.slice(3);
 
-  return html`<div class="subs-strip">
-    <span class="label">subs · last 24h</span>
-    ${top.map(subEntry)}
-    ${rest.length > 0
-      ? html`<details class="subs-more"><summary>+ show all (${rest.length})</summary>
-          <div class="subs-grid">
-            ${rest.map(subEntry)}
-          </div>
-        </details>`
-      : html``}
-    ${currentHandle
-      ? html`<a class="new-sub" href="/sub/create">+ new</a>`
-      : html``}
-  </div>`;
+  if (rest.length === 0) {
+    return html`<div class="subs-strip" title="active subs · last 24h">
+      <span class="label">subs</span>
+      ${top.map(subEntry)}
+      ${currentHandle
+        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
+        : html``}
+    </div>`;
+  }
+
+  return html`<details class="subs-area">
+    <summary class="subs-strip" title="active subs · last 24h">
+      <span class="label">subs</span>
+      ${top.map(subEntry)}
+      <span class="more-toggle">+ show all (${rest.length})</span>
+      ${currentHandle
+        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
+        : html``}
+    </summary>
+    <div class="subs-grid">${rest.map(subEntry)}</div>
+  </details>`;
 }
 
 function renderHome(req, res, { db, auth, postsDir }) {
@@ -487,7 +525,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       'check your email',
       html`
         <header>
-          <h1>plato · check your email</h1>
+          <h1>${logoHomeLink({ size: 32 })}plato · check your email</h1>
         </header>
         <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
         <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
@@ -529,6 +567,7 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
 // driven below -3 behind a separate <details> toggle.
 const COLLAPSE_THRESHOLD = -3;
 const MAX_DEPTH = 4;
+const COMMENT_PREVIEW_CHARS = 280;
 
 function countDescendants(node) {
   let n = 0;
@@ -551,7 +590,14 @@ function commentNodeView(node, ctx, depth) {
       </details>`
     : html``;
 
-  const body = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
+  const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
+  const isLong = depth > 0 && node.body.length > COMMENT_PREVIEW_CHARS;
+  const body = isLong
+    ? html`<details class="comment-long">
+        <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
+        ${fullBody}
+      </details>`
+    : fullBody;
 
   const inner = collapsed
     ? html`<details class="comment-collapsed">
@@ -665,7 +711,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
       <div class="composer-bar">
         ${currentHandle
           ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
-              <textarea name="body" placeholder="join the conversation — markdown ok" required></textarea>
+              <textarea name="body" placeholder="join the conversation" required></textarea>
               <button>comment</button>
             </form>`
           : html`<p class="muted">log in to comment.</p>`}

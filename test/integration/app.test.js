@@ -313,6 +313,16 @@ test('GET /static/style.css served', async (t) => {
   assert.match(res.headers.get('content-type'), /text\/css/);
 });
 
+test('GET /static/favicon.svg?v=N served (query string ignored for file lookup)', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { baseUrl } = ctx;
+
+  const res = await fetch(`${baseUrl}/static/favicon.svg?v=3`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /image\/svg/);
+});
+
 async function loginVia(jar, baseUrl, mailer, email, { db }) {
   // Posting now requires a real sub (no default catch-all). Create a
   // throwaway sub for the bootstrap post if it doesn't exist.

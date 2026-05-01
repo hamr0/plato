@@ -16,7 +16,8 @@ const TYPES = {
 
 export async function applyStaticRoute(req, res) {
   if (!req.url.startsWith('/static/') || req.method !== 'GET') return false;
-  const rel = normalize(req.url.slice('/static/'.length));
+  const pathOnly = req.url.split('?', 1)[0];
+  const rel = normalize(pathOnly.slice('/static/'.length));
   if (rel.startsWith('..') || rel.startsWith('/')) {
     res.writeHead(403);
     res.end('forbidden');

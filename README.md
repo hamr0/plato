@@ -1,4 +1,12 @@
-# plato
+<p align="center">
+  <img src="src/web/static/favicon.svg" alt="" width="64" height="64">
+</p>
+
+<h1 align="center">plato</h1>
+
+<p align="center"><em>"opinion is the medium between knowledge and ignorance."</em></p>
+
+---
 
 **A forum that lives at one URL.** Reddit-shaped community platform, owned by its members. Magic-link to post, no passwords, no email collected. Pseudonymous by default. If a moderator goes bad, fork the archive and run it elsewhere.
 
