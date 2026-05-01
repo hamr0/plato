@@ -1,13 +1,29 @@
+/* ============================================================
+ * FORK CUSTOMIZATION
+ * ------------------------------------------------------------
+ * All visual styling resolves through these custom properties.
+ * To rebrand a fork (different accent, different mood, lighter
+ * background, your operator name's palette), override only the
+ * values below — every selector below references the variable,
+ * never a literal hex. The one exception is favicon.svg, which
+ * is served standalone; copy + recolor it in the same place.
+ *
+ * Light mode (auto-toggle via prefers-color-scheme) ships with
+ * M8 polish. The token shape below is structured so M8 only adds
+ * a @media (prefers-color-scheme: light) block here, not a
+ * codebase-wide grep audit.
+ * ============================================================ */
 :root {
+  /* Surfaces */
   --bg: #0d1117;
   --bg-soft: #161b22;
   --border: #30363d;
+  /* Type */
   --text: #c9d1d9;
   --text-dim: #8b949e;
-  --accent: #58a6ff;
-  --accent-warm: #d29922;
-  --amber: #d29922;
-  --green: #56d364;
+  /* Accents */
+  --accent: #58a6ff;       /* primary — links, mark, active states */
+  --accent-warm: #d29922;  /* secondary — reserved for flair pills, NSFW badges, mod highlights */
 }
 
 * { box-sizing: border-box; }
