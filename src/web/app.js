@@ -647,12 +647,15 @@ async function handleAddComment(req, res, { db, auth }, subName, postId) {
   if (!commentBody || commentBody.trim().length === 0) {
     return send(res, 400, layout('empty', html`<p class="muted">comment body required.</p>`));
   }
+  let result;
   try {
-    addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
+    result = addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
   } catch (err) {
     return send(res, 400, layout('comment failed', html`<p class="muted">${err.message}</p>`));
   }
-  redirect(res, `/sub/${subName}/post/${postId}`);
+  // Land on the new comment so the user sees their submission in context
+  // instead of the page jumping to the top.
+  redirect(res, `/sub/${subName}/post/${postId}#comment-${result.commentId}`);
 }
 
 function wantsJson(req) {

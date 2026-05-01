@@ -610,7 +610,8 @@ test('M3: POST /sub/<name>/post/<id>/comment adds a comment, redirects back', as
     body: new URLSearchParams({ body: 'first reply with **markdown**' }),
   });
   assert.equal(res.status, 302);
-  assert.equal(res.headers.get('location'), permalink);
+  // Redirect lands on the new comment's anchor so the page doesn't jump to top.
+  assert.match(res.headers.get('location'), new RegExp(`^${permalink}#comment-[0-9a-f]{16}$`));
 
   res = await jarFetch(jar, baseUrl + permalink);
   const body = await res.text();
