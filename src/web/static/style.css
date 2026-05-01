@@ -98,6 +98,27 @@ header h1 .logo-mark {
   transition: background 1.2s ease-out;
 }
 
+/* Mod state: removed (hard) and collapsed (soft). PRD §Moderation says
+ * removed shows a stub so discussion structure isn't deceptively hole-
+ * filled; collapsed folds behind a <details> toggle so the read-out is
+ * still possible. */
+.comment-removed, .post-removed {
+  font-style: italic;
+  padding: 0.4rem 0;
+}
+.post-collapsed > summary,
+.comment-collapsed > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.post-collapsed > summary::-webkit-details-marker,
+.comment-collapsed > summary::-webkit-details-marker { display: none; }
+.mod-marker {
+  font-size: 0.78rem;
+  font-weight: normal;
+  margin-left: 0.4rem;
+}
+
 /* Site footer — the ∴plato attribution mark. Stays in every fork: the
  * operator can change wordmark + quote pool but keeps the glyph + "plato"
  * as upstream lineage. */

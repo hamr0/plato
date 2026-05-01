@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { renderMarkdown } from './markdown.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
+import { isBanned } from './mod.js';
 
 // Post + draft IDs are 8 random bytes (16 hex chars). Birthday-collision
 // floor at 2^32 IDs of the same kind, which is many orders of magnitude
@@ -65,6 +66,10 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   // Idempotent: re-finalizing an already-finalized draft returns the existing post.
   if (draft.finalized_post_id) {
     return { postId: draft.finalized_post_id, subName: draft.sub_name, alreadyFinalized: true };
+  }
+
+  if (isBanned(db, draft.sub_name, handle)) {
+    throw new Error(`finalizeDraft: ${handle} is banned from ${draft.sub_name}`);
   }
 
   // Ensure the handle row exists (pseudonymFor inserts on first sight). This

@@ -246,13 +246,17 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
         returnTo: perPostReturn,
       })}
       <div class="body">
-        <h2><a href="${link}">${post.title}</a></h2>
+        <h2><a href="${link}">${post.title}</a>${post.collapsed_at != null && post.removed_at == null
+          ? html` <span class="muted mod-marker">(collapsed by mod)</span>`
+          : html``}</h2>
         ${authorMeta(post, name, { showComments: true })}
-        ${preview
-          ? html`<div class="preview">${raw(preview.html)}${preview.truncated
-              ? html` <a href="${link}" class="more">read more →</a>`
-              : html``}</div>`
-          : html``}
+        ${post.removed_at != null
+          ? html`<div class="preview muted post-removed">[removed by mod]</div>`
+          : preview
+            ? html`<div class="preview">${raw(preview.html)}${preview.truncated
+                ? html` <a href="${link}" class="more">read more →</a>`
+                : html``}</div>`
+            : html``}
       </div>
     </div>`;
   });
@@ -574,8 +578,11 @@ function countDescendants(node) {
 
 function commentNodeView(node, ctx, depth) {
   const pseudonym = ctx.pseudonyms.get(node.handle) ?? node.handle.slice(0, 8);
-  const collapsed = node.score <= COLLAPSE_THRESHOLD;
-  const replyForm = ctx.currentHandle
+  const scoreCollapsed = node.score <= COLLAPSE_THRESHOLD;
+  const modCollapsed = node.collapsed_at != null;
+  const removed = node.removed_at != null;
+
+  const replyForm = ctx.currentHandle && !removed
     ? html`<details class="reply"><summary class="muted">reply</summary>
         <form method="POST" action="/sub/${ctx.subName}/post/${ctx.postId}/comment" class="reply-form">
           <input type="hidden" name="parent_id" value="${node.id}">
@@ -585,21 +592,36 @@ function commentNodeView(node, ctx, depth) {
       </details>`
     : html``;
 
-  const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
-  const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
-  const body = isLong
-    ? html`<details class="comment-long">
-        <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
-        ${fullBody}
-      </details>`
-    : fullBody;
+  // Removed: hard moderation. Body replaced with stub but the comment
+  // still occupies its slot in the tree so downstream replies still make
+  // sense. PRD §Moderation Tier 2.
+  let inner;
+  if (removed) {
+    inner = html`<div class="comment-removed muted">[removed by mod]</div>`;
+  } else {
+    const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
+    const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
+    const body = isLong
+      ? html`<details class="comment-long">
+          <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
+          ${fullBody}
+        </details>`
+      : fullBody;
 
-  const inner = collapsed
-    ? html`<details class="comment-collapsed">
+    if (modCollapsed) {
+      inner = html`<details class="comment-collapsed">
+        <summary class="muted">collapsed by mod. show.</summary>
+        ${body}
+      </details>`;
+    } else if (scoreCollapsed) {
+      inner = html`<details class="comment-collapsed">
         <summary class="muted">(score ${formatScore(node.score)}) collapsed comment by ${pseudonym}. show.</summary>
         ${body}
-      </details>`
-    : body;
+      </details>`;
+    } else {
+      inner = body;
+    }
+  }
 
   let repliesView = html``;
   if (node.replies.length > 0) {
@@ -692,7 +714,14 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         <div class="body">
           <h1>${post.title}</h1>
           ${authorMeta(post, pseudonyms.get(post.handle))}
-          <article>${raw(bodyHtml)}</article>
+          ${post.removed_at != null
+            ? html`<article class="muted post-removed">[removed by mod]</article>`
+            : post.collapsed_at != null
+              ? html`<details class="post-collapsed">
+                  <summary class="muted">collapsed by mod. show.</summary>
+                  <article>${raw(bodyHtml)}</article>
+                </details>`
+              : html`<article>${raw(bodyHtml)}</article>`}
         </div>
       </div>
 

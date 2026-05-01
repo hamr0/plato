@@ -7,6 +7,7 @@
 // Score caches per comment are updated by the vote module, not here.
 
 import { randomBytes } from 'node:crypto';
+import { isBanned } from './mod.js';
 
 const ID_BYTES = 8;
 
@@ -23,8 +24,11 @@ export function addComment(db, { postId, parentId = null, handle, body, now = Da
 
   // FK on post_id covers post existence; we re-check explicitly so the
   // error message is friendlier than "FOREIGN KEY constraint failed".
-  const post = db.prepare('SELECT id FROM posts WHERE id = ?').get(postId);
+  const post = db.prepare('SELECT id, sub_name FROM posts WHERE id = ?').get(postId);
   if (!post) throw new Error(`addComment: post ${postId} not found`);
+  if (isBanned(db, post.sub_name, handle)) {
+    throw new Error(`addComment: ${handle} is banned from ${post.sub_name}`);
+  }
 
   if (parentId) {
     const parent = db.prepare('SELECT post_id FROM comments WHERE id = ?').get(parentId);

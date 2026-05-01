@@ -13,6 +13,8 @@
 //   opposite direction switches sides. Score caches on posts/comments are
 //   updated transactionally on every change so the cache never drifts.
 
+import { isBanned } from './mod.js';
+
 const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const YOUNG_POST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -44,6 +46,16 @@ export function castVote(db, { targetType, targetId, voterHandle, direction, now
   const table = TARGET_TABLE[targetType];
   const target = db.prepare(`SELECT id, handle, created_at, score FROM ${table} WHERE id = ?`).get(targetId);
   if (!target) throw new Error(`castVote: ${targetType} ${targetId} not found`);
+
+  // Ban check: votes are participation per PRD §Moderation. Resolve the
+  // target's sub via post (direct) or comment → post (one hop) and reject
+  // banned voters in that sub.
+  const subName = targetType === 'post'
+    ? db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(targetId)?.sub_name
+    : db.prepare('SELECT p.sub_name AS sub_name FROM posts p JOIN comments c ON c.post_id = p.id WHERE c.id = ?').get(targetId)?.sub_name;
+  if (subName && isBanned(db, subName, voterHandle)) {
+    throw new Error(`castVote: ${voterHandle} is banned from ${subName}`);
+  }
 
   const isNew = isNewAccount(db, voterHandle, now);
   if (isNew) {

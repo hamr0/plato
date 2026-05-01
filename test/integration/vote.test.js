@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 import { castVote, getVote, isNewAccount } from '../../src/content/vote.js';
+import { recordAction } from '../../src/content/mod.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VOTER = 'a'.repeat(64);
@@ -134,4 +135,22 @@ test('isNewAccount: true within 7 days, false after', () => {
 
   const db2 = fixture({ voterFirstSeenAt: Date.now() - 30 * DAY_MS });
   assert.equal(isNewAccount(db2, VOTER), false);
+});
+
+// --- M4 ban check ---
+
+test('castVote: banned user rejected from voting in their banned sub', () => {
+  const db = fixture();
+  const banner = 'f'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(banner, 'mod-banner', Date.now());
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = ?`).run(banner, SUB);
+  recordAction(db, {
+    subName: SUB, modHandle: banner, action: 'ban',
+    targetType: 'handle', targetId: VOTER,
+  });
+  assert.throws(
+    () => castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' }),
+    new RegExp(`banned from ${SUB}`),
+  );
 });

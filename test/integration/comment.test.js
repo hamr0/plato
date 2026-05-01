@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 import { addComment, listCommentsForPost, buildCommentTree, COMMENT_SORTS } from '../../src/content/comment.js';
+import { recordAction } from '../../src/content/mod.js';
 
 const HANDLE = 'a'.repeat(64);
 const HANDLE_B = 'b'.repeat(64);
@@ -142,4 +143,20 @@ test('buildCommentTree: orphans (missing parent) surface as roots', () => {
   const tree = buildCommentTree(flat);
   assert.equal(tree.length, 2);
   assert.equal(tree.find((n) => n.id === 'a').replies.length, 0);
+});
+
+// --- M4 ban checks ---
+
+test('addComment: banned user rejected from sub', () => {
+  const db = fixture();
+  // HANDLE is the lobby owner-by-fiat below; bind it explicitly for the ban path.
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = 'lobby'`).run(HANDLE);
+  recordAction(db, {
+    subName: 'lobby', modHandle: HANDLE, action: 'ban',
+    targetType: 'handle', targetId: HANDLE_B,
+  });
+  assert.throws(
+    () => addComment(db, { postId: 'p1', handle: HANDLE_B, body: 'sneaky' }),
+    /banned from lobby/,
+  );
 });
