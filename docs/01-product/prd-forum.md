@@ -133,7 +133,7 @@ Same page for everyone — logged in or not. Two sections, no personalization, n
 
 **Recent posts (last 24h, chronological)**: stream of posts from any sub, newest first, **capped at 2 posts per sub** so a busy sub can't drown out everything else. Each row shows time, sub, title, score, and a short body preview (~280 chars / first paragraph) with a "read more →" affordance when truncated.
 
-Sub pages are read-mode: each post shows its full body inline (truncated only past ~1500 chars), so visitors can scan a sub's content without paging through individual permalinks. The permalink page stays canonical for sharing and (M3+) hosting comments.
+Sub pages are read-mode but still scan-friendly: each post shows up to ~600 chars (about double the home preview), enough for a single short reply or the lede of a long post; longer posts truncate with "read more →". The permalink page stays canonical for the full body, sharing, and (M3+) comments. 1500-char inline bodies were tried briefly and produced unscrollable sub pages on busy subs.
 
 That's the home page. Two lists, both chronological, both deduped. No "for you," no algorithm, no ranking magic.
 
@@ -445,6 +445,23 @@ Importable with `forum import-user user-export/`. New instance:
 - Engagement metrics surfaced to users (no view counts, no time-on-page).
 - Profile photos, custom avatars, avatar uploads.
 - Real names, phone numbers, any PII collection.
+- **Default catch-all sub.** No `general`, no `subzero`, no built-in lobby. Posts must land in a sub with a real owner-mod. A default sub becomes the path of least resistance for spam and erodes the "subs are universes" principle. First-run UX shows an empty state until the operator (or any logged-in user) creates the first sub. A 30-second cost on day zero buys lifetime principle integrity. The legacy `general` sub from the M1 schema is hidden from new-post pickers; existing posts there remain readable for archaeology.
+
+### Age verification and NSFW: operator-layer concern, not forum feature
+
+The forum exposes **per-sub NSFW flags** (M5 deliverable) and may expose per-post flags later. It does **not**:
+
+- Run age gates on visitors.
+- ID-verify users (no document upload, no third-party verifier integration).
+- Enforce jurisdictional age laws (UK Online Safety Act, German JuSchG, US state laws).
+
+These are the host's compliance problem. An operator who wants to comply layers their own age-gate (Caddy middleware, third-party verifier, manual policy) on top of the forum. Why this split:
+
+- **The forum is the same software in every jurisdiction.** Compliance differs per jurisdiction and per host. Building a "global" age-verification feature means building all of them, badly.
+- **Forking is the escape hatch.** An operator running an instance for over-18 audiences in a regulated jurisdiction can fork and add what they need. The mainline doesn't carry that surface area for everyone else.
+- **Privacy by default.** ID-verification means storing or routing identity documents. The forum's whole identity model (HMAC-only handles, no PII) collapses if it ever sees a passport scan. So it doesn't.
+
+If you operate plato in a jurisdiction that requires age gates, treat that as a deployment task, not a software task. NSFW flags are the only forum-level affordance.
 
 ---
 

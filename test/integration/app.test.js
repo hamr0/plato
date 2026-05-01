@@ -112,10 +112,17 @@ async function jarFetch(jar, url, opts = {}) {
   return response;
 }
 
+function ensureSub(db, name) {
+  db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(name, Date.now());
+}
+
 test('end-to-end: stranger posts → magic link → click → published post visible', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { mailer, baseUrl } = ctx;
+  const { db, mailer, baseUrl } = ctx;
+
+  // PRD §Permanently out: no default catch-all sub. Operator/admin step.
+  ensureSub(db, 'lobby');
 
   const jar = newJar();
 
@@ -131,6 +138,7 @@ test('end-to-end: stranger posts → magic link → click → published post vis
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       email: 'alice@example.com',
+      sub_name: 'lobby',
       title: 'first post',
       body: 'world **bold**\n\n# tail',
     }),
@@ -155,7 +163,7 @@ test('end-to-end: stranger posts → magic link → click → published post vis
   res = await jarFetch(jar, new URL(next, baseUrl).toString());
   assert.equal(res.status, 302);
   const subUrl = res.headers.get('location');
-  assert.match(subUrl, /\/sub\/general$/, 'finalize redirects to the sub the post landed in');
+  assert.match(subUrl, /\/sub\/lobby$/, 'finalize redirects to the sub the post landed in');
 
   // 6. View the sub page; the new post (preview) is on it
   res = await jarFetch(jar, new URL(subUrl, baseUrl).toString());
@@ -179,7 +187,9 @@ test('end-to-end: stranger posts → magic link → click → published post vis
 test('logged-in user posts directly without re-doing magic link', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { mailer, baseUrl } = ctx;
+  const { db, mailer, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
 
   const jar = newJar();
 
@@ -189,6 +199,7 @@ test('logged-in user posts directly without re-doing magic link', async (t) => {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       email: 'alice@example.com',
+      sub_name: 'lobby',
       title: 'first',
       body: 'first body',
     }),
@@ -210,10 +221,10 @@ test('logged-in user posts directly without re-doing magic link', async (t) => {
   res = await jarFetch(jar, baseUrl + '/draft', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ title: 'second', body: 'second body' }),
+    body: new URLSearchParams({ sub_name: 'lobby', title: 'second', body: 'second body' }),
   });
   assert.equal(res.status, 302);
-  assert.match(res.headers.get('location'), /\/sub\/general$/);
+  assert.match(res.headers.get('location'), /\/sub\/lobby$/);
   assert.equal(mailer.sent.length, 1, 'no second magic-link mail sent');
 
   res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
@@ -237,13 +248,16 @@ test('anonymous /draft without email returns 400', async (t) => {
 test('disposable email is rejected at /draft, knowless never invoked', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { mailer, baseUrl } = ctx;
+  const { db, mailer, baseUrl } = ctx;
+
+  ensureSub(db, 'lobby');
 
   const res = await fetch(baseUrl + '/draft', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       email: 'spam@mailinator.com',
+      sub_name: 'lobby',
       title: 't',
       body: 'b',
     }),
@@ -299,27 +313,30 @@ test('GET /static/style.css served', async (t) => {
   assert.match(res.headers.get('content-type'), /text\/css/);
 });
 
-async function loginVia(jar, baseUrl, mailer, email) {
+async function loginVia(jar, baseUrl, mailer, email, { db }) {
+  // Posting now requires a real sub (no default catch-all). Create a
+  // throwaway sub for the bootstrap post if it doesn't exist.
+  ensureSub(db, 'bootstrap');
   let res = await jarFetch(jar, baseUrl + '/draft', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ email, title: 'bootstrap', body: 'bootstrap' }),
+    body: new URLSearchParams({ email, sub_name: 'bootstrap', title: 'bootstrap', body: 'bootstrap' }),
   });
   assert.equal(res.status, 200);
   const link = magicLinkFrom(mailer.sent[mailer.sent.length - 1]);
   res = await jarFetch(jar, link);
   assert.equal(res.status, 302);
   res = await jarFetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
-  assert.equal(res.status, 302);  // /draft/<id>/finalize → /post/<id>
+  assert.equal(res.status, 302);  // /draft/<id>/finalize → /sub/<name>
 }
 
 test('M2: logged-in user creates a sub and posts in it', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { baseUrl, mailer } = ctx;
+  const { db, baseUrl, mailer } = ctx;
 
   const jar = newJar();
-  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com', { db });
 
   // Create a sub.
   let res = await jarFetch(jar, baseUrl + '/sub/create', {
@@ -363,10 +380,10 @@ test('M2: GET /sub/create requires session', async (t) => {
 test('M2: POST /sub/create rejects reserved name', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { baseUrl, mailer } = ctx;
+  const { db, baseUrl, mailer } = ctx;
 
   const jar = newJar();
-  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com', { db });
 
   const res = await jarFetch(jar, baseUrl + '/sub/create', {
     method: 'POST',
@@ -380,10 +397,10 @@ test('M2: POST /sub/create rejects reserved name', async (t) => {
 test('M2: POST /sub/create rejects duplicate name', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { baseUrl, mailer } = ctx;
+  const { db, baseUrl, mailer } = ctx;
 
   const jar = newJar();
-  await loginVia(jar, baseUrl, mailer, 'creator@example.com');
+  await loginVia(jar, baseUrl, mailer, 'creator@example.com', { db });
 
   let res = await jarFetch(jar, baseUrl + '/sub/create', {
     method: 'POST',
@@ -446,10 +463,10 @@ test('M2: home page caps recent posts to 2 per sub', async (t) => {
 test('M2: /draft to unknown sub returns 400', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
-  const { baseUrl, mailer } = ctx;
+  const { db, baseUrl, mailer } = ctx;
 
   const jar = newJar();
-  await loginVia(jar, baseUrl, mailer, 'poster@example.com');
+  await loginVia(jar, baseUrl, mailer, 'poster@example.com', { db });
 
   const res = await jarFetch(jar, baseUrl + '/draft', {
     method: 'POST',

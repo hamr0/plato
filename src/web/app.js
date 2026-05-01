@@ -61,8 +61,13 @@ function pseudonymsByHandle(db, handles) {
   return new Map(rows.map((r) => [r.handle, r.pseudonym]));
 }
 
-function listAllSubs(db) {
-  return db.prepare('SELECT name FROM subs ORDER BY name ASC').all();
+// PRD §Permanently out: no default catch-all sub. The legacy 'general' row
+// from the M1 schema is hidden from pickers; existing posts at /sub/general
+// remain readable for archaeology, but new posts can't land there.
+function listPostableSubs(db) {
+  return db.prepare(
+    "SELECT name FROM subs WHERE name != 'general' ORDER BY name ASC"
+  ).all();
 }
 
 function loginStatusFor(db, currentHandle) {
@@ -93,19 +98,27 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
   </header>`;
 }
 
-function postFormFor({ currentHandle, defaultSub, allSubs }) {
-  // Anonymous users always post to `general`. Logged-in users pick from a
-  // dropdown of all subs. When a sub is contextually fixed (the sub page),
-  // we hide the picker and pin the value.
+function postFormFor({ currentHandle, defaultSub, postableSubs }) {
+  // No default catch-all sub — every post must pick a sub with a real owner.
+  // When a sub is contextually fixed (the sub page itself), the picker is
+  // hidden and pinned. Otherwise both anon and logged-in users see a real
+  // dropdown. If postableSubs is empty, render an empty state instead of
+  // the form: posting requires creating the first sub.
+  if (!defaultSub && postableSubs.length === 0) {
+    return html`<p class="muted">
+      no subs to post in yet. ${currentHandle
+        ? html`<a href="/sub/create">create the first one</a> to get started.`
+        : html`a logged-in user must <a href="/sub/create">create a sub</a> first.`}
+    </p>`;
+  }
+
   let subField;
   if (defaultSub) {
     subField = html`<input type="hidden" name="sub_name" value="${defaultSub}">`;
-  } else if (currentHandle) {
-    subField = html`<select name="sub_name">
-      ${allSubs.map((s) => html`<option value="${s.name}">/sub/${s.name}</option>`)}
-    </select>`;
   } else {
-    subField = html`<input type="hidden" name="sub_name" value="general">`;
+    subField = html`<select name="sub_name" required>
+      ${postableSubs.map((s) => html`<option value="${s.name}">/sub/${s.name}</option>`)}
+    </select>`;
   }
 
   return html`<form method="POST" action="/draft">
@@ -170,7 +183,7 @@ function renderHome(req, res, { db, auth, postsDir }) {
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const active = listActiveSubs(db);
-  const allSubs = listAllSubs(db);
+  const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 280);
 
@@ -186,7 +199,7 @@ function renderHome(req, res, { db, auth, postsDir }) {
         ? html`<p class="muted"><a href="/sub/create">+ create a sub</a></p>`
         : html``}
       <h3 class="section">// new post</h3>
-      ${postFormFor({ currentHandle, allSubs })}
+      ${postFormFor({ currentHandle, postableSubs })}
       <h3 class="section">// recent (2 per sub)</h3>
       ${postRowsView(posts, pseudonyms, previews)}
     `)
@@ -202,9 +215,9 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName) {
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
-  // Sub page = read mode. Show full bodies inline; truncate only if very
-  // long (~1500 chars) so a runaway essay doesn't dominate the scroll.
-  const previews = buildPreviews(posts, postsDir, 1500);
+  // Sub page is still scan mode — about double the home preview. Long posts
+  // truncate with "read more →" to the permalink (where comments will live).
+  const previews = buildPreviews(posts, postsDir, 600);
 
   send(
     res,
@@ -219,7 +232,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName) {
       <p><a href="/">← home</a></p>
       ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
-      ${postFormFor({ currentHandle, defaultSub: subName })}
+      ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
       <h3 class="section">// posts</h3>
       ${postRowsView(posts, pseudonyms, previews)}
     `)
@@ -286,17 +299,28 @@ async function handleSubCreate(req, res, { db, auth }) {
 async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir }) {
   const body = await readBody(req);
   const form = parseForm(body);
-  const { email, title, body: postBody } = form;
-  const subName = form.sub_name || 'general';
+  const { email, title, body: postBody, sub_name: subName } = form;
   const currentHandle = auth.handleFromRequest(req);
 
-  if (!title || !postBody || (!currentHandle && !email)) {
+  if (!title || !postBody || !subName || (!currentHandle && !email)) {
     return send(
       res,
       400,
       layout(
         'missing fields',
-        html`<p class="muted">all fields are required. <a href="/">back</a></p>`
+        html`<p class="muted">all fields are required, including the sub. <a href="/">back</a></p>`
+      )
+    );
+  }
+
+  // PRD §Permanently out: no default sub. 'general' is read-only legacy.
+  if (subName === 'general') {
+    return send(
+      res,
+      400,
+      layout(
+        'no default sub',
+        html`<p class="muted">/sub/general is archive-only. pick a real sub or <a href="/sub/create">create one</a>.</p>`
       )
     );
   }
