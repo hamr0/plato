@@ -247,7 +247,8 @@ function buildPreviews(posts, postsDir, maxChars) {
 }
 
 function subEntry(s) {
-  return html`<a href="/sub/${s.name}">/sub/${s.name}${s.post_count > 0
+  const title = `${s.post_count} post${s.post_count === 1 ? '' : 's'} in the last 24h`;
+  return html`<a href="/sub/${s.name}" title="${title}">/sub/${s.name}${s.post_count > 0
     ? html` <span class="count">${s.post_count}</span>`
     : html``}</a>`;
 }
@@ -255,7 +256,7 @@ function subEntry(s) {
 function subsStripView({ subs, currentHandle }) {
   if (subs.length === 0) {
     return html`<div class="subs-strip">
-      <span class="label">subs</span>
+      <span class="label">subs · last 24h</span>
       <span class="muted"><em>none yet</em></span>
       ${currentHandle
         ? html`<a class="new-sub" href="/sub/create">+ new</a>`
@@ -267,7 +268,7 @@ function subsStripView({ subs, currentHandle }) {
   const rest = subs.slice(3);
 
   return html`<div class="subs-strip">
-    <span class="label">subs</span>
+    <span class="label">subs · last 24h</span>
     ${top.map(subEntry)}
     ${rest.length > 0
       ? html`<details class="subs-more"><summary>+ show all (${rest.length})</summary>
