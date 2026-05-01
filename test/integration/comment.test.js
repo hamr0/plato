@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
-import { addComment, listCommentsForPost, buildCommentTree } from '../../src/content/comment.js';
+import { addComment, listCommentsForPost, buildCommentTree, COMMENT_SORTS } from '../../src/content/comment.js';
 
 const HANDLE = 'a'.repeat(64);
 const HANDLE_B = 'b'.repeat(64);
@@ -101,6 +101,37 @@ test('buildCommentTree: roots + replies nested correctly', () => {
   assert.equal(tree[0].replies[0].replies[0].id, 'd');
   assert.equal(tree[1].id, 'c');
   assert.equal(tree[1].replies.length, 0);
+});
+
+test('listCommentsForPost: sort=best ranks by score, ties go to oldest', () => {
+  const db = fixture();
+  // Three top-level comments with varied scores + ages.
+  const insert = (id, body, score, when) => {
+    addComment(db, { postId: 'p1', handle: HANDLE, body, now: when });
+    db.prepare('UPDATE comments SET id = ?, score = ? WHERE body = ?').run(id, score, body);
+  };
+  insert('low',  'low score',  0,  100);
+  insert('high', 'high score', 5,  200);
+  insert('mid',  'mid score',  3,  150);
+  const list = listCommentsForPost(db, 'p1', { sort: 'best' });
+  assert.deepEqual(list.map((c) => c.body), ['high score', 'mid score', 'low score']);
+});
+
+test('listCommentsForPost: sort=new returns newest first', () => {
+  const db = fixture();
+  addComment(db, { postId: 'p1', handle: HANDLE, body: 'first',  now: 100 });
+  addComment(db, { postId: 'p1', handle: HANDLE, body: 'second', now: 200 });
+  const list = listCommentsForPost(db, 'p1', { sort: 'new' });
+  assert.deepEqual(list.map((c) => c.body), ['second', 'first']);
+});
+
+test('listCommentsForPost: unknown sort throws', () => {
+  const db = fixture();
+  assert.throws(() => listCommentsForPost(db, 'p1', { sort: 'whatever' }), /unknown sort/);
+});
+
+test('COMMENT_SORTS exports the two sort modes', () => {
+  assert.deepEqual([...COMMENT_SORTS].sort(), ['best', 'new']);
 });
 
 test('buildCommentTree: orphans (missing parent) surface as roots', () => {

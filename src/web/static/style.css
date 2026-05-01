@@ -263,19 +263,70 @@ button:hover { filter: brightness(1.1); }
 .post-page { border-bottom: 0; }
 .post-page article { margin-top: 1rem; }
 
+.comment-tree { margin-top: 0.6rem; }
+
 .comment {
-  border-left: 1px solid var(--border);
-  padding: 0.6rem 0 0.6rem 0.8rem;
-  margin: 0.6rem 0 0.6rem 0;
+  position: relative;
+  padding: 0.5rem 0;
 }
-.comment.depth-1 { margin-left: 1.2rem; }
-.comment.depth-2 { margin-left: 2.4rem; }
-.comment.depth-3 { margin-left: 3.6rem; }
-.comment.depth-4 { margin-left: 4.8rem; }
-.comment.depth-5 { margin-left: 6.0rem; }
-.comment.depth-6 { margin-left: 7.2rem; }
-.comment.depth-7 { margin-left: 8.4rem; }
-.comment.depth-8 { margin-left: 9.6rem; }
+
+.comment-tree > .comment + .comment {
+  border-top: 1px solid var(--border);
+}
+
+/* Replies container: vertical guide line on the left, indent for children. */
+.replies {
+  position: relative;
+  margin-left: 0.6rem;
+  padding-left: 1.2rem;
+  margin-top: 0.3rem;
+}
+.replies::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0.6rem;
+  width: 1px;
+  background: var(--border);
+}
+
+/* Horizontal stub from the parent's vertical guide to each reply. 90° L. */
+.replies > .comment::before {
+  content: '';
+  position: absolute;
+  left: -1.2rem;
+  top: 1.2rem;
+  width: 1rem;
+  height: 1px;
+  background: var(--border);
+}
+.replies > .comment + .comment {
+  border-top: 0;  /* connector, not divider, between siblings under the line */
+}
+
+.more-replies {
+  margin-left: 0.6rem;
+  padding: 0.3rem 0 0.3rem 1.2rem;
+  position: relative;
+}
+.more-replies::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1rem;
+  background: var(--border);
+}
+.more-replies > summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--accent);
+  list-style: none;
+}
+.more-replies > summary::-webkit-details-marker { display: none; }
+.more-replies > summary:hover { text-decoration: underline; }
 
 .comment-header {
   display: flex;

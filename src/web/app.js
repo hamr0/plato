@@ -18,7 +18,12 @@ import {
   validateSubName,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
-import { addComment, listCommentsForPost, buildCommentTree } from '../content/comment.js';
+import {
+  addComment,
+  listCommentsForPost,
+  buildCommentTree,
+  COMMENT_SORTS,
+} from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
@@ -518,15 +523,24 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
   redirect(res, `/sub/${result.subName}`);
 }
 
-// Comment tree render. Depth is unbounded; we cap visual indent at 8 levels
-// so deep replies don't disappear off-screen but still maintain order.
+// Comment tree render. Auto-collapse depth: any subtree beyond MAX_DEPTH
+// rolls up into a native <details> "+ N more replies" so deep threads don't
+// drown the page. Score-collapse threshold hides comments that have been
+// driven below -3 behind a separate <details> toggle.
 const COLLAPSE_THRESHOLD = -3;
-const MAX_INDENT_DEPTH = 8;
+const MAX_DEPTH = 4;
+
+function countDescendants(node) {
+  let n = 0;
+  for (const r of node.replies) {
+    n += 1 + countDescendants(r);
+  }
+  return n;
+}
 
 function commentNodeView(node, ctx, depth) {
   const pseudonym = ctx.pseudonyms.get(node.handle) ?? node.handle.slice(0, 8);
   const collapsed = node.score <= COLLAPSE_THRESHOLD;
-  const indent = Math.min(depth, MAX_INDENT_DEPTH);
   const replyForm = ctx.currentHandle
     ? html`<details class="reply"><summary class="muted">reply</summary>
         <form method="POST" action="/sub/${ctx.subName}/post/${ctx.postId}/comment" class="reply-form">
@@ -546,7 +560,19 @@ function commentNodeView(node, ctx, depth) {
       </details>`
     : body;
 
-  return html`<div class="comment depth-${indent}" id="comment-${node.id}">
+  let repliesView = html``;
+  if (node.replies.length > 0) {
+    if (depth + 1 >= MAX_DEPTH) {
+      const total = countDescendants(node);
+      repliesView = html`<details class="more-replies"><summary class="muted">+ ${total} more ${total === 1 ? 'reply' : 'replies'}</summary>
+        <div class="replies">${node.replies.map((r) => commentNodeView(r, ctx, depth + 1))}</div>
+      </details>`;
+    } else {
+      repliesView = html`<div class="replies">${node.replies.map((r) => commentNodeView(r, ctx, depth + 1))}</div>`;
+    }
+  }
+
+  return html`<div class="comment" id="comment-${node.id}">
     <div class="comment-header">
       ${voteWidget({
         targetType: 'comment',
@@ -564,9 +590,7 @@ function commentNodeView(node, ctx, depth) {
     </div>
     ${inner}
     ${replyForm}
-    ${node.replies.length > 0
-      ? html`<div class="replies">${node.replies.map((r) => commentNodeView(r, ctx, depth + 1))}</div>`
-      : html``}
+    ${repliesView}
   </div>`;
 }
 
@@ -582,7 +606,7 @@ function commentVotesFor(db, comments, currentHandle) {
   return map;
 }
 
-function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
+function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort) {
   const sub = getSubByName(db, subName);
   if (!sub) {
     return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
@@ -594,9 +618,10 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
 
   const { post, bodyHtml } = result;
   const currentHandle = auth.handleFromRequest(req);
-  const returnTo = permalinkFor(post);
+  const activeSort = COMMENT_SORTS.includes(sort) ? sort : 'best';
+  const returnTo = `${permalinkFor(post)}${activeSort === 'best' ? '' : `?sort=${activeSort}`}`;
 
-  const comments = listCommentsForPost(db, postId);
+  const comments = listCommentsForPost(db, postId, { sort: activeSort });
   const tree = buildCommentTree(comments);
   const allHandles = [...new Set([post.handle, ...comments.map((c) => c.handle)])];
   const pseudonyms = pseudonymsByHandle(db, allHandles);
@@ -605,6 +630,15 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
     ? getVote(db, { targetType: 'post', targetId: postId, voterHandle: currentHandle })
     : null;
   const treeCtx = { pseudonyms, commentVotes, currentHandle, subName, postId, returnTo };
+
+  const commentSortNav = html`<div class="sort-nav muted">
+    ${COMMENT_SORTS.map((s) => {
+      const href = s === 'best' ? permalinkFor(post) : `${permalinkFor(post)}?sort=${s}`;
+      return s === activeSort
+        ? html`<strong>${s}</strong>`
+        : html`<a href="${href}#comments">${s}</a>`;
+    })}
+  </div>`;
 
   send(
     res,
@@ -621,7 +655,8 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
         </div>
       </div>
 
-      <h3 class="section" id="comments">// comments (${comments.length})</h3>
+      <h3 class="section" id="comments">// comments (${comments.length}) · sort:</h3>
+      ${commentSortNav}
       ${currentHandle
         ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
             <textarea name="body" placeholder="add a comment in markdown" required></textarea>
@@ -631,7 +666,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
 
       ${tree.length === 0
         ? html`<p class="muted">no comments yet.</p>`
-        : tree.map((node) => commentNodeView(node, treeCtx, 0))}
+        : html`<div class="comment-tree">${tree.map((node) => commentNodeView(node, treeCtx, 0))}</div>`}
     `)
   );
 }
@@ -741,7 +776,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
         return handleAddComment(req, res, { db, auth }, m[1], m[2]);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
-        return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2]);
+        return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));
       }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'));

@@ -43,9 +43,22 @@ export function addComment(db, { postId, parentId = null, handle, body, now = Da
   return { commentId };
 }
 
-export function listCommentsForPost(db, postId) {
+export const COMMENT_SORTS = ['best', 'new'];
+
+// 'best' is the Reddit-style default: score DESC with chronological tiebreak
+// (the older of two tied comments wins, favoring substantive early replies
+// over latecomers piling on). 'new' is plain newest-first.
+const COMMENT_SORT_CLAUSES = {
+  best: 'score DESC, created_at ASC',
+  new: 'created_at DESC',
+};
+
+export function listCommentsForPost(db, postId, { sort = 'best' } = {}) {
+  if (!COMMENT_SORT_CLAUSES[sort]) {
+    throw new Error(`listCommentsForPost: unknown sort '${sort}'`);
+  }
   return db.prepare(
-    'SELECT * FROM comments WHERE post_id = ? ORDER BY created_at ASC'
+    `SELECT * FROM comments WHERE post_id = ? ORDER BY ${COMMENT_SORT_CLAUSES[sort]}`
   ).all(postId);
 }
 
