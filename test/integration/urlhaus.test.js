@@ -109,3 +109,26 @@ test('applyUrlhausMatches: empty matched array is a no-op', () => {
   const result = applyUrlhausMatches(db, { targetType: 'post', targetId: 'p1', matchedHosts: [] });
   assert.equal(result.hidden, false);
 });
+
+test('applyUrlhausMatches: writes system audit row with blocked-url note', () => {
+  const db = setup();
+  applyUrlhausMatches(db, {
+    targetType: 'post', targetId: 'p1', subName: 'lobby', matchedHosts: ['malware.example'],
+  });
+  const audit = db.prepare(
+    `SELECT mod_handle, action, target_id, reason, sub_name FROM mod_actions WHERE target_id = 'p1'`
+  ).get();
+  assert.ok(audit);
+  assert.equal(audit.mod_handle, SYSTEM_HANDLE);
+  assert.equal(audit.action, 'collapse');
+  assert.equal(audit.sub_name, 'lobby');
+  assert.match(audit.reason, /blocked-url: malware\.example/);
+});
+
+test('applyUrlhausMatches: re-run does not duplicate audit row', () => {
+  const db = setup();
+  applyUrlhausMatches(db, { targetType: 'post', targetId: 'p1', subName: 'lobby', matchedHosts: ['x.test'] });
+  applyUrlhausMatches(db, { targetType: 'post', targetId: 'p1', subName: 'lobby', matchedHosts: ['x.test'] });
+  const n = db.prepare(`SELECT COUNT(*) AS n FROM mod_actions WHERE target_id = 'p1'`).get().n;
+  assert.equal(n, 1);
+});

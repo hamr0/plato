@@ -131,6 +131,38 @@ test('applySpamMatches: empty matched array is a no-op', () => {
   assert.equal(post.collapsed_at, null);
 });
 
+test('applySpamMatches: writes system-attributed mod_actions audit row', () => {
+  const db = setup();
+  applySpamMatches(db, {
+    targetType: 'post', targetId: 'p1', subName: 'lobby', matched: ['guaranteed returns'],
+  });
+  const audit = db.prepare(
+    `SELECT mod_handle, action, target_type, target_id, reason, sub_name
+     FROM mod_actions WHERE target_id = 'p1'`
+  ).get();
+  assert.ok(audit, 'audit row should exist');
+  assert.equal(audit.mod_handle, SYSTEM_HANDLE);
+  assert.equal(audit.action, 'collapse');
+  assert.equal(audit.target_type, 'post');
+  assert.equal(audit.sub_name, 'lobby');
+  assert.match(audit.reason, /pattern: guaranteed returns/);
+});
+
+test('applySpamMatches: skips audit row when target already collapsed', () => {
+  const db = setup();
+  applySpamMatches(db, { targetType: 'post', targetId: 'p1', subName: 'lobby', matched: ['x'] });
+  applySpamMatches(db, { targetType: 'post', targetId: 'p1', subName: 'lobby', matched: ['x'] });
+  const n = db.prepare(`SELECT COUNT(*) AS n FROM mod_actions WHERE target_id = 'p1'`).get().n;
+  assert.equal(n, 1, 'no double-audit on re-publish');
+});
+
+test('applySpamMatches: omits audit row when no subName passed', () => {
+  const db = setup();
+  applySpamMatches(db, { targetType: 'post', targetId: 'p1', matched: ['x'] });
+  const n = db.prepare(`SELECT COUNT(*) AS n FROM mod_actions WHERE target_id = 'p1'`).get().n;
+  assert.equal(n, 0);
+});
+
 test('migration 007: SYSTEM_HANDLE row exists with pseudonym "system"', () => {
   const db = setup();
   const row = db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(SYSTEM_HANDLE);
