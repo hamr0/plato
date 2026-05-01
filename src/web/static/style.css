@@ -106,13 +106,28 @@ header h1 .logo-mark {
   font-style: italic;
   padding: 0.4rem 0;
 }
-.post-collapsed > summary,
+/* Mod state chips. Soft-removal = clickable [+] expands hidden body in
+ * place of the [collapsed by mod] label. Hard-removal = static [−]
+ * stub, no body. Score-collapsed comments use the same chip shape with
+ * a "(score) collapsed by community" label and stay clickable. */
+.mod-state.mod-soft-removed > summary,
 .comment-collapsed > summary {
   cursor: pointer;
   list-style: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 0.3rem 0;
 }
-.post-collapsed > summary::-webkit-details-marker,
+.mod-state.mod-soft-removed > summary::-webkit-details-marker,
 .comment-collapsed > summary::-webkit-details-marker { display: none; }
+.mod-state.mod-soft-removed > summary:hover,
+.comment-collapsed > summary:hover { color: var(--accent); }
+.mod-state.mod-soft-removed[open] > summary .label,
+.comment-collapsed[open] > summary .label { display: none; }
+.mod-state.mod-soft-removed[open] > summary,
+.comment-collapsed[open] > summary { margin-bottom: 0.4rem; }
+.mod-state .sigil { font-family: ui-monospace, monospace; }
+.mod-hard-removed { font-size: 0.85rem; padding: 0.3rem 0; font-style: italic; }
 .mod-marker {
   font-size: 0.78rem;
   font-weight: normal;
@@ -147,6 +162,35 @@ header h1 .logo-mark {
   filter: none;
 }
 
+/* Mod confirm form: each action button (remove, collapse, etc.) is a
+ * <details> summary; clicking expands a small reason form below. Hard
+ * removal requires a reason; soft removal is optional. The expand-form
+ * pattern is the friction that keeps mods deliberate. No JS needed. */
+.mod-confirm { display: inline-block; }
+.mod-confirm > summary { list-style: none; cursor: pointer; }
+.mod-confirm > summary::-webkit-details-marker { display: none; }
+.mod-confirm[open] > summary { color: var(--accent-warm); border-color: var(--accent-warm); }
+.mod-confirm > .mod-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0.4rem 0 0;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft);
+}
+.mod-confirm > .mod-form textarea {
+  flex: 1;
+  min-width: 200px;
+  min-height: 2rem;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.4rem;
+  resize: vertical;
+}
+.mod-confirm > .mod-form button { font-size: 0.78rem; padding: 0.2rem 0.7rem; }
+
 /* Mod log table — chronological public audit per PRD §Public mod log. */
 table.modlog { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
 table.modlog th, table.modlog td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
@@ -160,16 +204,20 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
 /* Flag button — small details dropdown next to the mod controls. PRD
  * §Spam 7: separate from downvote, category-driven. Closed list of 5
  * categories; optional 280-char note. */
-.post-actions { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.3rem; flex-wrap: wrap; }
+.post-actions { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.3rem; flex-wrap: wrap; }
+.post-actions .mod-controls { gap: 0.4rem; margin-top: 0; }
 .flag-form-wrap { display: inline-block; }
 .flag-trigger {
   cursor: pointer;
   list-style: none;
   font-size: 0.78rem;
+  font-weight: normal;
   border: 1px solid var(--border);
   padding: 0.15rem 0.5rem;
   border-radius: 3px;
   color: var(--text-dim);
+  display: inline-block;
+  line-height: 1.2;
 }
 .flag-trigger::-webkit-details-marker { display: none; }
 .flag-trigger:hover { color: var(--accent-warm); border-color: var(--accent-warm); }

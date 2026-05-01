@@ -1018,3 +1018,41 @@ test('M4: re-flagging same target by same user returns redirect (UNIQUE swallowe
   const count = db.prepare(`SELECT count(*) AS n FROM flags WHERE target_id = 'p1'`).get().n;
   assert.equal(count, 1);
 });
+
+test('M4: hard removal (action=remove) requires a reason', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+  ensureSub(db, 'lobby');
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'mod2@example.com', { db });
+  const owner = db.prepare(`SELECT handle FROM handles WHERE pseudonym IS NOT NULL ORDER BY first_seen_at DESC LIMIT 1`).get().handle;
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = 'lobby'`).run(owner);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p1', 'lobby', ?, 't', 'posts/p1.md', ?)`).run(owner, Date.now());
+
+  // Without reason → 400
+  let res = await jarFetch(jar, baseUrl + '/sub/lobby/mod', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'remove', target_type: 'post', target_id: 'p1' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.text();
+  assert.match(body, /reason required/);
+
+  // With reason → 302 + state flipped
+  res = await jarFetch(jar, baseUrl + '/sub/lobby/mod', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      action: 'remove', target_type: 'post', target_id: 'p1',
+      reason: 'targeted harassment', return_to: '/sub/lobby',
+    }),
+  });
+  assert.equal(res.status, 302);
+  const post = db.prepare(`SELECT removed_at FROM posts WHERE id = 'p1'`).get();
+  assert.ok(post.removed_at > 0);
+  const log = db.prepare(`SELECT reason FROM mod_actions WHERE action = 'remove'`).get();
+  assert.equal(log.reason, 'targeted harassment');
+});

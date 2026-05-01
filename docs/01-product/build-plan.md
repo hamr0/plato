@@ -177,11 +177,13 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 
 ---
 
-## M4: Moderation
+## M4: Moderation [SHIPPED]
 
 **Goal.** Sub owners can collapse, remove, ban. All actions land in a public mod log. Users can flag posts/comments by category. Flag thresholds auto-hide pending review. The forum has the social tools to stay non-toxic without external authority.
 
 **Why fourth.** M2-M3 created the surface (subs, posts, comments, votes); M4 makes that surface defensible against abuse. Ship before public exposure.
+
+**Vocabulary shipped (visible to users):** internal action enum stays `collapse` / `remove` for code/DB stability, but the public modlog displays them as **`soft removal`** and **`hard removal`**. Soft = chip-as-fold (`[+] [collapsed by mod]`, click expands body in place of label, reason optional). Hard = static stub (`[−] [removed by mod]`, body genuinely gone, reason required). Same chip shape, opposite sigil, opposite interactivity — symmetric design, honest about the asymmetric outcomes.
 
 ### Deliverables
 
@@ -237,6 +239,11 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 ---
 
 ## M5-M8 (sketch, refined as M1-M4 land)
+
+### M5 polish carryover from M4
+
+- **My mod decisions panel.** A mod-only page listing the mod's own past actions with inline `revoke` buttons. Surfaces a mod's pattern of decisions to themselves (the "self-watching" dynamic — knowing your record is visible to you discourages capricious moderation). The public modlog already covers external auditability; this panel is the *self-review* affordance. Pairs naturally with the M5 flag-queue work since both are mod-facing surfaces.
+- **Per-sub flag-threshold override.** PRD §Spam 7 says "configurable per-sub, default 3 unique flaggers." Currently hardcoded; M5 adds the per-sub config with the broader sub settings work.
 
 ### M5: Spam defenses + per-sub structure
 Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-account scrutiny, per-sub limits, link cap + URLhaus integration (hourly cron), spam pattern file (regex), velocity alerts dashboard, public mod log already done in M4.

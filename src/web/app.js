@@ -59,6 +59,16 @@ const PLATO_TAGLINE = 'opinion is the medium between knowledge and ignorance.';
 // animation in the entire app). aria-hidden because the wordmark next to
 // it carries the meaning for screen readers. ViewBox is sized so dots
 // fill ~75% of width — readable at favicon scales (16px+).
+// Display labels for mod actions in the public modlog. Internal enum stays
+// 'collapse'/'remove' (DB compat); public surface reads as soft/hard
+// removal so the brand of moderation is visible.
+const MOD_ACTION_LABELS = {
+  collapse:   'soft removal',
+  uncollapse: 'soft removal undone',
+  remove:     'hard removal',
+  unremove:   'hard removal undone',
+};
+
 function logoMark({ size = 22, loading = false } = {}) {
   const h = Math.round(size * (8 / 24));
   const attrs = loading ? raw(' data-loading') : raw('');
@@ -248,17 +258,13 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
         returnTo: perPostReturn,
       })}
       <div class="body">
-        <h2><a href="${link}">${post.title}</a>${post.collapsed_at != null && post.removed_at == null
-          ? html` <span class="muted mod-marker">(collapsed by mod)</span>`
-          : html``}</h2>
+        <h2><a href="${link}">${post.title}</a></h2>
         ${authorMeta(post, name, { showComments: true })}
-        ${post.removed_at != null
-          ? html`<div class="preview muted post-removed">[removed by mod]</div>`
-          : preview
-            ? html`<div class="preview">${raw(preview.html)}${preview.truncated
-                ? html` <a href="${link}" class="more">read more →</a>`
-                : html``}</div>`
-            : html``}
+        ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: preview
+          ? html`<div class="preview">${raw(preview.html)}${preview.truncated
+              ? html` <a href="${link}" class="more">read more →</a>`
+              : html``}</div>`
+          : html`` })}
         <div class="post-actions">
           ${currentHandle && post.removed_at == null
             ? flagButton({ targetType: 'post', targetId: post.id, returnTo: perPostReturn })
@@ -604,16 +610,17 @@ function commentNodeView(node, ctx, depth) {
       </details>`
     : html``;
 
-  // Removed: hard moderation. Body replaced with stub but the comment
-  // still occupies its slot in the tree so downstream replies still make
-  // sense. PRD §Moderation Tier 2.
+  // Body rendering: for live/score-collapsed comments build the body
+  // tree, then wrap with mod-state chip if mod-collapsed/removed. PRD
+  // §Moderation Tier 2: removed comments keep their slot in the tree
+  // (stub) so downstream replies still make sense.
   let inner;
   if (removed) {
-    inner = html`<div class="comment-removed muted">[removed by mod]</div>`;
+    inner = modStateView({ removedAt: node.removed_at, collapsedAt: null, body: html`` });
   } else {
     const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
     const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
-    const body = isLong
+    const longBody = isLong
       ? html`<details class="comment-long">
           <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
           ${fullBody}
@@ -621,17 +628,14 @@ function commentNodeView(node, ctx, depth) {
       : fullBody;
 
     if (modCollapsed) {
-      inner = html`<details class="comment-collapsed">
-        <summary class="muted">collapsed by mod. show.</summary>
-        ${body}
-      </details>`;
+      inner = modStateView({ removedAt: null, collapsedAt: node.collapsed_at, body: longBody });
     } else if (scoreCollapsed) {
       inner = html`<details class="comment-collapsed">
-        <summary class="muted">(score ${formatScore(node.score)}) collapsed comment by ${pseudonym}. show.</summary>
-        ${body}
+        <summary class="muted">[+] (score ${formatScore(node.score)}) collapsed by community</summary>
+        ${longBody}
       </details>`;
     } else {
-      inner = body;
+      inner = longBody;
     }
   }
 
@@ -736,6 +740,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         <div class="body">
           <h1>${post.title}</h1>
           ${authorMeta(post, pseudonyms.get(post.handle))}
+          ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
           <div class="post-actions">
             ${currentHandle && post.removed_at == null
               ? flagButton({ targetType: 'post', targetId: postId, returnTo })
@@ -745,14 +750,6 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
               collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
             }) : html``}
           </div>
-          ${post.removed_at != null
-            ? html`<article class="muted post-removed">[removed by mod]</article>`
-            : post.collapsed_at != null
-              ? html`<details class="post-collapsed">
-                  <summary class="muted">collapsed by mod. show.</summary>
-                  <article>${raw(bodyHtml)}</article>
-                </details>`
-              : html`<article>${raw(bodyHtml)}</article>`}
         </div>
       </div>
 
@@ -882,17 +879,56 @@ function renderAvatar(res, handle) {
 // current user is owner or co-mod of the sub. The buttons toggle the
 // soft-state column via POST /sub/<name>/mod. State-aware: shows
 // "uncollapse" if collapsed, "unremove" if removed, etc.
-function modControls({ subName, targetType, targetId, collapsedAt, removedAt, returnTo }) {
-  const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
-  const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
-  return html`<div class="mod-controls">
-    ${[collapseAction, removeAction].map((action) => html`<form method="POST" action="/sub/${subName}/mod" class="mod-form">
+// Public view of a post or comment's mod state. Live = body inline.
+// Soft-removed = `[+] [collapsed by mod]` <details> chip; clicking the
+// chip expands the body in place of the label. Hard-removed = `[-]
+// [removed by mod]` static stub, no body. Same shape, different sigils,
+// different interactivity. PRD §Moderation Tier 2.
+function modStateView({ removedAt, collapsedAt, body }) {
+  if (removedAt != null) {
+    return html`<div class="mod-state mod-hard-removed muted">
+      <span class="sigil">[−]</span> <span class="label">[removed by mod]</span>
+    </div>`;
+  }
+  if (collapsedAt != null) {
+    return html`<details class="mod-state mod-soft-removed">
+      <summary>
+        <span class="sigil">[+]</span> <span class="label">[collapsed by mod]</span>
+      </summary>
+      ${body}
+    </details>`;
+  }
+  return body;
+}
+
+// Inline confirm form per mod action. Clicking the action label expands a
+// small form with a reason textarea + confirm button. Hard removal (remove)
+// requires a reason; soft removal (collapse) makes it optional. The
+// expand-form pattern is the friction that makes hard moderation
+// deliberate without needing a JS modal.
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired }) {
+  return html`<details class="mod-confirm">
+    <summary class="mod-btn">${action}</summary>
+    <form method="POST" action="/sub/${subName}/mod" class="mod-form">
       <input type="hidden" name="action" value="${action}">
       <input type="hidden" name="target_type" value="${targetType}">
       <input type="hidden" name="target_id" value="${targetId}">
       <input type="hidden" name="return_to" value="${returnTo}">
-      <button class="mod-btn">${action}</button>
-    </form>`)}
+      <textarea name="reason" placeholder="${reasonRequired ? 'reason (required)' : 'reason (optional)'}" ${reasonRequired ? raw('required') : raw('')}></textarea>
+      <button>confirm ${action}</button>
+    </form>
+  </details>`;
+}
+
+function modControls({ subName, targetType, targetId, collapsedAt, removedAt, returnTo }) {
+  const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
+  const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
+  // Reason required only on the destructive direction: 'remove'. uncollapse,
+  // unremove, and collapse all leave content readable, so the deliberation
+  // gate is lighter.
+  return html`<div class="mod-controls">
+    ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo, reasonRequired: false })}
+    ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo, reasonRequired: removeAction === 'remove' })}
   </div>`;
 }
 
@@ -950,10 +986,16 @@ async function handleModAction(req, res, { db, auth }, subName) {
   if (!MOD_ACTIONS.includes(action)) {
     return send(res, 400, layout('bad action', html`<p class="muted">unknown mod action.</p>`));
   }
+  const trimmedReason = reason && reason.trim().length > 0 ? reason.trim() : null;
+  // Hard removal (the destructive direction) requires a written reason —
+  // self-discipline gate per "every mod action is auditable" + reason
+  // captures intent for the modlog so future reviewers can judge it.
+  if (action === 'remove' && !trimmedReason) {
+    return send(res, 400, layout('reason required', html`<p class="muted">hard removal requires a reason.</p>`));
+  }
   try {
     recordAction(db, {
-      subName, modHandle: handle, action, targetType, targetId,
-      reason: reason && reason.trim().length > 0 ? reason : null,
+      subName, modHandle: handle, action, targetType, targetId, reason: trimmedReason,
     });
   } catch (err) {
     return send(res, 400, layout('mod failed', html`<p class="muted">${err.message}</p>`));
@@ -979,7 +1021,7 @@ function renderModLog(req, res, { db, auth }, subName) {
         <tbody>${actions.map((a) => html`<tr>
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8)}</td>
-          <td><span class="mod-action mod-action-${a.action}">${a.action}</span></td>
+          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
           <td class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</td>
           <td class="muted">${a.reason ?? ''}</td>
         </tr>`)}</tbody>
@@ -989,7 +1031,7 @@ function renderModLog(req, res, { db, auth }, subName) {
     ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
     <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a> · modlog</p>
     <h2>// mod log</h2>
-    <p class="muted">every moderator action in this sub, public per PRD §Public mod log.</p>
+    <p class="muted">every moderator action in this sub. public.</p>
     ${rowsView}
   `));
 }

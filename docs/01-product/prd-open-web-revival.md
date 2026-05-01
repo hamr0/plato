@@ -218,20 +218,24 @@ Replies-by-email are DKIM-verified before posting. Originating address must matc
 
 Two-tier system, both visible to users.
 
-### Tier 1: Collapse (soft moderation)
+### Tier 1: Soft removal (collapse)
 
 - Mod marks a post or comment as "hidden."
-- It appears collapsed in the thread with a one-line reason ("off-topic," "low quality," "rule 3," etc.).
+- It appears as a `[+] [collapsed by mod]` chip in the thread; clicking the chip expands the body in place of the label.
 - Any reader can click to expand.
 - Vote tallies still show.
+- Reason is **optional** (the act is reversible and visible; the audit log captures who collapsed what).
 - Used for: opinions the mod disagrees with, off-topic posts, low-effort content, mild rule violations.
+- Public modlog renders this as **`soft removal`** (and `soft removal undone` on revoke).
 
-### Tier 2: Remove (hard moderation)
+### Tier 2: Hard removal (remove)
 
-- Post is removed from the thread entirely.
-- Listed in a public moderation log page with reason and timestamp.
+- Post body is replaced with a `[−] [removed by mod]` static stub. Same shape as the collapsed chip, opposite sigil, no fold — content is genuinely gone from view.
+- The slot still occupies its place in the tree so downstream replies don't show holes.
+- Reason is **required** (the destructive direction needs a written justification — self-discipline gate, mod action visible in the public log).
 - Original content viewable only via the log (or not at all for protocol-blocked content).
 - Used for: targeted harassment, doxxing, illegal content, deliberate harm.
+- Public modlog renders this as **`hard removal`** (and `hard removal undone` on revoke).
 
 ### Mod structure
 
