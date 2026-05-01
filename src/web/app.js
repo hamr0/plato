@@ -248,7 +248,7 @@ function buildPreviews(posts, postsDir, maxChars) {
 
 function subEntry(s) {
   const title = `${s.post_count} post${s.post_count === 1 ? '' : 's'} in the last 24h`;
-  return html`<a href="/sub/${s.name}" title="${title}">/sub/${s.name}${s.post_count > 0
+  return html`<a href="/sub/${s.name}" title="${title}">${s.name}${s.post_count > 0
     ? html` <span class="count">${s.post_count}</span>`
     : html``}</a>`;
 }
