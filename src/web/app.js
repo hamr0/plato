@@ -1296,6 +1296,73 @@ const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
 const SUB_POST_COMMENT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/comment$/;
 
+// Login + logout wrappers around knowless. Knowless's own /login renders
+// its built-in "thanks, link is on the way" page which doesn't match
+// plato's look (and recently surfaced an empty <strong></strong> when
+// the email field was missing). The wrappers below reuse plato's check-
+// your-email layout for login, and redirect logout to / so the user
+// lands on a useful page instead of a blank 200.
+async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const { email } = form;
+  if (!email) {
+    return send(res, 400, layout('login', html`<p class="muted">email required. <a href="/">back</a></p>`));
+  }
+  if (isDisposableEmail(email, disposableDomains)) {
+    return send(
+      res,
+      400,
+      layout('login rejected', html`<p class="muted">disposable email domains aren't accepted. <a href="/">back</a></p>`)
+    );
+  }
+  await auth.startLogin({
+    email,
+    nextUrl: `${baseUrl}/`,
+    sourceIp: req.socket?.remoteAddress,
+  });
+  send(
+    res,
+    200,
+    layout('check your email', html`
+      <header>
+        <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}plato · check your email</a></h1>
+      </header>
+      <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
+      <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
+      <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
+    `)
+  );
+}
+
+async function handleLogout(req, res, { auth }) {
+  // Capture knowless's clearing Set-Cookie via a thin response proxy,
+  // then drop a 302 to / so the user lands somewhere useful. Without
+  // this, knowless's logout returns a 200 with empty body — looks like
+  // a broken page even though it's working.
+  let setCookieValue = null;
+  let blocked403 = false;
+  const proxy = {
+    setHeader(name, value) {
+      if (String(name).toLowerCase() === 'set-cookie') setCookieValue = value;
+    },
+    end() {},
+    set statusCode(v) {
+      // Knowless returns 403 if the Origin/Referer check fails. Surface
+      // that to the caller; otherwise swallow the 200 it would set.
+      if (v === 403) blocked403 = true;
+    },
+    get statusCode() { return 200; },
+  };
+  await auth.logout(req, proxy);
+  if (blocked403) {
+    return send(res, 403, layout('logout failed', html`<p class="muted">request blocked (origin check). <a href="/">back</a></p>`));
+  }
+  if (setCookieValue) res.setHeader('Set-Cookie', setCookieValue);
+  redirect(res, '/');
+}
+
+
 export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
   return async function handler(req, res) {
     try {
@@ -1306,10 +1373,10 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl }) {
       if (await applyStaticRoute(req, res)) return;
 
       if (path === '/login' && method === 'GET') return auth.loginForm(req, res);
-      if (path === '/login' && method === 'POST') return auth.login(req, res);
+      if (path === '/login' && method === 'POST') return handleLogin(req, res, { auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);
       if (path === '/verify') return auth.verify(req, res);
-      if (path === '/logout' && method === 'POST') return auth.logout(req, res);
+      if (path === '/logout' && method === 'POST') return handleLogout(req, res, { auth });
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir });
       if (path === '/draft' && method === 'POST') {
