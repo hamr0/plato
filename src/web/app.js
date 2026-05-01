@@ -47,12 +47,15 @@ function relativeTime(ms) {
   return `${Math.floor(d / 86400)}d ago`;
 }
 
-function authorMeta(post, pseudonym) {
+function authorMeta(post, pseudonym, { showComments = false } = {}) {
   return html`<div class="meta">
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
     <span class="name">${pseudonym}</span>
     <span>· <a href="/sub/${post.sub_name}">/sub/${post.sub_name}</a></span>
     <span class="when">· ${relativeTime(post.created_at)}</span>
+    ${showComments
+      ? html`<span>· <a href="${permalinkFor(post)}#comments">${post.comment_count ?? 0} ${(post.comment_count ?? 0) === 1 ? 'reply' : 'replies'}</a></span>`
+      : html``}
   </div>`;
 }
 
@@ -186,18 +189,21 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
     const name = pseudonyms.get(post.handle) ?? post.handle.slice(0, 8);
     const preview = previews?.get(post.id);
     const link = permalinkFor(post);
-    return html`<div class="post">
+    // After voting, redirect back to this exact post in the list so the
+    // browser doesn't scroll to top. Anchor matches the post element below.
+    const perPostReturn = `${returnTo}#post-${post.id}`;
+    return html`<div class="post" id="post-${post.id}">
       ${voteWidget({
         targetType: 'post',
         targetId: post.id,
         score: post.score ?? 0,
         currentVote: voteState?.get(post.id) ?? null,
         currentHandle,
-        returnTo,
+        returnTo: perPostReturn,
       })}
       <div class="body">
         <h2><a href="${link}">${post.title}</a></h2>
-        ${authorMeta(post, name)}
+        ${authorMeta(post, name, { showComments: true })}
         ${preview
           ? html`<div class="preview">${raw(preview.html)}${preview.truncated
               ? html` <a href="${link}" class="more">read more →</a>`
@@ -506,7 +512,7 @@ function commentNodeView(node, ctx, depth) {
       </details>`
     : body;
 
-  return html`<div class="comment depth-${indent}">
+  return html`<div class="comment depth-${indent}" id="comment-${node.id}">
     <div class="comment-header">
       ${voteWidget({
         targetType: 'comment',
@@ -514,7 +520,7 @@ function commentNodeView(node, ctx, depth) {
         score: node.score,
         currentVote: ctx.commentVotes.get(node.id) ?? null,
         currentHandle: ctx.currentHandle,
-        returnTo: ctx.returnTo,
+        returnTo: `${ctx.returnTo}#comment-${node.id}`,
       })}
       <div class="meta">
         <img src="/avatar/${node.handle}.svg" width="16" height="16" alt="">
@@ -581,7 +587,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId) {
         </div>
       </div>
 
-      <h3 class="section">// comments (${comments.length})</h3>
+      <h3 class="section" id="comments">// comments (${comments.length})</h3>
       ${currentHandle
         ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
             <textarea name="body" placeholder="add a comment in markdown" required></textarea>

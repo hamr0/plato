@@ -150,13 +150,16 @@ export function listRecentPosts(db, { limit = 50, offset = 0 } = {}) {
 // Front-page recent feed with a per-sub cap (PRD §Front Page). Without the
 // cap, one chatty sub can crowd out everything else. ROW_NUMBER() partitions
 // by sub_name so each sub contributes at most `perSub` of its newest posts.
+// comment_count joined via correlated subquery — at M2/M3 scale this is fast
+// and avoids an N+1 walk in the route layer.
 export function listRecentPostsCappedPerSub(db, { limit = 50, perSub = 2 } = {}) {
   return db.prepare(
     `WITH ranked AS (
        SELECT *, ROW_NUMBER() OVER (PARTITION BY sub_name ORDER BY created_at DESC) AS rn
        FROM posts
      )
-     SELECT id, sub_name, handle, title, file_path, created_at
+     SELECT id, sub_name, handle, title, file_path, created_at, score,
+       (SELECT COUNT(*) FROM comments WHERE post_id = ranked.id) AS comment_count
      FROM ranked
      WHERE rn <= ?
      ORDER BY created_at DESC
@@ -188,7 +191,9 @@ export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'ne
 
   if (sort === 'hot') {
     return db.prepare(`
-      SELECT * FROM posts
+      SELECT *,
+        (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
+      FROM posts
       WHERE sub_name = ?
       ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC
       LIMIT ? OFFSET ?
@@ -196,6 +201,8 @@ export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'ne
   }
 
   return db.prepare(
-    `SELECT * FROM posts WHERE sub_name = ? ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
+    `SELECT *,
+       (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
+     FROM posts WHERE sub_name = ? ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
   ).all(subName, limit, offset);
 }
