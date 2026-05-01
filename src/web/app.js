@@ -657,16 +657,19 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
 
       <h3 class="section" id="comments">// comments (${comments.length}) · sort:</h3>
       ${commentSortNav}
-      ${currentHandle
-        ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
-            <textarea name="body" placeholder="add a comment in markdown" required></textarea>
-            <button>comment</button>
-          </form>`
-        : html`<p class="muted">log in to comment.</p>`}
 
       ${tree.length === 0
-        ? html`<p class="muted">no comments yet.</p>`
+        ? html`<p class="muted">no comments yet — be the first.</p>`
         : html`<div class="comment-tree">${tree.map((node) => commentNodeView(node, treeCtx, 0))}</div>`}
+
+      <div class="composer-bar">
+        ${currentHandle
+          ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
+              <textarea name="body" placeholder="join the conversation — markdown ok" required></textarea>
+              <button>comment</button>
+            </form>`
+          : html`<p class="muted">log in to comment.</p>`}
+      </div>
     `)
   );
 }

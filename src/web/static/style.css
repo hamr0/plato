@@ -328,6 +328,49 @@ button:hover { filter: brightness(1.1); }
 .more-replies > summary::-webkit-details-marker { display: none; }
 .more-replies > summary:hover { text-decoration: underline; }
 
+/* Sticky composer at the bottom of the post page. Always-visible reply
+ * affordance — user doesn't need to scroll past long threads to comment.
+ * Top-level only; per-comment replies still use their inline forms. */
+.composer-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  z-index: 100;
+}
+.composer-bar > * {
+  max-width: 720px;
+  margin: 0 auto;
+}
+.composer-bar form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  margin: 0;
+}
+.composer-bar textarea {
+  flex: 1;
+  min-height: 2.4rem;
+  height: 2.4rem;
+  max-height: 12rem;
+  resize: none;
+  padding: 0.4rem 0.6rem;
+  transition: height 0.15s ease-out;
+}
+.composer-bar textarea:focus {
+  height: 6rem;
+}
+.composer-bar p { margin: 0; padding: 0.4rem 0; text-align: center; }
+.composer-bar button { white-space: nowrap; }
+
+/* Page padding so the last comment isn't hidden behind the bar. Apply to
+ * body when the bar is present — guarded by a sub-tree class on the post
+ * page so other pages aren't affected. */
+body:has(.composer-bar) { padding-bottom: 5rem; }
+
 .comment-header {
   display: flex;
   align-items: center;
