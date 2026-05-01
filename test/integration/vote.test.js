@@ -1,0 +1,137 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../../src/db/index.js';
+import { applyAllMigrations } from '../_helpers/migrations.js';
+import { castVote, getVote, isNewAccount } from '../../src/content/vote.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const VOTER = 'a'.repeat(64);
+const AUTHOR = 'b'.repeat(64);
+const SUB = 'lobby';
+
+function fixture({ voterFirstSeenAt, postCreatedAt = Date.now() } = {}) {
+  const db = openDb(':memory:');
+  applyAllMigrations(db);
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run(SUB, Date.now());
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(VOTER, 'voter-one', voterFirstSeenAt ?? Date.now() - 30 * DAY_MS);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(AUTHOR, 'author-one', Date.now() - 30 * DAY_MS);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('p1', SUB, AUTHOR, 't', 'posts/p1.md', postCreatedAt);
+  db.prepare(`INSERT INTO comments (id, post_id, handle, body, created_at)
+              VALUES (?, ?, ?, ?, ?)`)
+    .run('c1', 'p1', AUTHOR, 'b', Date.now());
+  return db;
+}
+
+test('castVote: full-weight upvote on post sets value=1.0 and score=1.0', () => {
+  const db = fixture();
+  const r = castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' });
+  assert.equal(r.vote, 'up');
+  assert.equal(r.score, 1.0);
+  const post = db.prepare('SELECT score FROM posts WHERE id = ?').get('p1');
+  assert.equal(post.score, 1.0);
+});
+
+test('castVote: re-voting same direction toggles off', () => {
+  const db = fixture();
+  castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' });
+  const r = castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' });
+  assert.equal(r.vote, null);
+  assert.equal(r.score, 0);
+  assert.equal(getVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER }), null);
+});
+
+test('castVote: opposite direction switches sides', () => {
+  const db = fixture();
+  castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' });
+  const r = castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'down' });
+  assert.equal(r.vote, 'down');
+  assert.equal(r.score, -1.0);
+});
+
+test('castVote: new account upvote on young post is half-weight', () => {
+  const db = fixture({ voterFirstSeenAt: Date.now() - DAY_MS });
+  const r = castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' });
+  assert.equal(r.vote, 'up');
+  assert.equal(r.score, 0.5);
+});
+
+test('castVote: new account vote on comment throws', () => {
+  const db = fixture({ voterFirstSeenAt: Date.now() - DAY_MS });
+  assert.throws(
+    () => castVote(db, { targetType: 'comment', targetId: 'c1', voterHandle: VOTER, direction: 'up' }),
+    /new accounts.*cannot vote on comments/
+  );
+});
+
+test('castVote: new account vote on post older than 24h throws', () => {
+  const db = fixture({
+    voterFirstSeenAt: Date.now() - DAY_MS,
+    postCreatedAt: Date.now() - 2 * DAY_MS,
+  });
+  assert.throws(
+    () => castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'up' }),
+    /< 24h old/
+  );
+});
+
+test('castVote: established account vote on comment works (full weight)', () => {
+  const db = fixture();
+  const r = castVote(db, { targetType: 'comment', targetId: 'c1', voterHandle: VOTER, direction: 'up' });
+  assert.equal(r.score, 1.0);
+  const c = db.prepare('SELECT score FROM comments WHERE id = ?').get('c1');
+  assert.equal(c.score, 1.0);
+});
+
+test('castVote: nonexistent target throws', () => {
+  const db = fixture();
+  assert.throws(
+    () => castVote(db, { targetType: 'post', targetId: 'nope', voterHandle: VOTER, direction: 'up' }),
+    /not found/
+  );
+});
+
+test('castVote: invalid targetType / direction reject', () => {
+  const db = fixture();
+  assert.throws(
+    () => castVote(db, { targetType: 'user', targetId: 'p1', voterHandle: VOTER, direction: 'up' }),
+    /targetType/
+  );
+  assert.throws(
+    () => castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: VOTER, direction: 'sideways' }),
+    /direction/
+  );
+});
+
+test('castVote: score cache stays in sync across many voters', () => {
+  const db = fixture();
+  const voters = ['c', 'd', 'e'].map((c) => c.repeat(64));
+  for (const v of voters) {
+    db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+      .run(v, `voter-${v[0]}`, Date.now() - 30 * DAY_MS);
+  }
+  for (const v of voters) {
+    castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: v, direction: 'up' });
+  }
+  // 3 upvotes from established accounts = +3.0
+  const post = db.prepare('SELECT score FROM posts WHERE id = ?').get('p1');
+  assert.equal(post.score, 3.0);
+
+  // One toggles off, one switches to down
+  castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: voters[0], direction: 'up' });   // toggle off
+  castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: voters[1], direction: 'down' }); // switch
+  // 1 (still up) + (-1, switched) + 0 (toggled) = 0
+  const after = db.prepare('SELECT score FROM posts WHERE id = ?').get('p1');
+  assert.equal(after.score, 0);
+});
+
+test('isNewAccount: true within 7 days, false after', () => {
+  const db = fixture({ voterFirstSeenAt: Date.now() - 1 * DAY_MS });
+  assert.equal(isNewAccount(db, VOTER), true);
+
+  const db2 = fixture({ voterFirstSeenAt: Date.now() - 30 * DAY_MS });
+  assert.equal(isNewAccount(db2, VOTER), false);
+});
