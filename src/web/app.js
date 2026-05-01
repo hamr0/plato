@@ -1271,7 +1271,7 @@ function renderMyModLog(req, res, { db, auth }, page) {
     : html`<table class="modlog">
         <thead><tr><th>sub</th><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
-          <td><a href="/sub/${a.sub_name}/modlog">/sub/${a.sub_name}</a></td>
+          <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
@@ -1280,10 +1280,16 @@ function renderMyModLog(req, res, { db, auth }, page) {
         </tr>`)}</tbody>
       </table>`;
 
+  // Subs-i-mod strip under the heading: links to each per-sub modlog so a
+  // mod can drill into one sub's audit feed in one click. Also makes the
+  // "you mod 3 subs" claim concrete instead of an abstract count.
+  const subStrip = html`<p class="mod-subs muted">${subNames.map((s, i) => html`${i > 0 ? raw(' · ') : raw('')}<a href="/sub/${s}/modlog">${s}</a>`)}</p>`;
+
   send(res, 200, layout('/modlog', html`
     ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my mod log</h2>
+    ${subStrip}
     <p class="muted">every action across the ${subNames.length} sub${subNames.length === 1 ? '' : 's'} you moderate.</p>
     ${rowsView}
     ${pager}
