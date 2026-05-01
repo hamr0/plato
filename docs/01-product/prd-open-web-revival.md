@@ -227,6 +227,11 @@ Two-tier system, both visible to users.
 - Reason is **optional** (the act is reversible and visible; the audit log captures who collapsed what).
 - Used for: opinions the mod disagrees with, off-topic posts, low-effort content, mild rule violations.
 - Public modlog renders this as **`soft removal`** (and `soft removal undone` on revoke).
+- **Community auto-revert**: if the soft-removed target accumulates **enough net upvotes** since the collapse landed, the system auto-uncollapses it without mod intervention. The audit log records this as `community overruled` with `mod_handle = NULL`. Score-snapshot at collapse time enables the comparison; vote-weight rules (new-account 0.5x, ban-checks) still apply to the votes that count toward the threshold. Mods see the override in their modlog (and in the M5 "my mod decisions" panel) but take no action — the system handles the reversal. Soft moderation thus has both a mod-driven undo path (manual `uncollapse` button) and a community-driven undo path (cumulative upvotes). Hard moderation has neither — see Tier 2.
+- **Per-sub thresholds**: posts and comments have separate, mod-configurable auto-revert thresholds set at sub creation. Defaults match the floors below.
+  - **Posts: floor of 50.** Posts surface in feeds and accumulate votes faster than comments — the bar must be high enough that a small brigade can't overturn a soft-removal.
+  - **Comments: floor of 20.** Comments are downstream of a post, so their vote pool is naturally smaller; the bar is correspondingly lower.
+  - The floors are enforced at sub creation (`createSub`) and on the `/sub/create` form. Mods can raise either threshold but never lower it below the floor. Subs created before migration 006 get the floors as defaults via the column DEFAULT clauses.
 
 ### Tier 2: Hard removal (remove)
 
@@ -236,6 +241,7 @@ Two-tier system, both visible to users.
 - Original content viewable only via the log (or not at all for protocol-blocked content).
 - Used for: targeted harassment, doxxing, illegal content, deliberate harm.
 - Public modlog renders this as **`hard removal`** (and `hard removal undone` on revoke).
+- **No community auto-revert**: hard removal is for content the mod doesn't want anyone seeing. Letting cumulative votes auto-undo a hard removal could revive abusive content. Hard removals are reversed only manually by a mod via the `unremove` button — and that reversal is itself a logged action.
 
 ### Mod structure
 

@@ -49,10 +49,20 @@ export function canModerate(db, subName, handle) {
 function applyState(db, { action, targetType, targetId, subName, modHandle, reason, now }) {
   if (CONTENT_ACTIONS.has(action)) {
     const table = targetType === 'post' ? 'posts' : 'comments';
-    const column =
-      action === 'collapse' || action === 'uncollapse' ? 'collapsed_at' : 'removed_at';
-    const value = action === 'collapse' || action === 'remove' ? now : null;
-    const result = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run(value, targetId);
+    let result;
+    if (action === 'collapse') {
+      // Snapshot current score so the vote module can detect when the
+      // community has overruled the collapse with +N upvotes since.
+      result = db.prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ?`).run(now, targetId);
+    } else if (action === 'uncollapse') {
+      result = db.prepare(`UPDATE ${table} SET collapsed_at = NULL, score_at_collapse = NULL WHERE id = ?`).run(targetId);
+    } else {
+      // remove / unremove: hard moderation, no score snapshot — auto-revert
+      // does not apply to hard removals (PRD: hard removal is for content
+      // that should not return regardless of vote consensus).
+      const value = action === 'remove' ? now : null;
+      result = db.prepare(`UPDATE ${table} SET removed_at = ? WHERE id = ?`).run(value, targetId);
+    }
     if (result.changes === 0) {
       throw new Error(`recordAction: ${targetType} ${targetId} not found`);
     }

@@ -63,10 +63,11 @@ const PLATO_TAGLINE = 'opinion is the medium between knowledge and ignorance.';
 // 'collapse'/'remove' (DB compat); public surface reads as soft/hard
 // removal so the brand of moderation is visible.
 const MOD_ACTION_LABELS = {
-  collapse:   'soft removal',
-  uncollapse: 'soft removal undone',
-  remove:     'hard removal',
-  unremove:   'hard removal undone',
+  collapse:                  'soft removal',
+  uncollapse:                'soft removal undone',
+  remove:                    'hard removal',
+  unremove:                  'hard removal undone',
+  auto_uncollapse_community: 'community overruled',
 };
 
 function logoMark({ size = 22, loading = false } = {}) {
@@ -431,6 +432,18 @@ function renderSubCreate(req, res, { auth }) {
       <form method="POST" action="/sub/create">
         <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
         <input name="description" placeholder="one-line description (optional)">
+        <fieldset class="sub-thresholds">
+          <legend class="muted">community auto-uncollapse thresholds</legend>
+          <label>
+            posts (≥ 50)
+            <input type="number" name="autoUncollapsePost" value="50" min="50" step="1" required>
+          </label>
+          <label>
+            comments (≥ 20)
+            <input type="number" name="autoUncollapseComment" value="20" min="20" step="1" required>
+          </label>
+          <p class="muted">net upvotes since a soft-removal that auto-lift the collapse. higher = harder for the community to overrule a mod.</p>
+        </fieldset>
         <button>create</button>
       </form>
       <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>
@@ -446,6 +459,8 @@ async function handleSubCreate(req, res, { db, auth }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { name, description = '' } = form;
+  const autoUncollapsePost = Number.parseInt(form.autoUncollapsePost ?? '50', 10);
+  const autoUncollapseComment = Number.parseInt(form.autoUncollapseComment ?? '20', 10);
 
   try {
     validateSubName(name);
@@ -458,7 +473,13 @@ async function handleSubCreate(req, res, { db, auth }) {
   }
 
   try {
-    createSub(db, { name, description, ownerHandle: currentHandle });
+    createSub(db, {
+      name,
+      description,
+      ownerHandle: currentHandle,
+      autoUncollapsePost,
+      autoUncollapseComment,
+    });
   } catch (err) {
     return send(
       res,
@@ -1011,7 +1032,7 @@ function renderModLog(req, res, { db, auth }, subName) {
   }
   const currentHandle = auth.handleFromRequest(req);
   const actions = listModActions(db, subName, { limit: 100 });
-  const handles = [...new Set(actions.map((a) => a.mod_handle))];
+  const handles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
   const pseudonyms = pseudonymsByHandle(db, handles);
 
   const rowsView = actions.length === 0
@@ -1020,7 +1041,7 @@ function renderModLog(req, res, { db, auth }, subName) {
         <thead><tr><th>when</th><th>mod</th><th>action</th><th>target</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
           <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8)}</td>
+          <td>${a.mod_handle == null ? html`<em class="muted">system</em>` : (pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8))}</td>
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
           <td class="muted">${a.target_type} ${a.target_id.slice(0, 12)}</td>
           <td class="muted">${a.reason ?? ''}</td>

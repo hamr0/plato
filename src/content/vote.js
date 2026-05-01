@@ -13,12 +13,23 @@
 //   opposite direction switches sides. Score caches on posts/comments are
 //   updated transactionally on every change so the cache never drifts.
 
+import { randomBytes } from 'node:crypto';
 import { isBanned } from './mod.js';
 
 const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const YOUNG_POST_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// PRD §Moderation: a soft-removal (collapse) auto-reverts when the
+// community accumulates this many net upvotes since the collapse
+// landed. Per-sub configurable, default 20 for both targets. Hard
+// removals (remove) are NOT subject to auto-revert — see migration
+// 005 for rationale. Migration 006 split posts vs comments since they
+// accumulate votes at very different rates.
+export const AUTO_UNCOLLAPSE_THRESHOLD_DEFAULT = 20;
+
 const TARGET_TABLE = { post: 'posts', comment: 'comments' };
+
+const newActionId = () => randomBytes(8).toString('hex');
 
 export function isNewAccount(db, handle, now = Date.now()) {
   const row = db.prepare('SELECT first_seen_at FROM handles WHERE handle = ?').get(handle);
@@ -44,7 +55,7 @@ export function castVote(db, { targetType, targetId, voterHandle, direction, now
   if (!voterHandle) throw new Error('castVote: voterHandle is required');
 
   const table = TARGET_TABLE[targetType];
-  const target = db.prepare(`SELECT id, handle, created_at, score FROM ${table} WHERE id = ?`).get(targetId);
+  const target = db.prepare(`SELECT id, handle, created_at, score, collapsed_at, score_at_collapse FROM ${table} WHERE id = ?`).get(targetId);
   if (!target) throw new Error(`castVote: ${targetType} ${targetId} not found`);
 
   // Ban check: votes are participation per PRD §Moderation. Resolve the
@@ -101,8 +112,33 @@ export function castVote(db, { targetType, targetId, voterHandle, direction, now
     }
 
     db.prepare(`UPDATE ${table} SET score = score + ? WHERE id = ?`).run(delta, targetId);
+    const newScore = target.score + delta;
+
+    // Community auto-uncollapse: if the target is currently soft-removed
+    // and accumulated +AUTO_UNCOLLAPSE_THRESHOLD net upvotes since the
+    // collapse landed, lift the collapse and write a system audit row.
+    // Hard removals (removed_at != null) are not eligible.
+    let autoUncollapsed = false;
+    if (target.collapsed_at != null && target.score_at_collapse != null && subName) {
+      const sinceCollapse = newScore - target.score_at_collapse;
+      // Per-sub threshold (one for posts, one for comments). Falls back
+      // to the default if the row predates migration 006 somehow.
+      const thresholdCol = targetType === 'post' ? 'auto_uncollapse_post' : 'auto_uncollapse_comment';
+      const subRow = db.prepare(`SELECT ${thresholdCol} AS t FROM subs WHERE name = ?`).get(subName);
+      const threshold = subRow?.t ?? AUTO_UNCOLLAPSE_THRESHOLD_DEFAULT;
+      if (sinceCollapse >= threshold) {
+        db.prepare(`UPDATE ${table} SET collapsed_at = NULL, score_at_collapse = NULL WHERE id = ?`).run(targetId);
+        db.prepare(
+          `INSERT INTO mod_actions
+           (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+           VALUES (?, ?, NULL, 'auto_uncollapse_community', ?, ?, NULL, ?)`
+        ).run(newActionId(), subName, targetType, targetId, now);
+        autoUncollapsed = true;
+      }
+    }
+
     db.exec('COMMIT');
-    return { vote: newState, score: target.score + delta };
+    return { vote: newState, score: newScore, autoUncollapsed };
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;

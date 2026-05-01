@@ -7,6 +7,13 @@
 
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?$/;
 
+// Floors on the per-sub auto-uncollapse thresholds (migration 006). Posts
+// surface in feeds and rack up votes faster than comments, so the post
+// floor is higher. Both defend against a small brigade overturning a mod
+// soft-removal: 20 dedicated voters can flip a comment, 50 a post.
+export const AUTO_UNCOLLAPSE_POST_FLOOR = 50;
+export const AUTO_UNCOLLAPSE_COMMENT_FLOOR = 20;
+
 export const RESERVED_SUB_NAMES = new Set([
   'admin',
   'mod',
@@ -33,18 +40,31 @@ export function validateSubName(name) {
   }
 }
 
-export function createSub(db, { name, description = '', ownerHandle }) {
+export function createSub(db, {
+  name,
+  description = '',
+  ownerHandle,
+  autoUncollapsePost = AUTO_UNCOLLAPSE_POST_FLOOR,
+  autoUncollapseComment = AUTO_UNCOLLAPSE_COMMENT_FLOOR,
+}) {
   validateSubName(name);
   if (!ownerHandle) {
     throw new Error('createSub: ownerHandle is required');
+  }
+  if (!Number.isInteger(autoUncollapsePost) || autoUncollapsePost < AUTO_UNCOLLAPSE_POST_FLOOR) {
+    throw new Error(`auto-uncollapse threshold for posts must be an integer ≥ ${AUTO_UNCOLLAPSE_POST_FLOOR}`);
+  }
+  if (!Number.isInteger(autoUncollapseComment) || autoUncollapseComment < AUTO_UNCOLLAPSE_COMMENT_FLOOR) {
+    throw new Error(`auto-uncollapse threshold for comments must be an integer ≥ ${AUTO_UNCOLLAPSE_COMMENT_FLOOR}`);
   }
 
   db.exec('BEGIN');
   try {
     db.prepare(
-      `INSERT INTO subs (name, description, owner_handle, created_at)
-       VALUES (?, ?, ?, ?)`
-    ).run(name, description, ownerHandle, Date.now());
+      `INSERT INTO subs (name, description, owner_handle, created_at,
+                         auto_uncollapse_post, auto_uncollapse_comment)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(name, description, ownerHandle, Date.now(), autoUncollapsePost, autoUncollapseComment);
     db.prepare(
       `INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)`
     ).run(name, ownerHandle, 'owner');

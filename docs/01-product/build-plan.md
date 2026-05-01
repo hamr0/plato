@@ -244,6 +244,7 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 
 - **My mod decisions panel.** A mod-only page listing the mod's own past actions with inline `revoke` buttons. Surfaces a mod's pattern of decisions to themselves (the "self-watching" dynamic — knowing your record is visible to you discourages capricious moderation). The public modlog already covers external auditability; this panel is the *self-review* affordance. Pairs naturally with the M5 flag-queue work since both are mod-facing surfaces.
 - **Per-sub flag-threshold override.** PRD §Spam 7 says "configurable per-sub, default 3 unique flaggers." Currently hardcoded; M5 adds the per-sub config with the broader sub settings work.
+- **Auto-uncollapse threshold (per-sub) — SHIPPED in M4 polish.** Migration 006 added `subs.auto_uncollapse_post` (floor 50) and `subs.auto_uncollapse_comment` (floor 20). `createSub` enforces the floors; `/sub/create` exposes both as number inputs. Higher floor on posts because feed exposure means votes accumulate faster — same vote count on a post represents a smaller fraction of the audience that saw it.
 
 ### M5: Spam defenses + per-sub structure
 Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-account scrutiny, per-sub limits, link cap + URLhaus integration (hourly cron), spam pattern file (regex), velocity alerts dashboard, public mod log already done in M4.

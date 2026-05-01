@@ -65,6 +65,51 @@ test('createSub: nonexistent ownerHandle is rejected by FK', () => {
   );
 });
 
+test('createSub: defaults auto-uncollapse thresholds to floors (50 / 20)', () => {
+  const db = freshDb();
+  createSub(db, { name: 'cooking', ownerHandle: HANDLE_A });
+  const sub = getSubByName(db, 'cooking');
+  assert.equal(sub.auto_uncollapse_post, 50);
+  assert.equal(sub.auto_uncollapse_comment, 20);
+});
+
+test('createSub: stores per-sub overrides above the floors', () => {
+  const db = freshDb();
+  createSub(db, {
+    name: 'cooking',
+    ownerHandle: HANDLE_A,
+    autoUncollapsePost: 200,
+    autoUncollapseComment: 75,
+  });
+  const sub = getSubByName(db, 'cooking');
+  assert.equal(sub.auto_uncollapse_post, 200);
+  assert.equal(sub.auto_uncollapse_comment, 75);
+});
+
+test('createSub: rejects post threshold below the floor of 50', () => {
+  const db = freshDb();
+  assert.throws(
+    () => createSub(db, { name: 'cooking', ownerHandle: HANDLE_A, autoUncollapsePost: 49 }),
+    /posts must be an integer ≥ 50/
+  );
+});
+
+test('createSub: rejects comment threshold below the floor of 20', () => {
+  const db = freshDb();
+  assert.throws(
+    () => createSub(db, { name: 'cooking', ownerHandle: HANDLE_A, autoUncollapseComment: 19 }),
+    /comments must be an integer ≥ 20/
+  );
+});
+
+test('createSub: rejects non-integer thresholds', () => {
+  const db = freshDb();
+  assert.throws(
+    () => createSub(db, { name: 'cooking', ownerHandle: HANDLE_A, autoUncollapsePost: 50.5 }),
+    /posts must be an integer/
+  );
+});
+
 test('getSubByName: returns null for unknown', () => {
   const db = freshDb();
   assert.equal(getSubByName(db, 'nothing'), null);

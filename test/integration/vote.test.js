@@ -154,3 +154,106 @@ test('castVote: banned user rejected from voting in their banned sub', () => {
     new RegExp(`banned from ${SUB}`),
   );
 });
+
+// --- M4 polish: auto-uncollapse on cumulative community votes ---
+// Per-sub configurable thresholds (migration 006). Tests below override the
+// fixture sub's thresholds to small numbers so we don't have to spin up 50
+// voters per test — the threshold path is identical at any size.
+
+function setSubThresholds(db, { post, comment }) {
+  db.prepare('UPDATE subs SET auto_uncollapse_post = ?, auto_uncollapse_comment = ? WHERE name = ?')
+    .run(post, comment, SUB);
+}
+
+function spinUpVoters(db, n) {
+  for (let i = 0; i < n; i++) {
+    const h = String.fromCharCode(0x40 + i).repeat(64);
+    db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+      .run(h, `voter-${i}`, Date.now() - 30 * DAY_MS);
+    castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: h, direction: 'up' });
+  }
+}
+
+test('castVote: collapsed target accumulating +threshold upvotes auto-uncollapses + writes audit row', () => {
+  const db = fixture();
+  setSubThresholds(db, { post: 5, comment: 5 });
+  const owner = 'm'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(owner, 'mod-x', Date.now() - 30 * DAY_MS);
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = ?`).run(owner, SUB);
+  recordAction(db, {
+    subName: SUB, modHandle: owner, action: 'collapse',
+    targetType: 'post', targetId: 'p1',
+  });
+  let snap = db.prepare(`SELECT score_at_collapse, collapsed_at FROM posts WHERE id = 'p1'`).get();
+  assert.equal(snap.score_at_collapse, 0);
+  assert.ok(snap.collapsed_at > 0);
+
+  spinUpVoters(db, 5);
+
+  snap = db.prepare(`SELECT score_at_collapse, collapsed_at, score FROM posts WHERE id = 'p1'`).get();
+  assert.equal(snap.collapsed_at, null, 'auto-uncollapse fired');
+  assert.equal(snap.score_at_collapse, null, 'snapshot cleared');
+  assert.equal(snap.score, 5);
+
+  const audit = db.prepare(`SELECT action, mod_handle, reason FROM mod_actions WHERE action = 'auto_uncollapse_community'`).get();
+  assert.ok(audit, 'audit row written');
+  assert.equal(audit.mod_handle, null);
+  assert.equal(audit.reason, null);
+});
+
+test('castVote: collapsed target stays collapsed below threshold', () => {
+  const db = fixture();
+  setSubThresholds(db, { post: 5, comment: 5 });
+  const owner = 'm'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(owner, 'mod-y', Date.now() - 30 * DAY_MS);
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = ?`).run(owner, SUB);
+  recordAction(db, {
+    subName: SUB, modHandle: owner, action: 'collapse',
+    targetType: 'post', targetId: 'p1',
+  });
+
+  spinUpVoters(db, 4);
+
+  const snap = db.prepare(`SELECT collapsed_at FROM posts WHERE id = 'p1'`).get();
+  assert.ok(snap.collapsed_at > 0, 'still collapsed at threshold-1');
+});
+
+test('castVote: hard-removed target NOT eligible for auto-revert via votes', () => {
+  const db = fixture();
+  setSubThresholds(db, { post: 5, comment: 5 });
+  const owner = 'm'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(owner, 'mod-z', Date.now() - 30 * DAY_MS);
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = ?`).run(owner, SUB);
+  recordAction(db, {
+    subName: SUB, modHandle: owner, action: 'remove',
+    targetType: 'post', targetId: 'p1', reason: 'harassment',
+  });
+
+  spinUpVoters(db, 5);
+
+  const snap = db.prepare(`SELECT removed_at FROM posts WHERE id = 'p1'`).get();
+  assert.ok(snap.removed_at > 0, 'hard removal stays — not subject to vote auto-revert');
+  const audit = db.prepare(`SELECT count(*) AS n FROM mod_actions WHERE action = 'auto_uncollapse_community'`).get();
+  assert.equal(audit.n, 0, 'no auto-revert audit row written');
+});
+
+test('castVote: per-sub threshold override is honored (post threshold = 3 fires at 3)', () => {
+  const db = fixture();
+  setSubThresholds(db, { post: 3, comment: 3 });
+  const owner = 'm'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(owner, 'mod-q', Date.now() - 30 * DAY_MS);
+  db.prepare(`UPDATE subs SET owner_handle = ? WHERE name = ?`).run(owner, SUB);
+  recordAction(db, {
+    subName: SUB, modHandle: owner, action: 'collapse',
+    targetType: 'post', targetId: 'p1',
+  });
+
+  spinUpVoters(db, 3);
+
+  const snap = db.prepare(`SELECT collapsed_at FROM posts WHERE id = 'p1'`).get();
+  assert.equal(snap.collapsed_at, null, 'fired at the per-sub threshold of 3');
+});
