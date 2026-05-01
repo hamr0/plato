@@ -120,13 +120,16 @@ test('finalizeDraft: auto-creates handle row + pseudonym', (t) => {
   const postsDir = freshPostsDir();
   t.after(() => rmSync(postsDir, { recursive: true, force: true }));
 
-  const before = db.prepare('SELECT COUNT(*) as n FROM handles').get().n;
+  // Migration 007 seeds a SYSTEM handle (32-zero hex) used by spam-
+  // pattern auto-flagging — count user handles, not the seed row.
+  const userHandles = `WHERE handle != '${'0'.repeat(64)}'`;
+  const before = db.prepare(`SELECT COUNT(*) as n FROM handles ${userHandles}`).get().n;
   assert.equal(before, 0);
 
   const { draftId } = submitDraft(db, { title: 't', body: 'b' });
   finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
-  const after = db.prepare('SELECT COUNT(*) as n FROM handles').get().n;
+  const after = db.prepare(`SELECT COUNT(*) as n FROM handles ${userHandles}`).get().n;
   assert.equal(after, 1);
 
   const row = db.prepare('SELECT * FROM handles WHERE handle = ?').get(HANDLE);

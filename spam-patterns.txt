@@ -1,0 +1,38 @@
+# spam-patterns.txt — version-controlled regex patterns for known spam.
+#
+# One pattern per line. Lines starting with '#' are comments. Blank lines
+# ignored. Each pattern is a JS regex source (no surrounding slashes,
+# case-insensitive matching is applied by the loader).
+#
+# When a post or comment matches any pattern, plato:
+#   1. Sets collapsed_at on the target (auto-hide).
+#   2. Attaches a system flag (category='spam', note='pattern: <line>').
+#   3. The target appears in /modlog open mode for mod review.
+#
+# Operator workflow: append a new line per spam wave. Patterns are
+# immediate (no restart) if the file is re-read on every write — but the
+# default is read-once at boot. Restart to pick up edits, or move to a
+# watcher in a future revision.
+#
+# PRD §Spam Defenses 9. Conservative starter set; broaden over time.
+
+# === Cryptocurrency / investment scams ===
+guaranteed (?:returns?|profit|income)
+double your (?:investment|money|crypto)
+\b(?:btc|bitcoin|eth|ethereum)\s+(?:wallet|address)\b.*send
+send (?:btc|bitcoin|eth|usdt) to
+
+# === Fake job offers ===
+work from home.{0,40}\$?\d{3,5}.{0,20}(?:per\s*week|/week|weekly)
+earn \$?\d{3,5}.{0,30}(?:from home|remotely|easily)
+
+# === Wire fraud language ===
+\b(?:western union|moneygram|wire transfer only)\b
+payment via gift cards?\b
+
+# === Romance/relationship-scam openers ===
+\bI like your profile\b.{0,200}\b(?:get to know you|chat privately|email me)\b
+\bgod[- ]fearing\b.{0,80}\b(?:looking for|seeking)\b.{0,40}\b(?:relationship|partner|husband|wife)\b
+
+# === Phone-number-with-text-me ===
+\b(?:text|whatsapp|telegram).{0,30}(?:\+?\d[\d\s().-]{8,}\d)\b
