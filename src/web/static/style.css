@@ -196,6 +196,46 @@ header h1 .logo-mark {
   color: var(--text-dim);
   border-color: var(--border);
 }
+.mod-controls .mod-btn-warn {
+  color: var(--accent-warm);
+  border-color: var(--accent-warm);
+}
+
+/* Sub-create thresholds: align labels + inputs in two clean rows. */
+.sub-thresholds .threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.3rem 0;
+}
+.sub-thresholds .threshold-row > span {
+  flex: 0 0 8.5rem;
+  color: var(--text-dim);
+}
+.sub-thresholds .threshold-row > input[type="number"] {
+  flex: 0 0 5rem;
+  padding: 0.2rem 0.4rem;
+}
+.sub-thresholds > p { margin: 0.5rem 0 0; font-size: 0.82rem; }
+
+/* Login affordance for anonymous users — same nav corner as logout. */
+.login-trigger > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--accent);
+}
+.login-trigger > summary::-webkit-details-marker { display: none; }
+.login-trigger[open] > summary { color: var(--accent-warm); }
+.login-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.login-form input[type="email"] {
+  flex: 1;
+  min-width: 12rem;
+}
 
 /* Mod confirm form: each action button (remove, collapse, etc.) is a
  * <details> summary; clicking expands a small reason form below. Hard

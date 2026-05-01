@@ -139,7 +139,20 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
 }
 
 function loginStatusFor(db, currentHandle) {
-  if (!currentHandle) return html``;
+  if (!currentHandle) {
+    // Anonymous: explicit "log in" affordance top-right. Triggers the same
+    // magic-link flow as the post form does today; no separate auth page,
+    // just a single email field that drops them back where they were.
+    return html`<div class="status muted">
+      <details class="login-trigger">
+        <summary>log in</summary>
+        <form method="POST" action="/login" class="login-form">
+          <input name="email" type="email" placeholder="your email" required>
+          <button>send link</button>
+        </form>
+      </details>
+    </div>`;
+  }
   const pseudonym = pseudonymFor(db, currentHandle);
   // Mods (owner or co) see a unified `modlog` link in the nav. The link
   // routes to /modlog (cross-sub) so a mod-of-many subs has one place to
@@ -429,7 +442,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
         title: html`/sub/${subName}`,
         subtitle: sub.description || null,
       })}
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">modlog</a></p>
+      <p><a href="/">← home</a></p>
       ${anonHintFor(currentHandle)}
       <h3 class="section">// new post in /sub/${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
@@ -459,16 +472,16 @@ function renderSubCreate(req, res, { auth }) {
         <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
         <input name="description" placeholder="one-line description (optional)">
         <fieldset class="sub-thresholds">
-          <legend class="muted">community auto-uncollapse thresholds</legend>
-          <label>
-            posts (≥ 50)
+          <legend class="muted">auto-uncollapse (soft mod)</legend>
+          <label class="threshold-row">
+            <span>posts (≥ 50)</span>
             <input type="number" name="autoUncollapsePost" value="50" min="50" step="1" required>
           </label>
-          <label>
-            comments (≥ 20)
+          <label class="threshold-row">
+            <span>comments (≥ 20)</span>
             <input type="number" name="autoUncollapseComment" value="20" min="20" step="1" required>
           </label>
-          <p class="muted">net upvotes since a soft-removal that auto-lift the collapse. higher = harder for the community to overrule a mod.</p>
+          <p class="muted">net upvotes that auto-lift a soft-removal. higher = harder to overrule a mod. applies to soft removals only — hard removals never auto-revert.</p>
         </fieldset>
         <button>create</button>
       </form>
@@ -558,9 +571,23 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   }
 
   if (currentHandle) {
-    const { draftId } = submitDraft(db, { title, body: postBody, subName });
-    const { subName: published } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
-    return redirect(res, `/sub/${published}`);
+    try {
+      const { draftId } = submitDraft(db, { title, body: postBody, subName });
+      const { subName: published } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
+      return redirect(res, `/sub/${published}`);
+    } catch (err) {
+      // Most common case: ban check in finalizeDraft. Render a friendly
+      // error instead of crashing the process. Other DB-layer errors
+      // (FK miss, write failure) also land here with their own message.
+      return send(
+        res,
+        400,
+        layout(
+          'post failed',
+          html`<p class="muted">${err.message} <a href="/sub/${subName}">back to /sub/${subName}</a></p>`
+        )
+      );
+    }
   }
 
   if (isDisposableEmail(email, disposableDomains)) {
@@ -619,7 +646,13 @@ function handleFinalize(req, res, { db, auth, postsDir }, draftId) {
     if (/draft .* not found/.test(err.message)) {
       return send(res, 404, layout('not found', html`<p class="muted">draft expired or not found.</p>`));
     }
-    throw err;
+    // Bans applied between draft submission and magic-link click also
+    // surface here. Render the message; don't crash the process.
+    return send(
+      res,
+      400,
+      layout('post failed', html`<p class="muted">${err.message} <a href="/">home</a></p>`)
+    );
   }
 
   redirect(res, `/sub/${result.subName}`);
@@ -802,7 +835,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     200,
     layout(post.title, html`
       ${siteHeader({ db, currentHandle, title: html`plato · forum` })}
-      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a> · <a href="/sub/${subName}/modlog">modlog</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
@@ -978,7 +1011,7 @@ function modStateView({ removedAt, collapsedAt, body }) {
 // requires a reason; soft removal (collapse) makes it optional. The
 // expand-form pattern is the friction that makes hard moderation
 // deliberate without needing a JS modal.
-function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled }) {
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled, warn }) {
   if (disabled) {
     // Dimmed marker: only one mod-state should be active at a time. When
     // the target is hard-removed, the collapse/uncollapse pair is meaningless
@@ -986,8 +1019,9 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
     // the <details> button. The mod must `unremove` first to re-enable.
     return html`<span class="mod-btn mod-btn-disabled" aria-disabled="true" title="not available while ${MOD_ACTION_LABELS.remove ?? 'removed'}">${action}</span>`;
   }
+  const summaryClass = warn ? 'mod-btn mod-btn-warn' : 'mod-btn';
   return html`<details class="mod-confirm">
-    <summary class="mod-btn">${action}</summary>
+    <summary class="${summaryClass}">${action}</summary>
     <form method="POST" action="/sub/${subName}/mod" class="mod-form">
       <input type="hidden" name="action" value="${action}">
       <input type="hidden" name="target_type" value="${targetType}">
@@ -1015,6 +1049,9 @@ function modControls({
   // Ban: target_type='handle', target_id=author. Reason required on the
   // ban direction (it cuts a user out of every write path in this sub),
   // optional on unban. Skipped entirely when authorHandle isn't known.
+  // When the author is currently banned in this sub, render the unban
+  // form with a "warn" class so the banned-state is visible at a glance.
+  // Plain "ban" on a non-banned author is the usual neutral mod-btn.
   const banForm = authorHandle
     ? modActionForm({
         subName,
@@ -1023,6 +1060,7 @@ function modControls({
         targetId: authorHandle,
         returnTo,
         reasonRequired: !authorBanned,
+        warn: authorBanned,
       })
     : html``;
   return html`<div class="mod-controls">
