@@ -287,3 +287,93 @@ test('STRICT enforcement: type mismatches reject', () => {
       .run('p1', 'h1', 'hi', 'posts/p1.md', 'not-an-integer');
   }, /TYPE|cannot store|datatype/i);
 });
+
+// --- M4 moderation ---
+
+test('mod_actions: log entry inserts and constrains action enum', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('m1', 'mod-one', Date.now());
+  db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)')
+    .run('lobby', 'm1', Date.now());
+
+  db.prepare(`INSERT INTO mod_actions
+              (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('a1', 'lobby', 'm1', 'collapse', 'post', 'p1', 'off-topic', Date.now());
+  const row = db.prepare('SELECT action FROM mod_actions WHERE id = ?').get('a1');
+  assert.equal(row.action, 'collapse');
+
+  assert.throws(() => {
+    db.prepare(`INSERT INTO mod_actions
+                (id, sub_name, mod_handle, action, target_type, target_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run('a2', 'lobby', 'm1', 'nuke', 'post', 'p1', Date.now());
+  }, /CHECK/);
+});
+
+test('flags: one (target, flagger) pair only — flooding rejected', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('u1', 'flagger-one', Date.now());
+
+  db.prepare(`INSERT INTO flags (id, target_type, target_id, flagger_handle, category, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('f1', 'post', 'p1', 'u1', 'spam', Date.now());
+
+  assert.throws(() => {
+    db.prepare(`INSERT INTO flags (id, target_type, target_id, flagger_handle, category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run('f2', 'post', 'p1', 'u1', 'harassment', Date.now());
+  }, /UNIQUE/);
+});
+
+test('flags: category enum constrained, resolution defaults to pending', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('u1', 'flagger-two', Date.now());
+
+  db.prepare(`INSERT INTO flags (id, target_type, target_id, flagger_handle, category, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('f1', 'comment', 'c1', 'u1', 'illegal', Date.now());
+  const row = db.prepare('SELECT resolution FROM flags WHERE id = ?').get('f1');
+  assert.equal(row.resolution, 'pending');
+
+  assert.throws(() => {
+    db.prepare(`INSERT INTO flags (id, target_type, target_id, flagger_handle, category, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run('f2', 'post', 'p2', 'u1', 'gibberish', Date.now());
+  }, /CHECK/);
+});
+
+test('bans: composite PK enforces one ban per (sub, handle)', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('u1', 'banned-one', Date.now());
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('m1', 'mod-two', Date.now());
+  db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)')
+    .run('lobby', 'm1', Date.now());
+
+  db.prepare(`INSERT INTO bans (sub_name, handle, banned_by, created_at)
+              VALUES (?, ?, ?, ?)`)
+    .run('lobby', 'u1', 'm1', Date.now());
+
+  assert.throws(() => {
+    db.prepare(`INSERT INTO bans (sub_name, handle, banned_by, created_at)
+                VALUES (?, ?, ?, ?)`)
+      .run('lobby', 'u1', 'm1', Date.now());
+  }, /UNIQUE|PRIMARY/);
+});
+
+test('posts: collapsed_at and removed_at default NULL after migration', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run('h1', 'two', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+  const row = db.prepare('SELECT collapsed_at, removed_at FROM posts WHERE id = ?').get('p1');
+  assert.equal(row.collapsed_at, null);
+  assert.equal(row.removed_at, null);
+});
