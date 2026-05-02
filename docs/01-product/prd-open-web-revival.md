@@ -145,7 +145,11 @@ Same page for everyone — logged in, logged out, no personalization. Two sectio
 
 **Recent posts (last 24h, chronological)**: a stream of posts from any sub on the instance, newest first, capped at 2 posts per sub so one busy sub doesn't drown out everything else. Shows time, sub, title, score.
 
-That's the home page. Two lists, both chronological, both deduped sensibly. No "for you," no algorithm, no ranking magic.
+**Top-nav filters (M5/B8)**: the home feed exposes three orthogonal axes — `Posts | Comments` tab (comments tab shows `listRecentCommentsAcrossSubs`, removed-comments excluded), sort `new | top | hot` (hot is post-only; uses HN-shape `score / (age_hours + 2)^1.5`), and date `24h | week | all`. Default state (no params) keeps the per-sub-cap chronological recency feed described above; activating any filter switches to the global cross-sub ordering. `Subscribed | All` toggle deferred to M6.
+
+**`/communities` directory (M5/B8)**: a separate page listing every sub on the instance with description, owner pseudonym, post count, and last-activity timestamp. Sortable (`active | posts | name`), client-side prefix filter. Linked from the home subs strip as the `all` chip. The home page covers "what's lively right now"; `/communities` covers "what exists at all."
+
+That's the home page. Two lists by default, both chronological, both deduped sensibly. No "for you," no algorithm, no ranking magic.
 
 ### The "my subs" page (logged-in users with subscriptions)
 

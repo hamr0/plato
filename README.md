@@ -20,6 +20,7 @@
 - **One dashboard for mods.** `/modlog` with three modes — open (pending flags, expand any row to decide inline), inbox (deduped current state), audit (every event flat). Click any mod or user to filter. Same audit shape is what the public sees at `/sub/<name>/modlog`.
 - **RSS as it was meant to be.** Every sub publishes `/sub/<name>/feed.xml`. You pick what you follow with [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), or whatever you use. No notification system to fight, no app to install, no algorithm.
 - **Interoperable from day one.** Posts are plain markdown files on disk. The database is an index, regenerable. One-command export = full history or a sub's archive, readable in any text editor.
+- **You pick the feed.** Home page top-nav: Posts / Comments tabs, sort by new / top / hot, filter by 24h / week / all. `/communities` lists every sub at a glance. Each sub keeps its own color in the feed so you can scan-and-skim. No algorithm decides what you see.
 - **Runs on a $5 VPS.** One process, one SQLite file, one HTTP port. Backups = two `cp` commands. No build step, no frontend framework. Apache 2.0, fork without asking.
 
 ---

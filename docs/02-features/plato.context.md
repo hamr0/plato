@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.2 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 M1–M4 audit hardening shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.3 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -73,7 +73,8 @@ Validate at boot: missing required env fails fast with a clear error. The server
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | front page: active subs strip + recent posts (cap 2/sub) |
+| GET | `/` | front page: active subs strip + recent posts (cap 2/sub). Top-nav filters: `?tab=posts\|comments`, `?sort=new\|top\|hot`, `?date=24h\|week\|all`. Default tab = posts, default sort = new, default date = all. |
+| GET | `/communities` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter |
 | GET | `/sub/<name>` | sub feed (sort: new/old/top/hot via `?sort=`) |
 | GET | `/sub/create` | new-sub form (logged-in only) |
 | POST | `/sub/create` | create sub (validates name + thresholds) |

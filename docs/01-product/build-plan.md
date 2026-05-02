@@ -256,6 +256,21 @@ Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-ac
 ### M6: Subscriptions + notifications
 Sub subscribe/unsubscribe, my-subs page, email digest mode (reuses knowless's Postfix), ntfy push (one-line POST per notification), per-sub RSS feeds. Subscription list export (folds into M7's export format).
 
+**Home-feed Subscribed/All toggle.** Deferred from the M5/UX pass that introduced top-of-page Posts/Comments tabs and sort/date filters. Adds an `All | Subscribed` row above the existing tab strip; "Subscribed" reads from the M6 subscriptions table. No-op until M6 lands.
+
+**Outbound-mail signature + default rules.** Every plato → user email (magic link, digest, ntfy fallback) appends a footer block carrying the instance's default community rules. Default ruleset shipped with plato:
+
+```
+Basic Rules
+- No bigotry — including racism, sexism, ableism, homophobia, transphobia, or xenophobia.
+- Be respectful, especially when disagreeing. Everyone should feel welcome here.
+- No porn.
+- No ads / spamming.
+- No illegal content.
+```
+
+Operator-overridable in `config.json` (`mailFooter` field). Rationale: every email is a touchpoint, and surfacing the rules in the medium where users actually read text (vs the forum chrome they skim past) makes them remembered. Same footer rendered as plato's default `/about` content so a fresh instance has the rules visible from day one.
+
 ### M7: Identity + export/import
 Per-sub export (folder of markdown + JSON, archive.sig, server-pubkey.pem, archive.ots). Per-user export. Import flow on a fresh instance. Archive signing (one Ed25519 keypair instance-wide). OpenTimestamps daily anchor.
 
@@ -280,7 +295,7 @@ These were open questions; locked after the rendering-and-aesthetic discussion. 
 
 What does **not** change:
 - Identicons next to authors (32×32 bottts-neutral, deterministic from handle)
-- Favicon hints next to outbound links (16×16 per-domain glyph, no destination fetch)
+- Domain hints next to outbound links: `↗ host.com` text only (favicon image dropped — `s2/favicons` proxy leaks viewer→Google, self-hosting favicons reintroduces the no-uploads exception. Text alone delivers the affordance "I see I'm leaving to youtube.com before I click")
 - Account-age + new-account badges
 - Vote arrows + score on the left of every post
 - Typography hierarchy: title > meta > body

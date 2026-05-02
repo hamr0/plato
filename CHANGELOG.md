@@ -159,5 +159,20 @@ A code-review audit of M1–M4 (the pre-M5 surface) flagged a handful of issues 
 - **`pendingFlagCount`** — `count(DISTINCT flagger_handle)`, spelling the PRD "3 distinct flaggers" intent (equivalent under the current UNIQUE).
 - **CSRF / SameSite** — verified knowless sets `SameSite=Lax; HttpOnly` on every session cookie (`node_modules/knowless/src/handlers.js:217`). No code change needed; documented for the threat model.
 
+### Added — UX pass (M5/B8)
+
+A small read-the-design-mockups + close-the-feedback-loop pass:
+
+- **`/communities` directory page.** Sortable list of every sub (most recent / most posts / a-z) with description, owner pseudonym, post count, last-activity timestamp. Client-side prefix filter via the search input. Linked from the subs strip as the `all` chip.
+- **Comment-count icon on feed.** Replaced the bare "47 replies" text with an inline SVG bubble + tabular-numeric count. Zero-reply state stays muted but readable (was ~invisible against the dim text token on dark mode).
+- **Sub color accent on feed.** `/sub/<x>` links in post-meta and the communities directory now use a deterministic 8-color palette indexed by hash of the sub name (`subColorIndex` in `app.js`). Same sub keeps the same color across renders — visual anchor without an avatar / image / icon. Forks override the palette in one place (`--sub-color-0..7` on `:root`).
+- **Domain hint after outbound links.** `markdown.js` link renderer now appends a `↗ host.com` span after every absolute http(s) link. Pure text, no favicon image (the design mocks had favicons via `s2/favicons` but that proxy leaks viewer→Google; self-hosting favicons reintroduces the no-uploads exception). Reader sees where each link goes before clicking.
+- **Home top-nav: Posts | Comments + sort + date.** Tab strip above the home feed:
+  - **Posts** (default, capped per-sub on the unfiltered feed; switches to global `listPostsAcrossSubs` when any filter is active) | **Comments** (`listRecentCommentsAcrossSubs`, `removed_at IS NULL`).
+  - Sort chips: **new** (default, `created_at DESC`) | **top** (`score DESC`) | **hot** (post-only, HN-shape `score / (age_hours + 2)^1.5`).
+  - Date chips: **24h** | **week** | **all** (default).
+  - `Subscribed | All` toggle deferred to **M6** (subscriptions table doesn't exist yet).
+- **Width tightening.** Body `max-width` 720px → 880px globally — comment trees + modlog table + post-meta now breathe at 4-deep nesting without wrapping. Reading column inside `<article>` bodies is unchanged.
+
 ### Tests
-- 245 → 337 (92 new): rate limits (9 + 5 config), per-sub rate (3), modlog resolve flow (5), spam patterns (13), link cap (12), URLhaus (11), `modlog-http.test.js` (19) covering /modlog dispatcher modes + filter chain, `POST /modlog/resolve` decisions/permissions, end-to-end defense firing through `POST /draft`, `errorPage` chrome on banned-from-sub, and the open-redirect fallback (3 cases: `//evil`, `/\evil`, legit `/sub/x`). M5/B7 audit fixes (15) covering title/body/note/comment caps, atomic finalize (no `.tmp` leftover on success or rollback), frontmatter round-trip, fresh-user vote/flag, removed-parent rejection, comment-tree cycle detection, transfer_owner validation. Test helper `ageFreshHandles` retro-dates handles created in `loginVia` so app-flow tests don't trip the new-account 1/hour cap.
+- 245 → 340 (95 new): rate limits (9 + 5 config), per-sub rate (3), modlog resolve flow (5), spam patterns (13), link cap (12), URLhaus (11), `modlog-http.test.js` (22) covering /modlog dispatcher modes + filter chain, `POST /modlog/resolve` decisions/permissions, end-to-end defense firing through `POST /draft`, `errorPage` chrome on banned-from-sub, the open-redirect fallback (3 cases: `//evil`, `/\evil`, legit `/sub/x`), and the M5/B8 UX wiring (`/communities` listing, `/?tab=comments` feed, `/?sort=top&date=24h` filtering). M5/B7 audit fixes (15) covering title/body/note/comment caps, atomic finalize, frontmatter round-trip, fresh-user vote/flag, removed-parent rejection, comment-tree cycle detection, transfer_owner validation.
