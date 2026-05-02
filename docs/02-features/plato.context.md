@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.3 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.3 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13 UI polish, per-sub flairs, sensitive flag, flag-threshold, inline revoke shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -123,7 +123,7 @@ These have hardcoded constants because the right value is the same for almost ev
 - **`COMMENT_BODY_MAX = 10000`** (`src/content/comment.js`) — same shape as the post caps.
 - **`NOTE_MAX = 280`** (`src/content/flag.js`) — server-side cap on flag notes.
 - **`COMMENT_PREVIEW_CHARS = 280`** (`src/web/app.js`) — long-comment fold threshold; matches the post-preview cap on the home page.
-- **`AUTO_HIDE_THRESHOLD = 3`** (`src/content/flag.js`) — distinct flaggers needed to auto-collapse pending mod review. Per-sub override is a follow-up.
+- **`FLAG_THRESHOLD_FLOOR = 3`** (`src/content/flag.js`) — floor for the per-sub `flagThreshold` setting. Each sub's threshold is set at creation (default 3) and can be raised by the owner but never lowered below this floor.
 - **`RATE_LIMIT_FLOOR`** (`src/content/rateLimit.js`) — PRD-locked floor for per-account + per-sub rate limits. Operator can tighten via `config.json`; loosening throws at boot.
 - **`LINK_CAP_FLOOR`** (`src/content/linkCap.js`) — PRD-locked floor for per-post outbound link cap (1/3/5 by tier).
 - **`NEW_ACCOUNT_WINDOW_MS = 7 days`** (`src/content/vote.js`) — how long a fresh handle is treated as "new" (half vote weight, no comment voting, posts < 24h only).
@@ -160,10 +160,10 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | `handles` | HMAC-derived id + pseudonym + first_seen_at |
 | `subs` | name PK, owner_handle FK, default_sort, auto_uncollapse_post, auto_uncollapse_comment, flairs JSON, flairs_required, sensitive, flag_threshold |
 | `sub_mods` | (sub_name, handle) composite PK + role enum |
-| `posts` | id PK, sub_name FK, handle FK, title, file_path, score, collapsed_at, removed_at, score_at_collapse |
-| `comments` | id PK, post_id FK, parent_comment_id self-ref FK (nullable), score, soft-state columns |
+| `posts` | id PK, sub_name FK, handle FK, title, file_path, score, collapsed_at, removed_at, score_at_collapse, edited_at TEXT, flair_slug TEXT |
+| `comments` | id PK, post_id FK, parent_comment_id self-ref FK (nullable), score, soft-state columns, edited_at TEXT |
 | `votes` | (target_type, target_id, handle) composite PK, value REAL CHECK |
-| `drafts` | pending posts awaiting magic-link confirmation |
+| `drafts` | pending posts awaiting magic-link confirmation; flair_slug TEXT |
 | `mod_actions` | audit log; mod_handle nullable for system actors |
 | `flags` | (target_type, target_id, flagger_handle) composite PK, category enum |
 | `bans` | (sub_name, handle) composite PK |
@@ -249,7 +249,7 @@ System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` r
 | `autoUncollapsePost` | **50** | 50 | Net upvotes since collapse to auto-uncollapse a soft-removed post. Locked at creation. |
 | `autoUncollapseComment` | **20** | 20 | Same, for comments. Locked at creation. |
 | `flagThreshold` | **3** | 3 | Distinct flaggers required to auto-hide a target. Raise to make niche subs more permissive; cannot lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
-| `flairs` | max 12 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9-]{1,20}`, label ≤ 24 chars, color is any CSS string. Owner-curated. |
+| `flairs` | max 12 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?` (no leading/trailing hyphen, 1–20 chars), label ≤ 24 chars, color is any CSS string. Owner-curated. |
 | `flairsRequired` | requires ≥ 1 flair | `false` | When set, every new post in the sub must carry a flair. |
 | `sensitive` | — | `false` | Generic content-advisory flag. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
 
@@ -266,6 +266,7 @@ Auto-uncollapse thresholds: the operator can raise either but never below the fl
 | One vote per handle per target | enforced by composite PK |
 | Re-vote same direction | toggles off |
 | Re-vote opposite direction | switches |
+| Edit window | 24h from creation (`EDIT_WINDOW_MS`); applies to posts and comments; migration 008 added `edited_at` column |
 
 ## Patterns, not features
 
@@ -421,7 +422,7 @@ Restart plato. Matching posts auto-collapse and surface in `/modlog?mode=open`. 
 ### Recipe 10: Check the build status
 
 ```bash
-npm test            # 298 tests, ~3s
+npm test            # 408 tests, ~3s
 npm run migrate     # idempotent; no-op if up to date
 node --check bin/server.js     # syntax check without starting
 ```

@@ -16,7 +16,7 @@
 | M2 | Multi-tenant content | Sub creation, joining, listing, content model, front page | ~2 wks |
 | M3 | Discussion | Comments, voting, sorting, post pages | ~2 wks |
 | M4 | Moderation | Two-tier mod, flag system, public mod log | ~2 wks |
-| M5 | Spam defenses + per-sub structure | Rules 7-16 (rate limits, link caps, URLhaus, regex patterns, velocity dashboard) + per-sub flairs + per-sub NSFW flag | ~2 wks |
+| M5 | Spam defenses + per-sub structure | Rules 7-16 (rate limits, link caps, URLhaus, regex patterns, velocity dashboard) + per-sub flairs + per-sub sensitive flag | ~2 wks |
 | M6 | Subscriptions + notifications | Sub subscribe, my-subs, email digests, ntfy, per-sub RSS | ~2 wks |
 | M7 | Identity + export/import | Per-sub export, per-user export, archive signing, OpenTimestamps, fork flow | ~2 wks |
 | M8 | Production polish | docker-compose, search, dark mode, mobile, deploy docs | ~2 wks |
@@ -240,13 +240,14 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 
 ## M5-M8 (sketch, refined as M1-M4 land)
 
-### M5 polish carryover from M4
+### M5 polish carryover from M4 [SHIPPED]
 
+- **Branding colors + UI polish — SHIPPED M5/B9.** `resolveBrandingColors` validator; vote recolor using branding accent; 24h edit window (`EDIT_WINDOW_MS`) for posts and comments (migration 008); action-pill unification; `BRAND_ICONS` removed.
 - **My mod decisions panel — SHIPPED M5/B13.** Folded into the existing `/modlog` audit surface. The "[me]" filter button (now labeled "my decisions") scopes to the current mod's actions. Inline `revoke` buttons render in the audit table for the current mod's own actions whose effect is still in place: `collapse → uncollapse`, `remove → unremove`, `ban → unban`. Buttons POST to the existing `/sub/<sub>/mod` endpoint with the inverse action and return the user to the same audit view. Sub-keys-of-the-kingdom actions (`promote_mod`, `demote_mod`, `transfer_owner`) are intentionally NOT one-click revocable — those changes route through the explicit mod-management surface so they require deliberate action. Surfaces a mod's pattern of decisions to themselves (the "self-watching" dynamic — knowing your record is visible to you discourages capricious moderation).
 - **Per-sub flag-threshold override — SHIPPED M5/B12.** Migration 011 added `subs.flag_threshold INTEGER NOT NULL DEFAULT 3`. PRD §Spam 7's "configurable per-sub, default 3 unique flaggers" is now operator-tunable via `/sub/create` and `/sub/<name>/edit` (owner only). `FLAG_THRESHOLD_FLOOR = 3` enforced at the content layer — operators can raise (more permissive for niche subs) but not lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). `submitFlag` now resolves the threshold per-target via `resolveFlagThreshold(db, targetType, targetId)` — comments inherit their post's sub setting.
 - **Auto-uncollapse threshold (per-sub) — SHIPPED in M4 polish.** Migration 006 added `subs.auto_uncollapse_post` (floor 50) and `subs.auto_uncollapse_comment` (floor 20). `createSub` enforces the floors; `/sub/create` exposes both as number inputs. Higher floor on posts because feed exposure means votes accumulate faster — same vote count on a post represents a smaller fraction of the audience that saw it.
 
-### M5: Spam defenses + per-sub structure
+### M5: Spam defenses + per-sub structure [SHIPPED]
 Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-account scrutiny, per-sub limits, link cap + URLhaus integration (hourly cron), spam pattern file (regex), velocity alerts dashboard, public mod log already done in M4.
 
 **Per-sub structure adds:**

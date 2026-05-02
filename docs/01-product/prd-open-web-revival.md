@@ -288,7 +288,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 5. Honeypot fields | deferred | low ROI; bots that fill posting fields are also bots that fill honeypots |
 | 6. Outbound link cap | shipped (M5/B4) | 1/3/5 by tier; `LINK_CAP_FLOOR` |
 | 6b. URL malicious-domain check | shipped (M5/B5) | URLhaus hourly cron via `bin/refresh-urlhaus.js` |
-| 7. Flag button | shipped (M4) | five categories, AUTO_HIDE_THRESHOLD=3 |
+| 7. Flag button | shipped (M4/M5) | five categories, flagThreshold per-sub, floor 3 (M5/B12) |
 | 8. Velocity alerts | deferred | post-trial; manual /modlog scrolling suffices for unannounced trial |
 | 9. Spam pattern file | shipped (M5/B3) | `spam-patterns.txt` operator-editable, version-controlled |
 | 10. Bayesian filter | deferred | not v1; regex covers the campaign-reuse pattern |
@@ -297,6 +297,16 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 13. No DMs in v1 | locked | DM is permanently out |
 | 14. No media hosting | locked | text-only is permanent |
 | 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` for mods; M5/B6 surfaces system auto-actions as `system`-attributed audit rows |
+
+### Build status (M5 per-sub structure)
+
+| Feature | Status | Notes |
+|---|---|---|
+| B9: branding colors override + vote recolor + edit window + action-pill unification | shipped (M5/B9) | `resolveBrandingColors`; 24h edit window (`EDIT_WINDOW_MS`); `BRAND_ICONS` removed |
+| B10: per-sub flairs | shipped (M5/B10) | max 12, owner-curated, optional `flairs_required` |
+| B11: per-sub sensitive flag | shipped (M5/B11) | amber banner, not NSFW labeling |
+| B12: per-sub flag-threshold | shipped (M5/B12) | raise-only, floor 3 |
+| B13: inline revoke in /modlog | shipped (M5/B13) | actor-only, sub-keys excluded |
 
 The deferred items aren't blockers for an unannounced public trial; the shipped layer is enough that an attacker who gets through magic-link → tiered rate limit → link cap → spam regex → URLhaus has already done more work than spamming a typical small instance is worth.
 

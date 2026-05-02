@@ -112,7 +112,7 @@ These have one default that's right for almost every instance. The project doesn
 | `COLLAPSE_THRESHOLD` | -3 | `src/web/app.js` | Score below which a comment auto-folds (community-driven). |
 | `MAX_DEPTH` | 4 | `src/web/app.js` | Comment indent depth before deeper replies fold into "+ N more". |
 | `COMMENT_PREVIEW_CHARS` | 280 | `src/web/app.js` | Long-comment fold threshold (Twitter's old cap, deliberately the same for muscle memory). |
-| `AUTO_HIDE_THRESHOLD` | 3 | `src/content/flag.js` | Default for new subs; per-sub override via `flagThreshold` field. The constant is also the floor — operators can raise per-sub but never lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
+| `FLAG_THRESHOLD_FLOOR` | 3 | `src/content/flag.js` | Default for new subs; per-sub override via `flagThreshold` field. The constant is also the floor — operators can raise per-sub but never lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
 | `NEW_ACCOUNT_WINDOW_MS` | 7 days | `src/content/vote.js` | How long a fresh account counts as "new". |
 | `YOUNG_POST_WINDOW_MS` | 24h | `src/content/vote.js` | New accounts can only vote on posts within this window. |
 
@@ -203,7 +203,7 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 ### Recurring operations
 
 - **`npm run migrate`** — apply any new migrations. Idempotent; safe to run on every deploy.
-- **`npm test`** — run the 245-test suite. Should pass cleanly on every commit.
+- **`npm test`** — run the 408-test suite. Should pass cleanly on every commit.
 - **`npm start`** — start the server. No build step.
 - **Backups** — copy `forum.db` and `posts/`. SQLite WAL means a hot copy works; for safety, use `sqlite3 forum.db ".backup forum.db.bak"`.
 - **Restoring** — drop the files in place, ensure `KNOWLESS_SECRET` is the same as before (otherwise users look like new accounts), `npm start`.
@@ -242,10 +242,10 @@ The aesthetic is **terminal-honest**. Mono font where it fits, no emoji unless t
 
 ## What's coming next
 
-- **M5 — Mod surface + spam defenses (mostly done).** Unified `/modlog` (open/inbox/audit) shipped. Forum-wide rate limits, per-sub topic-flood limit, link cap, regex spam-patterns, URLhaus hourly cron all shipped. M5/B6 added system-attributed audit rows so spam-regex and URLhaus auto-collapses appear in the public modlog with `mod_handle = system`. M5/B7 closed an M1–M4 audit pass: open-redirect guard on `?return_to=`, atomic post-file/DB ordering, anchored frontmatter parser, length caps on title/body/comment/flag-note, fresh-user vote/flag handle bootstrap, comments under removed parents rejected, comment-tree cycle detection + render depth cap, `transfer_owner` validation. M5/B8 UX pass: `/subs` directory (with subscriber column placeholder for M6), `//<sub>` display style replaces `/sub/<x>` in feed/post-meta/breadcrumbs, comment-count "N replies" link with zero-reply visibility, sub color accent on feed, domain-hint after outbound links, home top-nav with Posts/Comments tabs + new/old/top/hot sort + 24h/week/all date filters, body width 720→880, post-page spacing tightened. Still open: per-sub flag-threshold override (currently 3 globally), per-sub flairs (closed-list, owner-curated), per-sub NSFW banner, "new account" tag in mod queue.
-- **M6 — Subscriptions and notifications.** Follow a sub, get a per-sub notification preference (none / new posts / comments on my posts).
-- **M7 — Search.** SQLite FTS5 over post titles and bodies and comments. No external service.
-- **M8 — Operator polish.** Light-mode toggle (forkable tokens already in place). Opinionated Caddy config. Install script. systemd unit.
+- **M5 — Mod surface + spam defenses [SHIPPED].** Unified `/modlog` (open/inbox/audit) shipped. Forum-wide rate limits, per-sub topic-flood limit, link cap, regex spam-patterns, URLhaus hourly cron all shipped. M5/B6 added system-attributed audit rows so spam-regex and URLhaus auto-collapses appear in the public modlog with `mod_handle = system`. M5/B7 closed an M1–M4 audit pass: open-redirect guard on `?return_to=`, atomic post-file/DB ordering, anchored frontmatter parser, length caps on title/body/comment/flag-note, fresh-user vote/flag handle bootstrap, comments under removed parents rejected, comment-tree cycle detection + render depth cap, `transfer_owner` validation. M5/B8 UX pass: `/subs` directory (with subscriber column placeholder for M6), `//<sub>` display style replaces `/sub/<x>` in feed/post-meta/breadcrumbs, comment-count "N replies" link with zero-reply visibility, sub color accent on feed, domain-hint after outbound links, home top-nav with Posts/Comments tabs + new/old/top/hot sort + 24h/week/all date filters, body width 720→880, post-page spacing tightened. M5/B9: branding color overrides + vote recolor + 24h edit window + action-pill unification. M5/B10: per-sub flairs (closed-list, owner-curated, max 12, optional `flairs_required`). M5/B11: per-sub sensitive content flag (amber banner; not NSFW labeling). M5/B12: per-sub flag-threshold override (`FLAG_THRESHOLD_FLOOR = 3`, raise-only). M5/B13: inline revoke in `/modlog` audit view (actor-only; promote/demote/transfer excluded). Still open: "new account" tag in mod queue.
+- **M6 — Subscriptions and notifications.** Sub subscribe/unsubscribe, my-subs page, home-feed Subscribed/All toggle, email digest, ntfy push, per-sub RSS feeds, outbound-mail signature.
+- **M7 — Identity + export/import.** Per-sub export, per-user export, archive signing, OpenTimestamps, fork flow.
+- **M8 — Production polish.** docker-compose, full-text search, light-mode toggle (forkable tokens already in place), mobile-responsive layout, deploy guide, GitHub Actions CI.
 
 The build plan in `docs/01-product/build-plan.md` has the running tally; the PRD in `docs/01-product/prd-open-web-revival.md` has the rationale for every decision.
 
