@@ -104,41 +104,44 @@ Each refusal maps to an illusion modern platforms sell — interoperability you 
 
 ## Where plato sits
 
-plato is a Reddit-shaped forum built like a phpBB-era forum should have been: one binary, one SQLite file, plain markdown on disk, fork without asking. **The interaction model of Reddit's small-subs era** — subs, threaded comments, upvotes, mods answerable to a public log — **assembled with the operational discipline of the self-host PHP forum era** — one process, plain files, no plugin marketplace — **minus the bloat both eras accumulated**: Reddit's algorithmic-feed/karma/ads layer, and the PHP era's bbcode-and-avatar-upload-and-monetization-plugin sprawl.
+Shaped like Reddit (subs, threaded comments, upvotes, mods who answer to a public log). Built like a classic forum (one program, one file, fork it without asking). Without the bloat either accumulated.
 
-### Closest neighbour: Lemmy
+### Closest cousin: Lemmy
 
-[Lemmy](https://join-lemmy.org) is the FOSS Reddit clone most open-web folks reach for. plato is in that conversation but a different bet:
+[Lemmy](https://join-lemmy.org) is the open-source Reddit clone most often suggested. plato is in that conversation but a smaller bet:
 
 | | Lemmy | plato |
 |---|---|---|
-| Stack | Rust + Postgres + Pictrs image server | Node 22 + SQLite, one process |
-| Install | Docker compose, ~5 services | `git clone && npm start` on a $5 VPS |
-| Federation | ActivityPub across instances | None — one site, one operator |
-| Image / video | Hosted via Pictrs | Link out, never hosted |
-| Identity | Username + password | Pseudonym from a one-time email link; email forgotten |
-| Mod transparency | Visible to instance admins | Public log per sub, for everyone, with community auto-override on votes |
-| Backup | `pg_dump` + Pictrs volume | `cp` two paths |
-| When the operator goes dark | Migrate to another instance via federation | `git clone`, fork the archive, keep your markdown |
+| To run it | 5 services running together | One program, one file |
+| Install | Container setup, takes hours | Two commands, runs on a cheap VPS |
+| Talks to other sites | Yes (federation) | No — one site, one operator |
+| Images and video | Hosted on the server | None — links only |
+| Sign in | Username + password | Click an emailed link |
+| Password | Stored, recovery flow, 2FA | None — your inbox is the credential |
+| What it knows about you | Email kept on file | A one-way fingerprint, scoped to this site only |
+| Same email on two sites | Same identity, trackable | Different pseudonym on each site |
+| CAPTCHA at signup | Yes | No — getting an email IS the cost |
+| Mod oversight | Visible to instance admins | Public log per sub, for everyone |
+| Backup | Database dump + image server | Copy two folders |
+| If the operator goes bad | Move to another instance | Fork the code + your archive, run your own |
 
-**Federation** = many servers talking via a shared protocol (ActivityPub) so users on one can follow content on another. Mastodon and Lemmy do this. plato refuses it on purpose:
+**Federation, in plain English** — many independent Lemmy sites that talk to each other so users on one can read and comment on another. Sounds great, costs a lot:
 
-- **Trust model.** One operator + public modlog + one-command fork is cleaner than "this content came from a server I don't admin."
-- **Stack weight.** ActivityPub needs inbound queues, signature verification, retry workers, thumbnail caching. The "$5 VPS, two `cp` backups" property dies on contact.
-- **Image hosting drags in.** Federated thumbnails cache locally — you become a host (DMCA, content-scanning) for content you didn't post. Incompatible with plato's "link out, never host" rule.
-- **Walk-away doesn't need it.** Federation says "leave one instance for another." plato says "fork the code + archive, run your own." Same exit, no 5-service install.
+- Your server downloads and stores images and posts from servers run by strangers (you become legally responsible for their content).
+- Every site needs heavy backend plumbing — kills the "runs on a cheap VPS" promise.
+- "Who's responsible when something goes wrong" gets muddy.
 
-For a 100-person forum, federation is a tax with no payoff. Lemmy is the pick if you want network-scale; plato is the pick if you want one small forum that runs forever on one box, with every mod action visible.
+For a 100-person forum, that's a tax with no payoff. plato's answer to "you can leave" isn't federation — it's *fork the code and the archive, run your own*. Same exit, none of the weight.
 
-### In the broader self-hostable forum landscape
+### The broader landscape
 
-| Tool | Shape | Stack | What plato kept | What plato refused |
-|---|---|---|---|---|
-| Reddit (closed) | subs + votes + threaded + mods | private | interaction model | algorithm, karma, ads, follower graph |
-| [Lemmy](https://join-lemmy.org) | Reddit, federated | Rust + PG + Pictrs | the FOSS shape | federation overhead, image hosting |
-| [NodeBB](https://nodebb.org) | bbforum (categories / topics) | Node + Mongo/PG + Redis | none — bbforum shape isn't ours | plugin marketplace, theme system, multi-DB |
-| [Discourse](https://www.discourse.org) | opinionated discussion | Ruby + PG + Redis + Sidekiq | public-modlog instinct | heavy stack, server requirements |
-| [phpBB](https://www.phpbb.com) / Discuz! / vBulletin | bbforum, classic PHP era | PHP + MySQL | self-host ethos, plain-files philosophy | bbcode, avatar uploads, plugin sprawl, monetization plugins |
+| Tool | What it is | What plato kept | What plato refused |
+|---|---|---|---|
+| Reddit (closed) | The interaction model — subs, votes, threads, mods | The shape | Algorithm, karma, ads, follower count |
+| [Lemmy](https://join-lemmy.org) | Open-source Reddit, federated | The open-source spirit | Federation overhead, image hosting |
+| [NodeBB](https://nodebb.org) | Modern Node forum, old-style (categories + topics) | Nothing — different shape | Plugin marketplace, theme system |
+| [Discourse](https://www.discourse.org) | Modern Ruby discussion forum | The public-modlog instinct | Heavy server requirements |
+| [phpBB](https://www.phpbb.com) / Discuz! / vBulletin | Classic PHP forums | Self-host ethos, plain-files philosophy | BBCode, avatar uploads, plugin sprawl, paid extensions |
 
 The lineage plato claims: **the structural defaults of Reddit's small-subs era, the self-host ethics of phpBB's golden era, none of the bloat either accumulated.**
 
