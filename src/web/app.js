@@ -42,7 +42,8 @@ import { loadSpamPatterns, matchSpamPatterns, applySpamMatches, SYSTEM_HANDLE } 
 import { checkLinkCap, resolveLinkCapConfig } from '../content/linkCap.js';
 import { loadUrlhausCache, matchUrlhaus, applyUrlhausMatches } from '../content/urlhaus.js';
 
-const HANDLE_RE = /^[0-9a-f]{1,128}$/;
+// Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
+const HANDLE_RE = /^[0-9a-f]{64}$/;
 
 function layout(title, body) {
   return render(html`<!doctype html>
@@ -99,6 +100,17 @@ function siteFooter() {
 // nav, sub strip) plus the bottom siteFooter (logo + tagline) sandwich
 // every error message so the user can always click home or pick a sub.
 // Pass `links` to surface specific recovery actions (e.g. "try again").
+// Sanitize a user-supplied `return_to` value for a Location: header.
+// Must be a same-origin path: starts with '/', not '//' (protocol-relative
+// → external host), not '/\' (browser quirk), and contains no scheme.
+// Falls back to `fallback` for anything else.
+function safeLocalRedirect(returnTo, fallback) {
+  if (typeof returnTo !== 'string') return fallback;
+  if (!returnTo.startsWith('/')) return fallback;
+  if (returnTo.startsWith('//') || returnTo.startsWith('/\\')) return fallback;
+  return returnTo;
+}
+
 function errorPage(req, { db, auth }, { title, message, links }) {
   const currentHandle = auth?.handleFromRequest(req);
   return layout(title, html`
@@ -781,6 +793,11 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
 // driven below -3 behind a separate <details> toggle.
 const COLLAPSE_THRESHOLD = -3;
 const MAX_DEPTH = 4;
+// Hard recursion guard. buildCommentTree rejects cycles, but a forum-scale
+// pathological thread (or a future re-parenting bug) shouldn't be able to
+// blow the stack. Beyond HARD_DEPTH we collapse the rest into a single
+// "+ N more replies" affordance and stop recursing.
+const HARD_DEPTH = 64;
 const COMMENT_PREVIEW_CHARS = 280;
 
 function countDescendants(node) {
@@ -792,6 +809,10 @@ function countDescendants(node) {
 }
 
 function commentNodeView(node, ctx, depth) {
+  if (depth >= HARD_DEPTH) {
+    const total = 1 + countDescendants(node);
+    return html`<div class="comment comment-truncated muted">+ ${total} replies hidden (depth limit)</div>`;
+  }
   const pseudonym = ctx.pseudonyms.get(node.handle) ?? node.handle.slice(0, 8);
   const scoreCollapsed = node.score <= COLLAPSE_THRESHOLD;
   const modCollapsed = node.collapsed_at != null;
@@ -1096,7 +1117,7 @@ async function handleVote(req, res, { db, auth }) {
   if (wantsJson(req)) return sendJson(res, 200, result);
   // Native form path: redirect back to where the user came from. Whitelist
   // the path so /vote can't be weaponized as an open redirect.
-  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/';
+  const safeReturn = safeLocalRedirect(returnTo, '/');
   redirect(res, safeReturn);
 }
 
@@ -1257,7 +1278,7 @@ async function handleFlag(req, res, { db, auth }) {
       return send(res, 400, layout('flag failed', html`<p class="muted">${err.message}</p>`));
     }
   }
-  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/';
+  const safeReturn = safeLocalRedirect(returnTo, '/');
   redirect(res, safeReturn);
 }
 
@@ -1294,7 +1315,7 @@ async function handleModAction(req, res, { db, auth }, subName) {
       title: 'mod failed', message: err.message,
     }));
   }
-  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : `/sub/${subName}`;
+  const safeReturn = safeLocalRedirect(returnTo, `/sub/${subName}`);
   redirect(res, safeReturn);
 }
 
@@ -1365,7 +1386,7 @@ async function handleModlogResolve(req, res, { db, auth }) {
       links: html`<p><a href="/modlog">← back to /modlog</a></p>`,
     }));
   }
-  const safeReturn = typeof returnTo === 'string' && returnTo.startsWith('/') ? returnTo : '/modlog';
+  const safeReturn = safeLocalRedirect(returnTo, '/modlog');
   redirect(res, safeReturn);
 }
 
