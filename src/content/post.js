@@ -216,7 +216,9 @@ export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, now
   }
   const order = sort === 'top'
     ? 'ORDER BY score DESC, created_at DESC'
-    : 'ORDER BY created_at DESC';
+    : sort === 'old'
+      ? 'ORDER BY created_at ASC'
+      : 'ORDER BY created_at DESC';
   return db.prepare(`${baseSelect} ${order} LIMIT ?`).all(...params, limit);
 }
 

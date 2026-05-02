@@ -90,7 +90,9 @@ export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit 
   const params = sinceMs != null ? [sinceMs] : [];
   const order = sort === 'top'
     ? 'ORDER BY c.score DESC, c.created_at DESC'
-    : 'ORDER BY c.created_at DESC';
+    : sort === 'old'
+      ? 'ORDER BY c.created_at ASC'
+      : 'ORDER BY c.created_at DESC';
   return db.prepare(
     `SELECT c.id, c.post_id, c.handle, c.body, c.score, c.created_at,
        c.collapsed_at, c.removed_at,
