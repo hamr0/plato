@@ -8,70 +8,20 @@
 
 ---
 
-**plato is a forum.** Reddit-shaped (subs, threaded comments, upvotes, mods). Without ads, algorithm, tracking, karma, follower counts, real-name pressure, image hosting, or a company that changes the rules. Loads instantly. You can walk away with everything you wrote.
+**plato is a forum.** Reddit-shaped (subs, threads, votes, mods), built like forums used to be: a single program on a cheap server, plain files on disk, fork it the day the operator stops listening.
 
 ---
 
-## Why this exists
+## What plato gives you
 
-Forums used to last decades — phpBB, Usenet, mailing lists, early Reddit. Then platforms started needing your attention to survive: recommendation feeds replaced friends, karma replaced thinking, followers replaced trust. plato is the bet that the structural defaults were what mattered.
-
----
-
-## What you get
-
-### Sign in without giving your email
-
-- Enter email → click the link → you're in.
-- The moment the link goes out, plato forgets your address. Only a one-way fingerprint stays.
-- Same email on two plato sites = two different pseudonyms. Cross-site tracking is impossible by construction.
-- No password, no recovery flow, no profile, no 2FA, no CAPTCHA.
-
-Powered by [**knowless**](https://github.com/hamr0/knowless), an open-source library for passwordless auth without storing email.
-
-### A moderation system that watches the moderators
-
-- **Soft removal** — fold-behind-a-chip; body readable on click; reason optional; community can lift it via upvotes.
-- **Hard removal** — body replaced with stub; reason required; only another mod can reverse.
-- **Public log per sub.** Every mod action visible to everyone — the audit trail is the social pressure.
-- **Unified `/modlog` for mods** — three modes (open / inbox / audit), click-to-filter on any mod or user, expand any row inline.
-
-### Spam defenses without an arms-race team
-
-- **Magic-link auth** — every account costs a working inbox.
-- **Account-age tiered rate limits** — new accounts post sparingly, established accounts post freely.
-- **Per-post link cap** — 1 link for new accounts, 5 for trusted.
-- **Spam pattern file** (`spam-patterns.txt`) — operator appends regex per spam wave; matches auto-collapse for review.
-- **URLhaus integration** — hourly cron pulls the malicious-URL list; matching posts auto-flag.
-
-Each knob has a hardcoded floor. Operators tighten, never loosen.
-
-### Text only
-
-- Markdown post bodies. Hyperlinks for everything else.
-- No image hosting, no video, no embeds, no auto-play.
-- Markdown image syntax becomes a plain link.
-- Loads instantly on any device, on any connection.
-
-### You own what you write
-
-- **Markdown on disk** — every post is a real file. The database is an index, regenerable.
-- **One-command export** — full history or a sub's archive, plain markdown + JSON manifest.
-- **Apache 2.0** — fork without asking.
-
-### Stay current with RSS
-
-Every sub publishes `/sub/<name>/feed.xml`. Point [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), [Reeder](https://reederapp.com), or whatever you use. No notification system, no app, no account.
-
-### Lightweight, on purpose
-
-- One process, one database file, one HTTP port.
-- Runs on a $5 VPS. Backups = two `cp` commands.
-- No build step, no frontend framework, no client-side JS in the basic path.
-
-### Retro, on purpose
-
-Monospace font. Dark by default. Terminal-honest. Three-blue-dot logo doubles as the loading animation. Looks like a tool, not a product.
+- **Plain text.** Markdown for posts, hyperlinks for everything else. No image / video / file hosting. The forum loads on any device, on any connection, in any decade.
+- **Magic-link sign-in, no identity lock.** Click an emailed link → you're in. No password, no profile, no captcha, no second factor. The moment the link is sent, the email is forgotten — only a one-way fingerprint, scoped to this site, remains. Same email on two plato sites = two different pseudonyms.
+- **Public moderation log per sub.** Every soft removal (fold-behind-a-chip, body still readable, community can lift it via upvotes) and every hard removal (stub, reason required, mod-only reverse) is visible to everyone. The audit trail is the social pressure.
+- **One dashboard for mods.** `/modlog` with three modes — open (pending flags, expand any row to decide inline), inbox (deduped current state), audit (every event flat). Click any mod or user to filter. Same audit shape is what the public sees at `/sub/<name>/modlog`.
+- **Checks and balances on mods.** Soft removals auto-revert when the community accumulates enough net upvotes since the collapse. Mods can soft-remove anything; the community has a recourse that doesn't require confrontation.
+- **RSS as it was meant to be.** Every sub publishes `/sub/<name>/feed.xml`. You pick what you follow with [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), or whatever you use. No notification system to fight, no app to install, no algorithm.
+- **Interoperable from day one.** Posts are plain markdown files on disk. The database is an index, regenerable. One-command export = full history or a sub's archive, readable in any text editor.
+- **Runs on a $5 VPS.** One process, one SQLite file, one HTTP port. Backups = two `cp` commands. No build step, no frontend framework. Apache 2.0, fork without asking.
 
 ---
 
@@ -81,46 +31,39 @@ Decisions, not roadmap items:
 
 - Ads, analytics, tracking pixels, third-party JavaScript.
 - Algorithmic feeds.
-- Karma, follower counts, post counts, "online now" badges, leaderboards.
+- Karma, follower counts, post counts, leaderboards, "online now" badges.
 - Real names, phone numbers, photos, locations.
 - Image / video / file uploads.
 - Tags, hashtags.
 - Private subs, DMs, hidden side-channels.
-- Password auth, OAuth, SSO.
+- Password auth, OAuth, SSO, federation.
 
 ---
 
-## Where plato sits
+## Closest cousin: Lemmy
 
-Reddit-shaped (subs, threads, votes, public-modlog mods). Classic-forum-built (one program, one file, fork without asking). None of the bloat either accumulated.
-
-### Closest cousin: Lemmy
+[Lemmy](https://join-lemmy.org) is the open-source Reddit clone most often suggested. Same shape, different bet:
 
 | | Lemmy | plato |
 |---|---|---|
 | To run it | 5 services + database server, container setup | One program, one file, two commands on a cheap VPS |
-| Sign in | Username + password (recovery, 2FA, CAPTCHA) | Click an emailed link, your address is forgotten |
+| Sign in | Username + password (recovery, 2FA, CAPTCHA) | Click an emailed link, address forgotten |
 | Privacy of your email | Kept on file, same identity across sites | One-way fingerprint, different pseudonym per site |
-| Talks to other sites + hosts strangers' images | Yes (federation) | No — one site, links only |
+| Federation + image hosting | Yes (cross-server protocol, server caches strangers' images) | No — one site, links only |
 | If the operator goes bad | Move to another federated instance | Fork the code + your archive, run your own |
 
-**Federation** — many Lemmy sites talking to each other so users on one can read and comment on another. plato refuses it:
+Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.discourse.org), [phpBB](https://www.phpbb.com), Discuz!, vBulletin) is bbforum-shaped (categories and topics), runs heavier stacks, and inherits a 25-year-old auth pattern (account row + password + email-on-record). plato keeps the self-host ethics of that era and the interaction model of Reddit's small-subs era. None of the bloat either accumulated.
 
-- Your server caches strangers' images and posts → you become legally responsible for them.
-- Federation needs heavy backend plumbing → kills the "runs on a cheap VPS" promise.
-- Plato's answer to "you can leave" is fork-the-archive, not cross-server protocol. Same exit, none of the weight.
+---
 
-### The broader landscape
+## For operators
 
-| Tool | What it is | What plato kept | What plato refused |
-|---|---|---|---|
-| Reddit (closed) | The interaction model — subs, votes, threads, mods | The shape | Algorithm, karma, ads, follower count |
-| [Lemmy](https://join-lemmy.org) | Open-source Reddit, federated | The open-source spirit | Federation overhead, image hosting |
-| [NodeBB](https://nodebb.org) | Modern Node forum, old-style (categories + topics) | Nothing — different shape | Plugin marketplace, theme system |
-| [Discourse](https://www.discourse.org) | Modern Ruby discussion forum | The public-modlog instinct | Heavy server requirements |
-| [phpBB](https://www.phpbb.com) / Discuz! / vBulletin | Classic PHP forums | Self-host ethos, plain-files philosophy | BBCode, avatar uploads, plugin sprawl, paid extensions |
-
-**Lineage**: Reddit's small-subs interaction model + phpBB's self-host ethics — bloat from both.
+- **Stack**: Node.js ≥ 22.5, SQLite (single file), no build step, ~5 runtime deps.
+- **Install**: `git clone && npm install && npm run migrate && npm start` — one HTTP port, default 8080.
+- **Backup**: `cp` the SQLite file + the `posts/` directory.
+- **Mail**: dev → [Mailpit](https://github.com/axllent/mailpit) on port 1025; prod → see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
+- **Spam knobs**: tighten via `config.json` (rate limits, link cap, regex patterns, URLhaus). Floors are PRD-locked — operators tighten, never loosen.
+- **Per-sub settings**: owner sets auto-uncollapse thresholds at `/sub/create`. Spam knobs are forum-wide on purpose.
 
 ---
 
@@ -143,16 +86,13 @@ npm start
 
 Open `http://localhost:8080` and post.
 
-- **Dev mail**: [Mailpit](https://github.com/axllent/mailpit) on port 1025 catches every outgoing email.
-- **Production mail**: see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
-
 ---
 
 ## Documentation
 
 - [Operator Guide](docs/02-features/operator-guide.md) — running and customizing your instance.
-- [Integration Guide](docs/02-features/plato.context.md) — for developers and AI assistants wiring plato into a project.
-- [Open-web revival PRD](docs/01-product/prd-open-web-revival.md) — the spec, design decisions, and rationale for every locked-in choice.
+- [Integration Guide](docs/02-features/plato.context.md) — wiring plato into a project.
+- [PRD](docs/01-product/prd-open-web-revival.md) — spec + rationale for every locked-in choice.
 - [Build plan](docs/01-product/build-plan.md) — milestone roadmap.
 - [Changelog](CHANGELOG.md) — what has shipped.
 
