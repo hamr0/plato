@@ -98,18 +98,11 @@ Reddit-shaped (subs, threads, votes, public-modlog mods). Classic-forum-built (o
 
 | | Lemmy | plato |
 |---|---|---|
-| To run it | 5 services running together | One program, one file |
-| Install | Container setup, takes hours | Two commands, runs on a cheap VPS |
-| Talks to other sites | Yes (federation) | No — one site, one operator |
-| Images and video | Hosted on the server | None — links only |
-| Sign in | Username + password | Click an emailed link |
-| Password | Stored, recovery flow, 2FA | None — your inbox is the credential |
-| What it knows about you | Email kept on file | A one-way fingerprint, scoped to this site only |
-| Same email on two sites | Same identity, trackable | Different pseudonym on each site |
-| CAPTCHA at signup | Yes | No — getting an email IS the cost |
-| Mod oversight | Visible to instance admins | Public log per sub, for everyone |
-| Backup | Database dump + image server | Copy two folders |
-| If the operator goes bad | Move to another instance | Fork the code + your archive, run your own |
+| To run it | 5 services + database server, container setup | One program, one file, two commands on a cheap VPS |
+| Sign in | Username + password (recovery, 2FA, CAPTCHA) | Click an emailed link, your address is forgotten |
+| Privacy of your email | Kept on file, same identity across sites | One-way fingerprint, different pseudonym per site |
+| Talks to other sites + hosts strangers' images | Yes (federation) | No — one site, links only |
+| If the operator goes bad | Move to another federated instance | Fork the code + your archive, run your own |
 
 **Federation** — many Lemmy sites talking to each other so users on one can read and comment on another. plato refuses it:
 
