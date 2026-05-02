@@ -59,6 +59,21 @@ export function addComment(db, { postId, parentId = null, handle, body, now = Da
 }
 
 export const COMMENT_SORTS = ['best', 'new'];
+export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function editComment(db, { commentId, handle, body, now = Date.now() }) {
+  if (!commentId) throw new Error('editComment: commentId is required');
+  if (!handle) throw new Error('editComment: handle is required');
+  if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editComment: body is required');
+  if (body.length > COMMENT_BODY_MAX) throw new Error(`editComment: body exceeds ${COMMENT_BODY_MAX} characters`);
+
+  const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId);
+  if (!comment) throw new Error(`editComment: comment ${commentId} not found`);
+  if (comment.handle !== handle) throw new Error('editComment: not the author');
+  if (now - comment.created_at > EDIT_WINDOW_MS) throw new Error('editComment: edit window has closed');
+
+  db.prepare('UPDATE comments SET body = ?, edited_at = ? WHERE id = ?').run(body.trim(), now, commentId);
+}
 
 // 'best' is the Reddit-style default: score DESC with chronological tiebreak
 // (the older of two tied comments wins, favoring substantive early replies

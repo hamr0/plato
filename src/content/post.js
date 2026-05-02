@@ -52,6 +52,7 @@ function parseFrontmatter(raw) {
 
 export const TITLE_MAX = 300;
 export const BODY_MAX = 40000;
+export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export function submitDraft(db, { title, body, subName = 'general' }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
@@ -149,11 +150,42 @@ export function getPost(db, postId, postsDir) {
   return { post, body, bodyHtml };
 }
 
+export function editPost(db, { postId, handle, body, postsDir, now = Date.now() }) {
+  if (!postId) throw new Error('editPost: postId is required');
+  if (!handle) throw new Error('editPost: handle is required');
+  if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editPost: body is required');
+  if (body.length > BODY_MAX) throw new Error(`editPost: body exceeds ${BODY_MAX} characters`);
+
+  const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId);
+  if (!post) throw new Error(`editPost: post ${postId} not found`);
+  if (post.handle !== handle) throw new Error('editPost: not the author');
+  if (now - post.created_at > EDIT_WINDOW_MS) throw new Error('editPost: edit window has closed');
+
+  const absPath = resolve(postsDir, basename(post.file_path));
+  const raw = readFileSync(absPath, 'utf8');
+  // Preserve the frontmatter block exactly; replace only the body section.
+  const rest = raw.slice(4);
+  const closeIdx = rest.indexOf('\n---\n');
+  const header = raw.slice(0, 4 + closeIdx + 5);
+  writeFileSync(absPath, `${header}\n${body.trim()}\n`);
+
+  db.prepare('UPDATE posts SET edited_at = ? WHERE id = ?').run(now, postId);
+}
+
 // Body preview for list views (home, sub pages). Reads the file, takes the
 // first paragraph (or maxChars, whichever is shorter), renders it. truncated
 // signals to the caller whether to show a "read more" affordance. Markdown is
 // re-rendered through the same allow-listed pipeline as full posts, so
 // preview content is as XSS-safe as the post body itself.
+export function getPostRawBody(post, postsDir) {
+  try {
+    const raw = readFileSync(resolve(postsDir, basename(post.file_path)), 'utf8');
+    return parseFrontmatter(raw).trim();
+  } catch {
+    return '';
+  }
+}
+
 export function getPostPreview(post, postsDir, { maxChars = 280 } = {}) {
   // Tolerate a missing file: the index row and the file tree can drift
   // (operator restored only the DB, partial backfill, etc.). A list view

@@ -209,3 +209,60 @@ test('buildCommentTree: surfaces an a→b→a cycle as roots', () => {
   // Both surface as roots so neither node infinite-recurses.
   assert.equal(tree.length, 2);
 });
+
+// --- editComment ---
+
+import { editComment, EDIT_WINDOW_MS } from '../../src/content/comment.js';
+
+function commentFixture() {
+  const db = fixture();
+  const { commentId } = addComment(db, { postId: 'p1', handle: HANDLE, body: 'original' });
+  return { db, commentId };
+}
+
+test('editComment: author within window can update body', () => {
+  const { db, commentId } = commentFixture();
+  editComment(db, { commentId, handle: HANDLE, body: 'updated' });
+  const row = db.prepare('SELECT body, edited_at FROM comments WHERE id = ?').get(commentId);
+  assert.equal(row.body, 'updated');
+  assert.ok(row.edited_at != null, 'edited_at set after edit');
+});
+
+test('editComment: edited_at is null before any edit', () => {
+  const { db, commentId } = commentFixture();
+  const row = db.prepare('SELECT edited_at FROM comments WHERE id = ?').get(commentId);
+  assert.equal(row.edited_at, null);
+});
+
+test('editComment: non-author throws', () => {
+  const { db, commentId } = commentFixture();
+  assert.throws(
+    () => editComment(db, { commentId, handle: HANDLE_B, body: 'x' }),
+    /not the author/,
+  );
+});
+
+test('editComment: expired window throws', () => {
+  const { db, commentId } = commentFixture();
+  const future = Date.now() + EDIT_WINDOW_MS + 1000;
+  assert.throws(
+    () => editComment(db, { commentId, handle: HANDLE, body: 'x', now: future }),
+    /edit window has closed/,
+  );
+});
+
+test('editComment: blank body throws', () => {
+  const { db, commentId } = commentFixture();
+  assert.throws(
+    () => editComment(db, { commentId, handle: HANDLE, body: '   ' }),
+    /body is required/,
+  );
+});
+
+test('editComment: body over COMMENT_BODY_MAX throws', () => {
+  const { db, commentId } = commentFixture();
+  assert.throws(
+    () => editComment(db, { commentId, handle: HANDLE, body: 'x'.repeat(10001) }),
+    /body exceeds/,
+  );
+});

@@ -7,11 +7,14 @@ import {
   submitDraft,
   finalizeDraft,
   getPost,
+  editPost,
   getPostPreview,
+  getPostRawBody,
   listRecentPostsCappedPerSub,
   listPostsInSub,
   listPostsAcrossSubs,
   SUB_SORTS,
+  EDIT_WINDOW_MS as POST_EDIT_WINDOW_MS,
 } from '../content/post.js';
 import {
   createSub,
@@ -22,10 +25,12 @@ import {
 } from '../content/sub.js';
 import {
   addComment,
+  editComment,
   listCommentsForPost,
   buildCommentTree,
   listRecentCommentsAcrossSubs,
   COMMENT_SORTS,
+  EDIT_WINDOW_MS as COMMENT_EDIT_WINDOW_MS,
 } from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
 import {
@@ -57,16 +62,18 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css">
-<script src="/static/vote.js?v=1" defer></script>
+<link rel="stylesheet" href="/static/style.css?v=6">
+${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
+<script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
 }
 
-// LOCKED project quote — appears in the footer below the operator's
-// "instance hosted by" line. Source of plato's name; not for forking.
+// LOCKED project quote — appears in the footer below the
+// "a plato instance hosted by ..." line. Source of plato's name;
+// not for forking.
 const PLATO_QUOTE = 'opinion is the medium between knowledge and ignorance.';
 
 // Module-scoped branding, set by createApp at boot from operator config.
@@ -76,7 +83,24 @@ const branding = {
   forumName: 'plato',
   tagline: 'a forum that lives at one URL',
   hostedBy: null,
+  colors: { up: null, down: null },
 };
+
+// Blocks CSS injection: reject anything containing ; { } < > " '
+// A valid CSS color (hex, rgb(), named) never needs those characters.
+export function resolveBrandingColors(overrides) {
+  const unsafe = /[;{}<>"']/;
+  const check = (key, val) => {
+    if (val == null || val === '') return null;
+    if (typeof val !== 'string') throw new Error(`branding.colors.${key} must be a string`);
+    if (unsafe.test(val)) throw new Error(`branding.colors.${key} contains invalid characters`);
+    return val.trim();
+  };
+  return {
+    up:   check('up',   overrides.up),
+    down: check('down', overrides.down),
+  };
+}
 
 // Inline SVG of the mark. `loading` adds the wave animation (the only
 // animation in the entire app). aria-hidden because the wordmark next to
@@ -100,11 +124,10 @@ function logoMark({ size = 22, loading = false } = {}) {
 }
 
 function siteFooter() {
+  const handle = branding.hostedBy ?? `@${branding.forumName}`;
   return html`<footer class="site-footer">
-    <a href="/" class="logo-home">${logoMark({ size: 22 })}<span class="wordmark">${branding.forumName}</span></a>
-    ${branding.hostedBy
-      ? html`<span class="hosted-by muted">a ${branding.forumName} instance hosted by ${branding.hostedBy}</span>`
-      : html``}
+    <a href="/" class="logo-home">${logoMark({ size: 22 })}</a>
+    <span class="hosted-by muted">a plato instance hosted by ${handle}</span>
     <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
@@ -191,12 +214,12 @@ function listPostableSubs(db) {
   ).all();
 }
 
-// Subs nav data: every postable sub plus its last-24h post count, hottest
-// first. Used by the home-page strip — top 3 always visible, the rest
-// collapse behind a "+ show all" <details>.
+// Subs nav data: every postable sub with its last-24h post count and
+// description, hottest first. Home renders the top 4 as the
+// "// active subs · last 24h" block.
 function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {}) {
   return db.prepare(
-    `SELECT s.name,
+    `SELECT s.name, s.description,
        (SELECT COUNT(*) FROM posts p WHERE p.sub_name = s.name AND p.created_at >= ?) AS post_count
      FROM subs s
      WHERE s.name != 'general'
@@ -210,6 +233,7 @@ function loginStatusFor(db, currentHandle) {
     // magic-link flow as the post form does today; no separate auth page,
     // just a single email field that drops them back where they were.
     return html`<div class="status muted">
+      <a href="/subs">subs</a> ·
       <details class="login-trigger">
         <summary>log in</summary>
         <form method="POST" action="/login" class="login-form">
@@ -229,7 +253,7 @@ function loginStatusFor(db, currentHandle) {
     : html``;
   return html`<div class="status muted">
     <img src="/avatar/${currentHandle}.svg" width="16" height="16" alt="">
-    <strong>${pseudonym}</strong>${modLogLink} ·
+    <strong>${pseudonym}</strong> · <a href="/subs">subs</a>${modLogLink} ·
     <form method="POST" action="/logout" class="inline">
       <button class="link">logout</button>
     </form>
@@ -310,10 +334,11 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
   // No JS: each arrow is its own POST form. Server toggles and redirects.
   // currentVote is 'up' / 'down' / null — used to highlight the active
   // arrow. Anonymous users see arrows as muted text (no form, no action).
+  const scoreClass = score > 0 ? 'score score-pos' : score < 0 ? 'score score-neg' : 'score score-zero';
   if (!currentHandle) {
     return html`<div class="vote">
       <span class="arrow muted">▲</span>
-      <span class="score">${formatScore(score)}</span>
+      <span class="${scoreClass}">${formatScore(score)}</span>
       <span class="arrow muted">▼</span>
     </div>`;
   }
@@ -327,7 +352,7 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
       <input type="hidden" name="return_to" value="${returnTo}">
       <button class="${upClass}" title="upvote">▲</button>
     </form>
-    <span class="score">${formatScore(score)}</span>
+    <span class="${scoreClass}">${formatScore(score)}</span>
     <form method="POST" action="/vote" class="inline">
       <input type="hidden" name="target_type" value="${targetType}">
       <input type="hidden" name="target_id" value="${targetId}">
@@ -338,7 +363,12 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
   </div>`;
 }
 
-function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
+function postLinksView(hosts) {
+  if (!hosts?.length) return html``;
+  return html`<div class="links">${hosts.map((h) => html`<span class="lh">${h}</span>`)}</div>`;
+}
+
+function postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
@@ -359,26 +389,29 @@ function postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, r
         returnTo: perPostReturn,
       })}
       <div class="body">
-        <h2><a href="${link}">${post.title}</a></h2>
+        <div class="post-title-line">
+          <h2><a href="${link}">${post.title}</a></h2>
+          <div class="post-actions">
+            ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
+              ? flagButton({
+                  targetType: 'post', targetId: post.id, returnTo: perPostReturn,
+                  alreadyFlagged: flaggedSet?.has(post.id) ?? false,
+                })
+              : html``}
+            ${modRole && subName === post.sub_name ? modControls({
+              subName, targetType: 'post', targetId: post.id,
+              collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
+              authorHandle: post.handle, authorBanned: bannedAuthors?.has(post.handle) ?? false,
+            }) : html``}
+          </div>
+        </div>
         ${authorMeta(post, name, { showComments: true })}
         ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: preview
           ? html`<div class="preview">${raw(preview.html)}${preview.truncated
               ? html` <a href="${link}" class="more">read more →</a>`
               : html``}</div>`
           : html`` })}
-        <div class="post-actions">
-          ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
-            ? flagButton({
-                targetType: 'post', targetId: post.id, returnTo: perPostReturn,
-                alreadyFlagged: flaggedSet?.has(post.id) ?? false,
-              })
-            : html``}
-          ${modRole && subName === post.sub_name ? modControls({
-            subName, targetType: 'post', targetId: post.id,
-            collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
-            authorHandle: post.handle, authorBanned: bannedAuthors?.has(post.handle) ?? false,
-          }) : html``}
-        </div>
+        ${postLinksView(linksMap?.get(post.id))}
       </div>
     </div>`;
   });
@@ -404,52 +437,54 @@ function buildPreviews(posts, postsDir, maxChars) {
   return map;
 }
 
-function subEntry(s) {
-  const title = `${s.post_count} post${s.post_count === 1 ? '' : 's'} in the last 24h`;
-  return html`<a href="/sub/${s.name}" title="${title}">${s.name}${s.post_count > 0
-    ? html` <span class="count">${s.post_count}</span>`
-    : html``}</a>`;
+const OUTBOUND_URL_RE = /https?:\/\/[^\s)>"<\]\[]+/g;
+
+function extractOutboundHosts(text) {
+  const seen = new Set();
+  const hosts = [];
+  for (const m of text.matchAll(OUTBOUND_URL_RE)) {
+    try {
+      const host = new URL(m[0]).hostname.replace(/^www\./, '');
+      if (host && !seen.has(host)) { seen.add(host); hosts.push(host); }
+    } catch { /* skip malformed */ }
+  }
+  return hosts;
 }
 
-function subsStripView({ subs, currentHandle }) {
-  const allLink = html`<a class="all-subs" href="/subs">all</a>`;
-  if (subs.length === 0) {
-    return html`<div class="subs-strip" title="active subs · last 24h">
-      <span class="label">subs</span>
-      <span class="muted"><em>none yet</em></span>
-      ${allLink}
-      ${currentHandle
-        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
-        : html``}
-    </div>`;
+function buildLinkBadges(posts, postsDir) {
+  const map = new Map();
+  for (const p of posts) {
+    const body = getPostRawBody(p, postsDir);
+    if (body) map.set(p.id, extractOutboundHosts(body));
   }
+  return map;
+}
 
-  const top = subs.slice(0, 3);
-  const rest = subs.slice(3);
-
-  if (rest.length === 0) {
-    return html`<div class="subs-strip" title="active subs · last 24h">
-      <span class="label">subs</span>
-      ${top.map(subEntry)}
-      ${allLink}
-      ${currentHandle
-        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
-        : html``}
-    </div>`;
+// Top-of-home active-subs block — vertical list of the 4 most-active subs
+// in the last 24h. Each row: //name — description    N posts · M subs.
+// Subscriber count is a placeholder (`—`) until M6 ships subscriptions.
+function activeSubsBlock({ subs, currentHandle }) {
+  const top = subs.slice(0, 4);
+  const newSubLink = currentHandle
+    ? html`<a class="new-sub" href="/sub/create">+ new sub</a>`
+    : html``;
+  if (top.length === 0) {
+    return html`<section class="active-subs">
+      <h3 class="section">// active subs · last 24h</h3>
+      <p class="muted"><em>no subs yet.</em> ${newSubLink}</p>
+    </section>`;
   }
-
-  return html`<details class="subs-area">
-    <summary class="subs-strip" title="active subs · last 24h">
-      <span class="label">subs</span>
-      ${top.map(subEntry)}
-      <span class="more-toggle">+ show all (${rest.length})</span>
-      ${allLink}
-      ${currentHandle
-        ? html`<a class="new-sub" href="/sub/create">+ new</a>`
-        : html``}
-    </summary>
-    <div class="subs-grid">${rest.map(subEntry)}</div>
-  </details>`;
+  return html`<section class="active-subs">
+    <h3 class="section">// active subs · last 24h</h3>
+    <div class="active-subs-list">
+      ${top.map((s) => html`<div class="active-sub-row">
+        <a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
+        <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
+        <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · — subs</span>
+      </div>`)}
+    </div>
+    ${newSubLink ? html`<p class="active-subs-foot">${newSubLink}</p>` : html``}
+  </section>`;
 }
 
 // Home top-nav filter values. Sort applies to both posts and comments
@@ -500,6 +535,11 @@ function homeNav(filters) {
       ${chip('date', '24h', '24h', filters.date === '24h')}
       ${chip('date', 'week', 'week', filters.date === 'week')}
       ${chip('date', 'all', 'all', filters.date === 'all')}
+    </span>
+    <span class="filter-sep">·</span>
+    <span class="filter-group">
+      <span class="filter-btn filter-btn-disabled" title="subscriptions — coming soon">subs</span>
+      <a class="filter-btn filter-btn-active" href="/">all</a>
     </span>
   </nav>`;
 }
@@ -552,22 +592,25 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       : listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
     const pseudonyms = pseudonymsByHandle(db, [...new Set(posts.map((p) => p.handle))]);
     const previews = buildPreviews(posts, postsDir, 280);
+    const linksMap = buildLinkBadges(posts, postsDir);
     const voteState = votesForPostList(db, posts, currentHandle);
     const flaggedSet = currentHandle
       ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
       : new Set();
-    feedView = postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/', flaggedSet });
+    feedView = postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo: '/', flaggedSet });
   }
 
   send(
     res,
     200,
     layout(branding.forumName, html`
-      ${siteHeader({ db, currentHandle, subtitle: 'a forum that lives at one URL' })}
+      ${siteHeader({ db, currentHandle, subtitle: branding.tagline })}
       ${anonHintFor(currentHandle)}
-      ${subsStripView({ subs: subsNav, currentHandle })}
-      <h3 class="section">// new post</h3>
-      ${postFormFor({ currentHandle, postableSubs })}
+      ${activeSubsBlock({ subs: subsNav, currentHandle })}
+      <details class="new-post-toggle">
+        <summary>+ new post</summary>
+        ${postFormFor({ currentHandle, postableSubs })}
+      </details>
       ${homeNav(filters)}
       ${feedView}
     `)
@@ -628,7 +671,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   `));
 }
 
-function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
+function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchParams) {
   const sub = getSubByName(db, subName);
   if (!sub) {
     return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
@@ -639,6 +682,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 600);
+  const linksMap = buildLinkBadges(posts, postsDir);
   const voteState = votesForPostList(db, posts, currentHandle);
   const returnTo = `/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}`;
   const modRole = canModerate(db, subName, currentHandle);
@@ -672,11 +716,13 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
       })}
       <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a></p>
       ${anonHintFor(currentHandle)}
-      <h3 class="section">// new post in //${subName}</h3>
-      ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
+      <details class="new-post-toggle">
+        <summary>+ new post</summary>
+        ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
+      </details>
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
-      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
+      ${postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
     `)
   );
 }
@@ -868,11 +914,9 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     res,
     200,
     layout(
-      'check your email',
+      `${branding.forumName} · check your email`,
       html`
-        <header>
-          <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${branding.forumName} · check your email</a></h1>
-        </header>
+        ${siteHeader({ db, currentHandle: auth.handleFromRequest(req), title: html`${branding.forumName} · check your email` })}
         <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
         <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
         <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
@@ -1066,23 +1110,27 @@ function commentNodeView(node, ctx, depth) {
         <img src="/avatar/${node.handle}.svg" width="16" height="16" alt="">
         <span class="name">${pseudonym}</span>
         <span class="when">· ${relativeTime(node.created_at)}</span>
+        ${node.edited_at != null ? html`<span class="muted">(edited)</span>` : html``}
+      </div>
+      <div class="post-actions">
+        ${ctx.currentHandle === node.handle && !removed && (Date.now() - node.created_at) <= COMMENT_EDIT_WINDOW_MS
+          ? html`<a class="action-link" href="/sub/${ctx.subName}/post/${ctx.postId}/comment/${node.id}/edit">edit</a>`
+          : html``}
+        ${ctx.currentHandle && !removed && !ctx.modRole
+          ? flagButton({
+              targetType: 'comment', targetId: node.id,
+              returnTo: `${ctx.returnTo}#comment-${node.id}`,
+              alreadyFlagged: ctx.flaggedComments?.has(node.id) ?? false,
+            })
+          : html``}
+        ${ctx.modRole ? modControls({
+          subName: ctx.subName, targetType: 'comment', targetId: node.id,
+          collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
+          authorHandle: node.handle, authorBanned: ctx.bannedAuthors?.has(node.handle) ?? false,
+        }) : html``}
       </div>
     </div>
     ${inner}
-    <div class="post-actions">
-      ${ctx.currentHandle && !removed && !ctx.modRole
-        ? flagButton({
-            targetType: 'comment', targetId: node.id,
-            returnTo: `${ctx.returnTo}#comment-${node.id}`,
-            alreadyFlagged: ctx.flaggedComments?.has(node.id) ?? false,
-          })
-        : html``}
-      ${ctx.modRole ? modControls({
-        subName: ctx.subName, targetType: 'comment', targetId: node.id,
-        collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
-        authorHandle: node.handle, authorBanned: ctx.bannedAuthors?.has(node.handle) ?? false,
-      }) : html``}
-    </div>
     ${replyForm}
     ${repliesView}
   </div>`;
@@ -1160,22 +1208,28 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
-          <h1>${post.title}</h1>
-          ${authorMeta(post, pseudonyms.get(post.handle))}
-          ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
-          <div class="post-actions">
-            ${currentHandle && post.removed_at == null && !modRole
-              ? flagButton({
-                  targetType: 'post', targetId: postId, returnTo,
-                  alreadyFlagged: flaggedPosts.has(postId),
-                })
-              : html``}
-            ${modRole ? modControls({
-              subName, targetType: 'post', targetId: postId,
-              collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
-              authorHandle: post.handle, authorBanned: bannedAuthors.has(post.handle),
-            }) : html``}
+          <div class="post-title-line">
+            <h1>${post.title}</h1>
+            <div class="post-actions">
+              ${currentHandle === post.handle && post.removed_at == null && (Date.now() - post.created_at) <= POST_EDIT_WINDOW_MS
+                ? html`<a class="action-link" href="/sub/${subName}/post/${postId}/edit">edit</a>`
+                : html``}
+              ${currentHandle && post.removed_at == null && !modRole
+                ? flagButton({
+                    targetType: 'post', targetId: postId, returnTo,
+                    alreadyFlagged: flaggedPosts.has(postId),
+                  })
+                : html``}
+              ${modRole ? modControls({
+                subName, targetType: 'post', targetId: postId,
+                collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
+                authorHandle: post.handle, authorBanned: bannedAuthors.has(post.handle),
+              }) : html``}
+            </div>
           </div>
+          ${authorMeta(post, pseudonyms.get(post.handle))}
+          ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
+          ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
         </div>
       </div>
 
@@ -1270,6 +1324,89 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
   // Land on the new comment so the user sees their submission in context
   // instead of the page jumping to the top.
   redirect(res, `/sub/${subName}/post/${postId}#comment-${result.commentId}`);
+}
+
+function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  const result = getPost(db, postId, postsDir);
+  if (!result || result.post.sub_name !== subName) {
+    return send(res, 404, layout('not found', html`<p class="muted">post not found.</p>`));
+  }
+  const { post, body } = result;
+  if (post.handle !== handle) return send(res, 403, layout('forbidden', html`<p class="muted">not your post.</p>`));
+  if (Date.now() - post.created_at > POST_EDIT_WINDOW_MS) {
+    return send(res, 403, layout('edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="${permalinkFor(post)}">back</a></p>`));
+  }
+  const permalink = permalinkFor(post);
+  send(res, 200, layout(`edit: ${post.title}`, html`
+    ${siteHeader({ db, currentHandle: handle })}
+    <p><a href="${permalink}">← back to post</a></p>
+    <h2 class="section">// edit post</h2>
+    <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
+      <label>body (markdown)</label>
+      <textarea name="body" required>${body}</textarea>
+      <div class="form-actions">
+        <button>save</button>
+        <a href="${permalink}">cancel</a>
+      </div>
+    </form>
+  `));
+}
+
+async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  const form = parseForm(await readBody(req));
+  const body = form.body ?? '';
+  try {
+    editPost(db, { postId, handle, body, postsDir });
+  } catch (err) {
+    const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
+    return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+  }
+  const post = db.prepare('SELECT sub_name, id FROM posts WHERE id = ?').get(postId);
+  redirect(res, permalinkFor(post));
+}
+
+function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentId) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId);
+  if (!comment || comment.post_id !== postId) {
+    return send(res, 404, layout('not found', html`<p class="muted">comment not found.</p>`));
+  }
+  if (comment.handle !== handle) return send(res, 403, layout('forbidden', html`<p class="muted">not your comment.</p>`));
+  if (Date.now() - comment.created_at > COMMENT_EDIT_WINDOW_MS) {
+    return send(res, 403, layout('edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="/sub/${subName}/post/${postId}#comment-${commentId}">back</a></p>`));
+  }
+  send(res, 200, layout('edit comment', html`
+    ${siteHeader({ db, currentHandle: handle })}
+    <p><a href="/sub/${subName}/post/${postId}#comment-${commentId}">← back</a></p>
+    <h2 class="section">// edit comment</h2>
+    <form method="POST" action="/sub/${subName}/post/${postId}/comment/${commentId}/edit" class="post-form">
+      <label>body (markdown)</label>
+      <textarea name="body" required>${comment.body}</textarea>
+      <div class="form-actions">
+        <button>save</button>
+        <a href="/sub/${subName}/post/${postId}#comment-${commentId}">cancel</a>
+      </div>
+    </form>
+  `));
+}
+
+async function handleCommentEdit(req, res, { db, auth }, subName, postId, commentId) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  const form = parseForm(await readBody(req));
+  const body = form.body ?? '';
+  try {
+    editComment(db, { commentId, handle, body });
+  } catch (err) {
+    const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
+    return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+  }
+  redirect(res, `/sub/${subName}/post/${postId}#comment-${commentId}`);
 }
 
 function wantsJson(req) {
@@ -2269,7 +2406,7 @@ function modlogFilterBar(filters, currentHandle) {
     <span class="filter-sep">·</span>
     ${typeBtn('flagged', 'flagged')} ${typeBtn('banned', 'banned')} ${typeBtn('removed', 'removed')} ${typeBtn('all', 'all')}
     <span class="filter-sep">·</span>
-    <a class="${meCls}" href="${meHref}">[me]</a>
+    <a class="${meCls}" href="${meHref}" title="filter to your own decisions">[me]</a>
   </p>`;
 }
 
@@ -2302,7 +2439,9 @@ const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
+const SUB_POST_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/edit$/;
 const SUB_POST_COMMENT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/comment$/;
+const SUB_POST_COMMENT_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/comment\/([0-9a-f]{16})\/edit$/;
 
 // Login + logout wrappers around knowless. Knowless's own /login renders
 // its built-in "thanks, link is on the way" page which doesn't match
@@ -2332,10 +2471,8 @@ async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
   send(
     res,
     200,
-    layout('check your email', html`
-      <header>
-        <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}plato · check your email</a></h1>
-      </header>
+    layout(`${branding.forumName} · check your email`, html`
+      ${siteHeader({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline })}
       <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
       <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
       <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
@@ -2372,16 +2509,18 @@ async function handleLogout(req, res, { auth }) {
 
 
 export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {} }) {
-  // Operator-replaceable branding: forum name (top + footer wordmark),
-  // top tagline (subtitle under the wordmark on the home page), and
-  // hostedBy (handle/name/owner — appended to the footer's
-  // "a <forumName> instance hosted by ..." line; line hidden if empty).
-  // The logo (3-blue-dot mark) and the project quote
-  // ("opinion is the medium between knowledge and ignorance.") are
-  // LOCKED across forks. See docs/01-product/build-plan.md §Locked.
+  // Operator-replaceable branding: forum name (top wordmark), top
+  // tagline (subtitle under the wordmark on the home page), and
+  // hostedBy (the @-handle shown in the footer's
+  // "a plato instance hosted by ..." line). When hostedBy is unset,
+  // the footer falls back to "@<forumName>". The logo (3-blue-dot
+  // mark), the literal "plato" attribution in the footer, and the
+  // project quote are LOCKED across forks.
+  // See docs/01-product/build-plan.md §Locked.
   branding.forumName = (brandingOverrides.forumName ?? 'plato').trim() || 'plato';
   branding.tagline   = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
   branding.hostedBy  = (brandingOverrides.hostedBy  ?? '').trim() || null;
+  branding.colors    = resolveBrandingColors(brandingOverrides.colors ?? {});
   // Resolve operator overrides against the floor at boot. Bad config
   // throws here, so the operator sees the error before serving any
   // request rather than at the moment a user happens to trip a check.
@@ -2419,6 +2558,18 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
 
       let m;
+      if ((m = path.match(SUB_POST_COMMENT_EDIT_PATH_RE)) && method === 'GET') {
+        return renderCommentEditPage(req, res, { db, auth }, m[1], m[2], m[3]);
+      }
+      if ((m = path.match(SUB_POST_COMMENT_EDIT_PATH_RE)) && method === 'POST') {
+        return handleCommentEdit(req, res, { db, auth }, m[1], m[2], m[3]);
+      }
+      if ((m = path.match(SUB_POST_EDIT_PATH_RE)) && method === 'GET') {
+        return renderPostEditPage(req, res, { db, auth, postsDir }, m[1], m[2]);
+      }
+      if ((m = path.match(SUB_POST_EDIT_PATH_RE)) && method === 'POST') {
+        return handlePostEdit(req, res, { db, auth, postsDir }, m[1], m[2]);
+      }
       if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
         return handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, m[1], m[2]);
       }
@@ -2438,7 +2589,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));
       }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
-        return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'));
+        return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'), url.searchParams);
       }
       if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
         return handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, m[1]);

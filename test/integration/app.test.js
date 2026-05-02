@@ -500,19 +500,19 @@ test('M2: /draft to unknown sub returns 400', async (t) => {
   assert.match(await res.text(), /doesn't exist/);
 });
 
-test('home subs strip: shows top 3 inline, rest behind <details>', async (t) => {
+test('home active-subs block: shows top 4 subs by 24h post count', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
 
-  // Five real subs, ranked by 24h post count.
+  // Five real subs; top 4 by activity should appear, fifth should not.
   for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon']) {
     db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run(name, Date.now());
   }
   const handle = 'h'.repeat(64);
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, 'strip-test', Date.now() - 10000);
-  // Give 'alpha', 'beta', 'gamma' recent posts so they rank top by count.
+  // alpha(5), beta(3), gamma(1) get recent posts; delta and epsilon get none (alphabetical tiebreak).
   for (const [name, n] of [['alpha', 5], ['beta', 3], ['gamma', 1]]) {
     for (let i = 0; i < n; i++) {
       db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
@@ -524,22 +524,19 @@ test('home subs strip: shows top 3 inline, rest behind <details>', async (t) => 
   const res = await fetch(baseUrl + '/');
   const body = await res.text();
 
-  // Strip wrapper present, top 3 sub links rendered.
-  assert.match(body, /class="subs-strip"/);
+  // Active-subs block present, top 4 subs rendered.
+  assert.match(body, /class="active-subs"/);
   assert.match(body, /\/sub\/alpha/);
   assert.match(body, /\/sub\/beta/);
   assert.match(body, /\/sub\/gamma/);
+  assert.match(body, /\/sub\/delta/);   // 4th by tiebreak (alpha sort after gamma)
+  assert.doesNotMatch(body, /\/sub\/epsilon/); // 5th — not shown
 
-  // The two non-top subs go inside the <details> with summary "+ show all (2)".
-  assert.match(body, /\+ show all \(2\)/);
-  assert.match(body, /\/sub\/delta/);
-  assert.match(body, /\/sub\/epsilon/);
-
-  // Order check: alpha (top) appears before delta (in show-all).
+  // Order: alpha (most active) appears before delta (zero activity).
   assert.ok(body.indexOf('/sub/alpha') < body.indexOf('/sub/delta'));
 });
 
-test('home subs strip: hides "+ show all" when ≤ 3 subs', async (t) => {
+test('home active-subs block: renders with fewer than 4 subs', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
@@ -549,8 +546,9 @@ test('home subs strip: hides "+ show all" when ≤ 3 subs', async (t) => {
 
   const res = await fetch(baseUrl + '/');
   const body = await res.text();
-  assert.match(body, /class="subs-strip"/);
-  assert.doesNotMatch(body, /\+ show all/);
+  assert.match(body, /class="active-subs"/);
+  assert.match(body, /\/sub\/alpha/);
+  assert.match(body, /\/sub\/beta/);
 });
 
 test('M3: legacy /post/<id> 301 redirects to /sub/<name>/post/<id>', async (t) => {

@@ -34,7 +34,11 @@
       const data = await res.json();
 
       const scoreEl = voteEl.querySelector('.score');
-      if (scoreEl) scoreEl.textContent = formatScore(data.score);
+      if (scoreEl) {
+        scoreEl.textContent = formatScore(data.score);
+        scoreEl.classList.remove('score-pos', 'score-neg', 'score-zero');
+        scoreEl.classList.add(data.score > 0 ? 'score-pos' : data.score < 0 ? 'score-neg' : 'score-zero');
+      }
 
       voteEl.querySelectorAll('button.arrow').forEach((btn) => {
         btn.classList.remove('active');

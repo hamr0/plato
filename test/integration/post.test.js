@@ -293,3 +293,66 @@ test('parseFrontmatter: body that itself starts with --- is not mis-parsed', (t)
   const got = getPost(db, postId, postsDir);
   assert.equal(got.body.trim(), body);
 });
+
+// --- editPost ---
+
+import { editPost, EDIT_WINDOW_MS } from '../../src/content/post.js';
+
+function postFixture(t) {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const { draftId } = submitDraft(db, { title: 'original title', body: 'original body', subName: 'lobby' });
+  const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
+  return { db, postsDir, postId };
+}
+
+test('editPost: author within window can update body', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  editPost(db, { postId, handle: HANDLE, body: 'new body', postsDir });
+  const { body } = getPost(db, postId, postsDir);
+  assert.equal(body.trim(), 'new body');
+  const row = db.prepare('SELECT edited_at FROM posts WHERE id = ?').get(postId);
+  assert.ok(row.edited_at != null, 'edited_at set after edit');
+});
+
+test('editPost: edited_at is null before any edit', (t) => {
+  const { db, postId } = postFixture(t);
+  const row = db.prepare('SELECT edited_at FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.edited_at, null);
+});
+
+test('editPost: non-author throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const OTHER = 'b'.repeat(64);
+  assert.throws(
+    () => editPost(db, { postId, handle: OTHER, body: 'x', postsDir }),
+    /not the author/,
+  );
+});
+
+test('editPost: expired window throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const future = Date.now() + EDIT_WINDOW_MS + 1000;
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, body: 'x', postsDir, now: future }),
+    /edit window has closed/,
+  );
+});
+
+test('editPost: blank body throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, body: '   ', postsDir }),
+    /body is required/,
+  );
+});
+
+test('editPost: body over BODY_MAX throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, body: 'x'.repeat(40001), postsDir }),
+    /body exceeds/,
+  );
+});
