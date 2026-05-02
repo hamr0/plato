@@ -24,7 +24,7 @@ import {
   setSubFlairs,
   setSubSensitive,
   setSubFlagThreshold,
-  getSubFlairs,
+  setSubDescription,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
 import { parseFlairs } from '../content/flair.js';
@@ -296,7 +296,6 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
   </header>`;
 }
 
-// MAX_FLAIR_ROWS — operator can bump per-instance, no PRD floor.
 const FLAIR_EDITOR_ROWS = 6;
 function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
   const rows = [];
@@ -975,10 +974,23 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
   const flagThreshold = Number.parseInt(form.flagThreshold ?? '3', 10);
   const tryAgain = html`<p><a href="/sub/${subName}/edit">← try again</a></p>`;
   try {
+    parseFlairs(flairs);
+    if (flairsRequired && flairs.length === 0) {
+      throw new Error('flairs_required cannot be set when no flairs are defined');
+    }
+    if (!Number.isInteger(flagThreshold) || flagThreshold < FLAG_THRESHOLD_FLOOR) {
+      throw new Error(`flag threshold must be an integer ≥ ${FLAG_THRESHOLD_FLOOR}`);
+    }
+  } catch (err) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'edit failed', message: err.message, links: tryAgain,
+    }));
+  }
+  try {
     setSubFlairs(db, subName, { flairs, flairsRequired });
     setSubSensitive(db, subName, sensitive);
     setSubFlagThreshold(db, subName, flagThreshold);
-    db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(description, subName);
+    setSubDescription(db, subName, description);
   } catch (err) {
     return send(res, 400, errorPage(req, { db, auth }, {
       title: 'edit failed', message: err.message, links: tryAgain,

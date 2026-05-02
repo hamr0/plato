@@ -119,6 +119,12 @@ export function setSubFlagThreshold(db, name, threshold) {
   db.prepare('UPDATE subs SET flag_threshold = ? WHERE name = ?').run(threshold, name);
 }
 
+export function setSubDescription(db, name, description) {
+  const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
+  if (!sub) throw new Error(`sub "${name}" not found`);
+  db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(description, name);
+}
+
 export function setSubSensitive(db, name, sensitive) {
   const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
   if (!sub) throw new Error(`sub "${name}" not found`);
