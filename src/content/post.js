@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { renderMarkdown } from './markdown.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
@@ -32,12 +32,26 @@ function frontmatterFor({ title, handle, subName, createdAt, body }) {
   ].join('\n');
 }
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
-
+// Strip ONLY the leading sentinel block we wrote in frontmatterFor: the
+// file must start with `---\n`, contain key: value lines (no blank line),
+// then a closing `---\n`. A user body containing its own `---\n…\n---\n`
+// must not be re-stripped; a user body that begins with `---` is also
+// safe because the lines that follow won't match `key: value`.
+const FRONTMATTER_LINE_RE = /^[a-z_]+:\s/;
 function parseFrontmatter(raw) {
-  const match = raw.match(FRONTMATTER_RE);
-  return match ? match[2] : raw;
+  if (!raw.startsWith('---\n')) return raw;
+  const rest = raw.slice(4);
+  const close = rest.indexOf('\n---\n');
+  if (close === -1) return raw;
+  const inner = rest.slice(0, close);
+  for (const line of inner.split('\n')) {
+    if (line === '' || !FRONTMATTER_LINE_RE.test(line)) return raw;
+  }
+  return rest.slice(close + 5);
 }
+
+export const TITLE_MAX = 300;
+export const BODY_MAX = 40000;
 
 export function submitDraft(db, { title, body, subName = 'general' }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
@@ -45,6 +59,12 @@ export function submitDraft(db, { title, body, subName = 'general' }) {
   }
   if (typeof body !== 'string' || body.trim().length === 0) {
     throw new Error('submitDraft: body is required');
+  }
+  if (title.length > TITLE_MAX) {
+    throw new Error(`submitDraft: title exceeds ${TITLE_MAX} characters`);
+  }
+  if (body.length > BODY_MAX) {
+    throw new Error(`submitDraft: body exceeds ${BODY_MAX} characters`);
   }
 
   const draftId = newId();
@@ -82,9 +102,14 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   const absPath = resolve(postsDir, filename);
   const createdAt = Date.now();
 
+  // Write to a temp file first, then commit DB, then rename. If the DB
+  // INSERT fails, we unlink the temp without ever exposing it under its
+  // permanent name. If the rename succeeds and a later step throws, the
+  // file is the canonical record and DB rollback restores consistency.
   mkdirSync(postsDir, { recursive: true });
+  const tmpPath = `${absPath}.tmp-${randomBytes(4).toString('hex')}`;
   writeFileSync(
-    absPath,
+    tmpPath,
     frontmatterFor({
       title: draft.title,
       handle,
@@ -101,9 +126,11 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(postId, draft.sub_name, handle, draft.title, filePath, createdAt);
     db.prepare('UPDATE drafts SET finalized_post_id = ? WHERE id = ?').run(postId, draftId);
+    renameSync(tmpPath, absPath);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
+    try { unlinkSync(tmpPath); } catch { /* temp may not exist */ }
     throw err;
   }
 
