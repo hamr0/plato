@@ -35,7 +35,9 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Change new-account window or weight | `NEW_ACCOUNT_WINDOW_MS` / weight literal in `src/content/vote.js` |
 | Change young-post window for new-account voting | `YOUNG_POST_WINDOW_MS` in `src/content/vote.js` |
 | Change auto-uncollapse threshold for a sub | per-sub via `/sub/create` form (post ≥ 50, comment ≥ 20) |
-| Change auto-hide flag threshold | `AUTO_HIDE_THRESHOLD` in `src/content/flag.js` (per-sub override pending) |
+| Change auto-hide flag threshold | per-sub via `/sub/create` form or owner-only `/sub/<name>/edit` (floor 3, raise-only). Floor and global default in `FLAG_THRESHOLD_FLOOR` / `AUTO_HIDE_THRESHOLD` in `src/content/flag.js`. |
+| Add flairs / mark sensitive | per-sub via `/sub/create` form or owner-only `/sub/<name>/edit` |
+| Override vote arrow colors | `branding.colors.{up,down}` in `config.json` |
 | Tighten rate limits / link cap | `config.json` at project root — see Operator Config below |
 | Append spam regex patterns | `spam-patterns.txt` at project root, one regex per line |
 | Refresh URLhaus blocklist | wire `bin/refresh-urlhaus.js` to system cron, hourly |
@@ -141,8 +143,8 @@ These are deliberate product decisions. The PRD treats them as load-bearing; cha
 - **One owner per sub + co-mods.** Co-mods can `collapse/uncollapse/remove/unremove/ban/unban`. Owner-only: `promote_mod / demote_mod / transfer_owner`.
 - **Two-tier moderation.** Soft removal (`collapse`, reversible, reason optional, `[+] [collapsed by mod]` chip-as-fold) vs hard removal (`remove`, reason required, `[−] [removed by mod]` static stub). Hard removals never auto-revert via votes; soft removals do, at the per-sub threshold.
 - **Public mod log per sub.** Every action logged with mod handle, action, target, optional reason. System-driven actions (`auto_uncollapse_community`) write `mod_handle = NULL` and render as "community overruled".
-- **No NSFW age verification.** Operator concern. M5 adds a per-sub NSFW flag (banner + advisory), nothing more.
-- **No tags / hashtags.** M5 ships per-sub flairs (closed list, owner-curated) instead.
+- **No NSFW labeling, no age verification.** Plato uses a generic `sensitive` per-sub flag (M5/B11) — banner + advisory mark in the home strip, no age-gating. NSFW as a label is excluded specifically because the default rules ban porn, so labeling something NSFW would invite the very content the rules forbid. Age verification is an operator-layer concern (reverse proxy / content gateway), not a forum feature.
+- **No tags / hashtags.** Per-sub flairs (M5/B10) are the structured-categorization escape valve: closed list, owner-curated, max 12 per sub, slug + label + raw CSS color, optional unless `flairs_required`.
 - **No private subs.** PRD §Permanently out — different product.
 - **`general` is archive-only.** Legacy backfill bucket from migration 002. New posts must land in a real sub.
 - **No image embeds, no video, no rich media.** Text-first by design.
@@ -156,7 +158,7 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | Table | Purpose |
 |---|---|
 | `handles` | HMAC-derived id + pseudonym + first_seen_at |
-| `subs` | name PK, owner_handle FK, default_sort, NSFW flag (M5), auto_uncollapse_post, auto_uncollapse_comment |
+| `subs` | name PK, owner_handle FK, default_sort, auto_uncollapse_post, auto_uncollapse_comment, flairs JSON, flairs_required, sensitive, flag_threshold |
 | `sub_mods` | (sub_name, handle) composite PK + role enum |
 | `posts` | id PK, sub_name FK, handle FK, title, file_path, score, collapsed_at, removed_at, score_at_collapse |
 | `comments` | id PK, post_id FK, parent_comment_id self-ref FK (nullable), score, soft-state columns |
@@ -215,7 +217,22 @@ Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wher
 }
 ```
 
-Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds today, NSFW banner + flag-threshold override later).
+Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds, flairs, sensitive flag) and one moderation lever (`flag_threshold`, floor 3 — operators can raise but not lower).
+
+The `branding.colors` section of `config.json` overrides vote-arrow CSS variables at boot:
+
+```jsonc
+{
+  "branding": {
+    "forumName": "terribic",
+    "tagline":   "terrific or terrible",
+    "hostedBy":  "@tedvdb",
+    "colors": { "up": "#7fd962", "down": "#73d0ff" }
+  }
+}
+```
+
+`up` overrides `--up` (positive score + voted-up arrow); `down` overrides `--down` (negative score number + voted-down arrow). Any CSS color string works (hex, `rgb()`, named); the same injection guard as flair colors rejects `;{}<>"'`.
 
 `spam-patterns.txt` is the operator's per-instance regex set, one line per pattern, `#` comments, blank-line tolerant. Bad regex skips with a stderr warning. Restart picks up edits.
 
@@ -223,16 +240,20 @@ Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopho
 
 System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` row attributed to `SYSTEM_HANDLE` (pseudonym `system`) in addition to the system flag. They surface in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog`, with the pattern source or blocked host carried in the `reason` column. Filter with `?mod=system` to isolate auto-actions.
 
-### Per-sub settings (set via `/sub/create` form)
+### Per-sub settings (set via `/sub/create` form; flairs / sensitive / flag-threshold also editable via owner-only `/sub/<name>/edit`)
 
 | Field | Floor | Default | Purpose |
 |---|---|---|---|
-| `name` | 3–30 chars, locked | — | Lowercase alphanumeric + hyphen, no leading/trailing hyphen. |
-| `description` | optional | `''` | One-line tagline shown in the home strip. |
-| `autoUncollapsePost` | **50** | 50 | Net upvotes since collapse to auto-uncollapse a soft-removed post. |
-| `autoUncollapseComment` | **20** | 20 | Same, for comments. |
+| `name` | 3–30 chars, locked at creation | — | Lowercase alphanumeric + hyphen, no leading/trailing hyphen. |
+| `description` | optional | `''` | One-line tagline shown in the home strip. Editable. |
+| `autoUncollapsePost` | **50** | 50 | Net upvotes since collapse to auto-uncollapse a soft-removed post. Locked at creation. |
+| `autoUncollapseComment` | **20** | 20 | Same, for comments. Locked at creation. |
+| `flagThreshold` | **3** | 3 | Distinct flaggers required to auto-hide a target. Raise to make niche subs more permissive; cannot lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
+| `flairs` | max 12 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9-]{1,20}`, label ≤ 24 chars, color is any CSS string. Owner-curated. |
+| `flairsRequired` | requires ≥ 1 flair | `false` | When set, every new post in the sub must carry a flair. |
+| `sensitive` | — | `false` | Generic content-advisory flag. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
 
-Operator can raise either threshold but never below the floor — defends against a small brigade overturning a soft-removal.
+Auto-uncollapse thresholds: the operator can raise either but never below the floor — defends against a small brigade overturning a soft-removal.
 
 ### Per-handle rules (locked)
 

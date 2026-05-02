@@ -6,6 +6,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M5/B9 Branding + UI polish (in progress)
+
+- **Vote widget** — single rule: arrows default grey, hover brightens to text; voted-up arrow holds green (`--up`), voted-down arrow holds blue (`--down`). Score number is the primary signal: green if positive, blue if negative, grey at zero. JS handler updates the score class live so a vote that flips the sign re-colors the number without a page reload.
+- **Operator-replaceable vote colors** — `branding.colors.up` and `branding.colors.down` in `config.json`; injected into `:root` at boot via a `<style>` block. Boot-time validation rejects CSS-injection characters (`;{}<>"'`) and non-strings; bad config throws before serving any request. 8 unit tests.
+- **Outbound-link badges simplified** — `BRAND_ICONS` SVG palette removed; every detected host now renders as a plain `.lh` text badge. Smaller surface, no per-domain styling, easier to fork.
+- **Action button unification** — `edit` link converted from plain text to a pill matching `flag` and `collapse/remove/ban` (border, padding, radius). All action buttons now sit in `.post-actions` at the top-right of the row: feed (next to `<h2>`), post detail page (next to `<h1>`), and comments (next to the comment header). Comment header gains `flex: 1` on `.meta` so actions push right.
+- **Sub page consistency** — `+ new post` button uses the same `<details class="new-post-toggle">` collapsed pattern as the home page (was an expanded form with `<h3>` heading).
+- **Cache busting** — `style.css?v=6`, `vote.js?v=2` so browsers pick up the new chrome on next load.
+
+### Added — M5/B10 Flairs (per-sub)
+
+- **Migration 009** — `subs.flairs` JSON column (default `'[]'`), `subs.flairs_required INTEGER NOT NULL DEFAULT 0`, nullable `posts.flair_slug` and `drafts.flair_slug`.
+- **Content module `src/content/flair.js`** — `parseFlairs(json)`, `serializeFlairs`, `validateFlair`, `findFlair`. Floors: max 12 flairs per sub, slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?`, label ≤ 24 chars, color is any CSS string with the same injection guard as `branding.colors`.
+- **`sub.js`** — `createSub` accepts `flairs` and `flairsRequired`; new `setSubFlairs(db, name, { flairs, flairsRequired })` and `getSubFlairs(db, name)`. `flairs_required` cannot be set when no flairs are defined.
+- **`post.js`** — `submitDraft` and `finalizeDraft` thread `flairSlug`. `finalizeDraft` validates the slug against the sub's current list at finalize time (a flair removed between draft and finalize rejects the post). `listPostsInSub` accepts an optional `flairSlug` filter.
+- **Routes** — `/sub/create` form has a 6-row flair editor (slug / label / color) plus a "require a flair" checkbox; new owner-only `GET/POST /sub/<name>/edit` for editing flairs (and description) after creation; `/sub/<name>?flair=<slug>` filters the feed; sub-pinned post form shows a flair `<select>` (required attribute set when `flairs_required`).
+- **Display** — `flair-pill` rendered in `authorMeta` next to the sub link (clickable to filter); flair filter strip at top of sub page (`all` + each flair as a colored pill); owner sees an `edit sub` link in the sub-page nav.
+- **24 new tests** — `flair.test.js` (16): valid/invalid hex/rgb/named, empty→null, label/slug/color floors, duplicate slugs, CSS-injection in color, `findFlair`, `validateFlair` index in error. `flair.test.js` integration (8): persists flairs as JSON, `flairsRequired` requires flairs, invalid flair rejects whole sub creation, `setSubFlairs` replaces list, unknown sub throws, `finalizeDraft` rejects unknown/missing flair, writes `flair_slug` onto post, `listPostsInSub` filters.
+
+### Added — M5/B11 Sensitive content per-sub flag
+
+- **Migration 010** — `subs.sensitive INTEGER NOT NULL DEFAULT 0`. Generic content advisory; intentionally NOT labeled "NSFW" (porn is banned by default rules — labeling something NSFW in a porn-banned forum invites the very content the rules forbid).
+- **`sub.js`** — `createSub` accepts `sensitive`; new `setSubSensitive(db, name, bool)`; `listActiveSubs` and `listAllSubs` return the flag.
+- **UI** — checkbox in `/sub/create` and `/sub/<name>/edit`. Sub page renders an amber `[!] sensitive content — use discretion` banner under the nav row. Home active-subs strip and `/subs` directory show a small amber `[!]` mark next to the sub name. No age verification (PRD §Permanently out).
+- **6 new tests** — defaults to 0, persists 1, toggles, unknown sub throws, list functions return the flag.
+
+### Added — M5/B12 Per-sub flag-threshold override
+
+- **Migration 011** — `subs.flag_threshold INTEGER NOT NULL DEFAULT 3`.
+- **`flag.js`** — new `FLAG_THRESHOLD_FLOOR = 3` (raising allowed, lowering forbidden — a single flagger collapsing a target would defeat the "distinct flaggers" defense). New `resolveFlagThreshold(db, targetType, targetId)` resolves the effective threshold per-target (comments inherit their post's sub setting). `submitFlag` now uses the resolved value instead of the global constant.
+- **`sub.js`** — `createSub` accepts `flagThreshold` (validates ≥ floor); new `setSubFlagThreshold(db, name, threshold)`.
+- **UI** — number input (`min=3, step=1`) on `/sub/create` and `/sub/<name>/edit`.
+- **11 new tests** — floor enforcement on create + setter, raising allowed, comment threshold inherits from post's sub, per-sub auto-hide fires at the right count, default still fires at 3.
+
+### Added — M5/B13 My mod decisions panel
+
+Folded into the existing `/modlog` audit surface rather than a separate page. The `[me]` filter button is renamed **my decisions** for discoverability.
+
+- **Inline `revoke` buttons** in the audit table, only on rows where the current handle is the actor AND the action's effect is still in place.
+- **`buildRevokeMap(db, actions, currentHandle)`** — batches lookups for posts (`collapsed_at`/`removed_at`), comments (same), and bans (`bans` table existence). Returns `Map<actionId, inverseAction>`.
+- **`REVOKE_MAP`** — `collapse → uncollapse`, `remove → unremove`, `ban → unban`. Sub-keys-of-the-kingdom actions (`promote_mod`, `demote_mod`, `transfer_owner`) intentionally NOT one-click revocable — those changes route through the explicit mod-management surface so they require deliberate action.
+- **POST flow** — buttons POST to the existing `/sub/<sub>/mod` endpoint with the inverse action; `return_to` carries the audit URL so the page comes back to where it was.
+- **7 new tests** — own-active collapse offers uncollapse, no offer when target already uncollapsed, no offer for someone else's action, comment remove offers unremove, ban → unban while still banned then drops, empty when not logged in, `promote_mod` is not one-click revocable.
+
+### Changed — M5 doc updates
+
+- **`build-plan.md`** — B10/B11/B12/B13 marked SHIPPED with implementation details. NSFW per-sub flag renamed to "Sensitive content per-sub flag" with rationale (porn banned → NSFW label invites what the rules forbid). Obsolete favicon-cache section removed (M5/B9 rolled back the brand-icon palette in favor of plain hostname text).
+- **PRD §Permanently out** — added "NSFW labeling" entry: `sensitive` is the generic primitive; the NSFW label is excluded specifically because it invites porn that the default rules ban. Forks that want porn can rename/repurpose.
+
+### Tests
+- 340 → 408 (68 new): branding colors (8), flair unit (16), flair integration (8), sensitive (6), per-sub flag threshold (11), mod-revoke (7), plus existing pass-through.
+
 ### Added — M1 Foundation
 - Project scaffolding: layered repo structure, idempotent SQL migrations runner, vanilla `node:http` server.
 - HTML rendering: tagged-template `html\`\`` helper with safe-by-default escaping and `raw()` opt-out for trusted output (rendered markdown, inline SVG).

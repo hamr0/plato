@@ -53,8 +53,8 @@ These aren't "later" — they're decided.
 - **No real names, no profile pictures, no bios.** Pseudonym + identicon, full stop.
 - **No image or video uploads.** Text only. Markdown-image syntax becomes a plain link.
 - **No private subs.** PRD §Permanently out. Different product, different security story, different attack surface.
-- **No tags or hashtags.** Closed-list per-sub flairs (M5) instead. Tags drift into spam vectors and taxonomy chaos; flairs stay clean because the sub owner curates.
-- **No NSFW age verification.** Operator-layer concern. M5 adds a per-sub NSFW banner; that's the extent.
+- **No tags or hashtags.** Closed-list per-sub flairs (M5/B10) instead — slug + label + raw CSS color, max 12 per sub, owner-curated, optional unless `flairsRequired`. Tags drift into spam vectors and taxonomy chaos; flairs stay clean because the sub owner curates.
+- **No NSFW labeling, no age verification.** Plato uses a generic `sensitive` per-sub flag (M5/B11) — banner advisory, no age-gating. NSFW is excluded as a label specifically because the default rules ban porn, so the NSFW label would invite the very content the rules forbid. Age verification is an operator-layer concern (reverse proxy or content gateway in front of the forum), not a forum feature.
 - **No algorithmic feed.** Hot + new + top + old. Simple, predictable, auditable.
 - **No deletion of comments by their author.** Mods remove via the mod log. The log is the social pressure that keeps mods honest, and authors deleting their own words breaks the audit trail.
 - **No federation, no ActivityPub.** One site, one URL, one operator. Forking is the answer to "what if the operator goes bad."
@@ -74,14 +74,15 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
-**Branding (operator-replaceable, `config.json`).** Three knobs:
+**Branding (operator-replaceable, `config.json`).** Five knobs:
 
 ```json
 {
   "branding": {
     "forumName": "plato",
     "tagline": "a forum that lives at one URL",
-    "hostedBy": "@tedvdb"
+    "hostedBy": "@tedvdb",
+    "colors": { "up": "#3fb950", "down": "#58a6ff" }
   }
 }
 ```
@@ -89,6 +90,10 @@ These are the operator surfaces. The project assumes you'll touch them.
 - `forumName` shows in the top wordmark, footer wordmark, page title, and the "check your email" header.
 - `tagline` shows as the subtitle on the home page.
 - `hostedBy` (optional) renders as a footer line: `a <forumName> instance hosted by <hostedBy>`. Hidden when empty.
+- `colors.up` (optional) overrides `--up` — positive score color and the voted-up arrow's "you voted here" memory shade.
+- `colors.down` (optional) overrides `--down` — negative score color and the voted-down arrow's "you voted here" memory shade.
+
+Color values accept any CSS color string (hex `#fff`, rgb `rgb(127, 217, 98)`, named `tomato`). Boot-time validation rejects any string containing `;{}<>"'` to block CSS-injection. Bad config throws at boot, not on first user request.
 
 **Locked across all forks.** The 3-blue-dot logo and the footer quote `— "opinion is the medium between knowledge and ignorance."` travel with the project. Forks rename the forum, never the mark or the quote.
 
@@ -107,22 +112,23 @@ These have one default that's right for almost every instance. The project doesn
 | `COLLAPSE_THRESHOLD` | -3 | `src/web/app.js` | Score below which a comment auto-folds (community-driven). |
 | `MAX_DEPTH` | 4 | `src/web/app.js` | Comment indent depth before deeper replies fold into "+ N more". |
 | `COMMENT_PREVIEW_CHARS` | 280 | `src/web/app.js` | Long-comment fold threshold (Twitter's old cap, deliberately the same for muscle memory). |
-| `AUTO_HIDE_THRESHOLD` | 3 | `src/content/flag.js` | Distinct flaggers needed to auto-collapse for mod review. M5 makes this per-sub. |
+| `AUTO_HIDE_THRESHOLD` | 3 | `src/content/flag.js` | Default for new subs; per-sub override via `flagThreshold` field. The constant is also the floor — operators can raise per-sub but never lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
 | `NEW_ACCOUNT_WINDOW_MS` | 7 days | `src/content/vote.js` | How long a fresh account counts as "new". |
 | `YOUNG_POST_WINDOW_MS` | 24h | `src/content/vote.js` | New accounts can only vote on posts within this window. |
 
 If you change these, document *why* in your fork's CHANGELOG so future-you remembers.
 
-### Tier 3: Per-sub setting, no restart, set when the sub is created
+### Tier 3: Per-sub setting, no restart
 
-The only per-sub knobs:
+Set at `/sub/create` (all knobs) or via owner-only `/sub/<name>/edit` (everything except auto-uncollapse thresholds and the sub name, which are locked at creation):
 
-- **Auto-uncollapse threshold for posts.** Floor 50, default 50. The number of net upvotes since a soft-removal that auto-lifts the collapse. Higher = harder for the community to overrule a mod.
-- **Auto-uncollapse threshold for comments.** Floor 20, default 20. Same idea, lower bar because comments accumulate fewer votes.
+- **Auto-uncollapse threshold for posts.** Floor 50, default 50. Net upvotes since a soft-removal that auto-lifts the collapse. Higher = harder for the community to overrule a mod. Locked at creation.
+- **Auto-uncollapse threshold for comments.** Floor 20, default 20. Same, lower bar because comments accumulate fewer votes. Locked at creation.
+- **Flag auto-hide threshold (`flagThreshold`).** Floor 3, default 3. Distinct flaggers required before a target auto-hides for mod review. Operators can raise (more permissive — useful for niche subs where a small audience would otherwise auto-hide normal content) but never lower. Editable.
+- **Flairs.** Closed list, max 12 per sub, slug + label + raw CSS color. Owner-curated. Optional unless `flairsRequired = true`. Each flair renders as a colored pill in the post-meta line; users filter with `?flair=<slug>`. Editable. Removing a flair from the list does not invalidate posts that already use it (the post just renders without a pill until the flair is re-added).
+- **Sensitive content flag.** Generic content advisory. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Editable.
 
-Both shown on `/sub/create` as number inputs. The floors are enforced — you can raise them but not lower them.
-
-Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file.
+Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file. The per-sub `flagThreshold` is the one exception — it's a moderation lever (when does mod review trigger), not a spam-defense permissiveness control, and the floor prevents abuse.
 
 ### Tier 4: Operator config (`config.json`), boot-validated, tighten-only
 

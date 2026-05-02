@@ -625,7 +625,8 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Engagement metrics surfaced to users (no view counts, no time-on-page).
 - **Hashtags / user-created tags.** Tagging is voluntary, inconsistent, and creates a parallel taxonomy that competes with subs. The "subs are universes" model breaks if `#laptop` exists in five subs. Search (M8 FTS5) covers the discovery need that hashtags would have served. Sub owners get **per-sub flairs** (curated, closed list — see M5 in build-plan.md) as the structured-categorization escape valve. Flairs are removable; tags would not be.
 - **Private subs (membership-gated read access).** Inverts every load-bearing forum claim: lives at one URL (no longer browseable), public mod log (invisible to non-members), fork-the-archive (members-only export). Also a moderation blind spot — abuse compounds in private spaces because random readers can't report. The WhatsApp-/mailing-list-replacement opportunity is real but is a separate product (different UX shape: real-time vs canonical, room vs sub) and would need its own PRD. Not a flag on existing subs.
-- **Age verification / ID checks for NSFW.** Operator-layer concern, not forum feature. Forum exposes per-sub NSFW flags (M5); if a jurisdiction requires age gates, the operator runs them in a reverse proxy or content gateway in front of the forum. Forum never sees IDs.
+- **Age verification / ID checks.** Operator-layer concern, not forum feature. Forum exposes a per-sub `sensitive` flag (M5/B11) as a generic content advisory; if a jurisdiction requires age gates, the operator runs them in a reverse proxy or content gateway in front of the forum. Forum never sees IDs.
+- **NSFW labeling.** Plato uses a generic `sensitive` flag (M5/B11), not "NSFW." Reason: plato's default community rules ban porn, so labeling something "NSFW" in a porn-banned forum invites the very content the rules forbid. `sensitive` is the operator/community-defined catch-all (graphic violence, abuse discussions, intense political topics, suicide/eating-disorder threads, etc.). A fork that wants to allow porn can rename/repurpose the flag — that's a fork concern, not plato's.
 
 ## Needs further discussion (parked, not decided)
 
@@ -645,7 +646,7 @@ The first public deployment is a **demonstration of the architecture**, not a pe
 
 - **Two-name framing.** The software is *plato*. The site is whatever URL it happens to live at this week. Tagline copy and footer line reinforce the split: *"plato — running at terribic.com today, your fork tomorrow."* The impermanence of the domain is the message, not an accident.
 - **Two instances on day one, even if the second one is empty.** Hosting at exactly one URL collapses the message back to "this is a forum at this URL," which is what every other platform also says. A second running instance — even with three posts and no users — is the structural proof that the domain is chrome and the software is the product. Set up before announcing the first.
-- **M5 closes before public trial.** Per-sub flag-threshold override, rate limits, link-cap with URLhaus, regex spam patterns, mod flag-queue UI, per-sub flairs, NSFW banner. Without these, day-one public traffic surfaces problems the UI can't yet handle. M4 made plato safe for an invited beta; M5 makes it safe for an unannounced URL on the open web.
+- **M5 closes before public trial.** Per-sub flag-threshold override, rate limits, link-cap with URLhaus, regex spam patterns, mod flag-queue UI, per-sub flairs, sensitive-content banner, my-mod-decisions panel. Without these, day-one public traffic surfaces problems the UI can't yet handle. M4 made plato safe for an invited beta; M5 makes it safe for an unannounced URL on the open web.
 
 ---
 

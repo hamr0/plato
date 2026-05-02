@@ -242,16 +242,16 @@ This document details **M1-M4** (the scaffolding + core forum). M5-M8 get refine
 
 ### M5 polish carryover from M4
 
-- **My mod decisions panel.** A mod-only page listing the mod's own past actions with inline `revoke` buttons. Surfaces a mod's pattern of decisions to themselves (the "self-watching" dynamic — knowing your record is visible to you discourages capricious moderation). The public modlog already covers external auditability; this panel is the *self-review* affordance. Pairs naturally with the M5 flag-queue work since both are mod-facing surfaces.
-- **Per-sub flag-threshold override.** PRD §Spam 7 says "configurable per-sub, default 3 unique flaggers." Currently hardcoded; M5 adds the per-sub config with the broader sub settings work.
+- **My mod decisions panel — SHIPPED M5/B13.** Folded into the existing `/modlog` audit surface. The "[me]" filter button (now labeled "my decisions") scopes to the current mod's actions. Inline `revoke` buttons render in the audit table for the current mod's own actions whose effect is still in place: `collapse → uncollapse`, `remove → unremove`, `ban → unban`. Buttons POST to the existing `/sub/<sub>/mod` endpoint with the inverse action and return the user to the same audit view. Sub-keys-of-the-kingdom actions (`promote_mod`, `demote_mod`, `transfer_owner`) are intentionally NOT one-click revocable — those changes route through the explicit mod-management surface so they require deliberate action. Surfaces a mod's pattern of decisions to themselves (the "self-watching" dynamic — knowing your record is visible to you discourages capricious moderation).
+- **Per-sub flag-threshold override — SHIPPED M5/B12.** Migration 011 added `subs.flag_threshold INTEGER NOT NULL DEFAULT 3`. PRD §Spam 7's "configurable per-sub, default 3 unique flaggers" is now operator-tunable via `/sub/create` and `/sub/<name>/edit` (owner only). `FLAG_THRESHOLD_FLOOR = 3` enforced at the content layer — operators can raise (more permissive for niche subs) but not lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). `submitFlag` now resolves the threshold per-target via `resolveFlagThreshold(db, targetType, targetId)` — comments inherit their post's sub setting.
 - **Auto-uncollapse threshold (per-sub) — SHIPPED in M4 polish.** Migration 006 added `subs.auto_uncollapse_post` (floor 50) and `subs.auto_uncollapse_comment` (floor 20). `createSub` enforces the floors; `/sub/create` exposes both as number inputs. Higher floor on posts because feed exposure means votes accumulate faster — same vote count on a post represents a smaller fraction of the audience that saw it.
 
 ### M5: Spam defenses + per-sub structure
 Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-account scrutiny, per-sub limits, link cap + URLhaus integration (hourly cron), spam pattern file (regex), velocity alerts dashboard, public mod log already done in M4.
 
 **Per-sub structure adds:**
-- **Flairs** (curated by sub owner). `subs.flairs` JSON column `[{slug, label, color}]` + nullable `posts.flair_slug`. Owner edits the closed list; users pick from it. Optional unless owner sets `flairs_required`. Display: small colored pill in the post-meta line; filter via `/sub/<name>?flair=<slug>`. No global flair index, no user-created flairs, no cross-sub flairs. Chosen over hashtags because: closed list = no spam vector; sub-scoped = no taxonomy drift; removable later by dropping the column. See PRD §Permanently out for the rejected-hashtags rationale.
-- **NSFW per-sub flag.** `subs.nsfw INTEGER NOT NULL DEFAULT 0`. Sets a banner on the sub page and a content advisory in the home strip. Forum does **not** run age verification (operator concern, see PRD §Permanently out). Ties cleanly into M6 subscription preferences (hide NSFW subs from my-subs by default).
+- **Flairs (per-sub) — SHIPPED M5/B10.** Migration 009 added `subs.flairs` JSON column, `subs.flairs_required`, and nullable `posts.flair_slug`/`drafts.flair_slug`. Owner curates the closed list (max 12 per sub) at `/sub/create` or via owner-only `/sub/<name>/edit`; users pick from it at post time. `flairsRequired` enforced in `finalizeDraft`. Display: colored pill in `authorMeta`, filter strip at top of sub page, filter via `?flair=<slug>`. No global flair index, no user-created flairs, no cross-sub flairs. Color is any valid CSS color (raw, like `branding.colors`); CSS-injection guard reused from `resolveBrandingColors`.
+- **Sensitive content per-sub flag — SHIPPED M5/B11.** Migration 010 added `subs.sensitive INTEGER NOT NULL DEFAULT 0`. Toggled at sub creation and via owner-only `/sub/<name>/edit`. Renders as: amber banner on the sub page (`[!] sensitive content — use discretion`) plus a small `[!]` mark next to the sub name in the home active-subs strip and `/subs` directory. Forum does **not** run age verification (operator concern, see PRD §Permanently out). The flag is intentionally generic rather than NSFW because plato's default community rules ban porn — labeling something "NSFW" in a porn-banned forum invites the very content the rules forbid. `sensitive` covers graphic violence, abuse discussions, intense political topics, suicide/eating-disorder threads, etc. — operator/community decides what counts. Ties cleanly into M6 subscription preferences (hide sensitive subs from my-subs by default). A fork that wants to allow porn can rename/repurpose this flag.
 
 ### M6: Subscriptions + notifications
 Sub subscribe/unsubscribe, my-subs page, email digest mode (reuses knowless's Postfix), ntfy push (one-line POST per notification), per-sub RSS feeds. Subscription list export (folds into M7's export format).
@@ -359,15 +359,9 @@ One handler in `src/web/static.js`. Serves `style.css`, favicon, generated ident
 
 CSS variables for an instance-wide palette. Light/dark in M8. Per-sub themes are PRD-permanently-out (§What's explicitly out of v1). Sub mods get content tools, not visual styling.
 
-### Media rendering — favicon hints only
+### Media rendering — domain hints only
 
-Plain markdown rendering (`marked`) for body content. Outbound links get a 16×16 favicon glyph next to them, sourced from a per-instance favicon cache. Nothing fetched from the destination on render. No preview cards, no embeds, no thumbnails — PRD §Permanently out holds.
-
-### Per-instance favicon cache
-
-Forum maintains a small SQLite table `(domain, svg_or_png_bytes, fetched_at)`. First time a link to a new domain is rendered, the forum schedules a one-shot background fetch of `https://<domain>/favicon.ico` (or `/favicon.svg`), caches what comes back, serves from `/static/favicon/<domain>` thereafter. Stale-after-30-days. Failed fetches cache a placeholder so we don't retry constantly.
-
-This is the only "fetch from third-party URL" the forum ever does, and it's bounded: per-domain, not per-link, not per-page-render. Implementation lands in **M5** alongside other spam-defense plumbing (URLhaus integration is a similar shape).
+Plain markdown rendering (`marked`) for body content. Outbound links surface as plain hostname badges in the post-meta line — no fetched assets, no preview cards, no embeds, no thumbnails. PRD §Permanently out holds. (M5/B9 shipped a brand-icon palette for ~10 popular domains; rolled back in favor of plain hostnames for simplicity and zero network surface.)
 
 ---
 
