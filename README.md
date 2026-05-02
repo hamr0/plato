@@ -8,19 +8,13 @@
 
 ---
 
-**plato is a forum.** A community-owned discussion site, shaped like the best parts of Reddit — sub-communities, threaded conversations, upvotes — without the parts that broke discourse.
-
-No ads. No algorithm. No tracking. No karma. No follower count. No real-name pressure. No image-and-video arms race. No company that owns your conversations and changes the rules every quarter.
-
-A forum that loads in a heartbeat, looks like a tool not a product, lets you walk away with everything you wrote, and can be replaced by the next operator the day yours stops listening.
+**plato is a forum.** Reddit-shaped (subs, threaded comments, upvotes, mods). Without ads, algorithm, tracking, karma, follower counts, real-name pressure, image hosting, or a company that changes the rules. Loads instantly. You can walk away with everything you wrote.
 
 ---
 
 ## Why this exists
 
-The internet had forums that lasted decades. Mailing lists, phpBB boards, Usenet, early Reddit. Then everything moved to platforms that needed your attention to stay alive, and slowly the conversations got worse. Recommendation feeds replaced friends. Karma replaced thinking. Followers replaced trust. Real names replaced honesty.
-
-plato is the bet that the structural defaults were what mattered all along.
+Forums used to last decades — phpBB, Usenet, mailing lists, early Reddit. Then platforms started needing your attention to survive: recommendation feeds replaced friends, karma replaced thinking, followers replaced trust. plato is the bet that the structural defaults were what mattered.
 
 ---
 
@@ -28,87 +22,79 @@ plato is the bet that the structural defaults were what mattered all along.
 
 ### Sign in without giving your email
 
-You enter your email, plato sends you a one-time link. The moment that link goes out, plato forgets your address. What's stored is a one-way hash that yields a *different* identity on every plato site — useless to anyone who steals the database, useless for cross-site tracking, useless to a government request.
+- Enter email → click the link → you're in.
+- The moment the link goes out, plato forgets your address. Only a one-way fingerprint stays.
+- Same email on two plato sites = two different pseudonyms. Cross-site tracking is impossible by construction.
+- No password, no recovery flow, no profile, no 2FA, no CAPTCHA.
 
-This works because of [**knowless**](https://github.com/hamr0/knowless), an open-source library built specifically to do passwordless email auth without storing email. It's the same primitive any other plato-shaped project can drop in.
-
-No password, no account recovery flow, no profile to fill, no second factor, no captcha. One field, one click, you're in.
+Powered by [**knowless**](https://github.com/hamr0/knowless), an open-source library for passwordless auth without storing email.
 
 ### A moderation system that watches the moderators
 
-Two tools, one is reversible by the community:
+- **Soft removal** — fold-behind-a-chip; body readable on click; reason optional; community can lift it via upvotes.
+- **Hard removal** — body replaced with stub; reason required; only another mod can reverse.
+- **Public log per sub.** Every mod action visible to everyone — the audit trail is the social pressure.
+- **Unified `/modlog` for mods** — three modes (open / inbox / audit), click-to-filter on any mod or user, expand any row inline.
 
-- **Soft removal** — folds the post behind a clickable chip; body still readable on click; reason optional; auto-lifts if the community upvotes it back.
-- **Hard removal** — replaces the body with a stub; reason required; reversible only by another mod.
+### Spam defenses without an arms-race team
 
-Every action lands in a public log per sub. No private mod chat decides what stays up — the audit trail is the social pressure.
+- **Magic-link auth** — every account costs a working inbox.
+- **Account-age tiered rate limits** — new accounts post sparingly, established accounts post freely.
+- **Per-post link cap** — 1 link for new accounts, 5 for trusted.
+- **Spam pattern file** (`spam-patterns.txt`) — operator appends regex per spam wave; matches auto-collapse for review.
+- **URLhaus integration** — hourly cron pulls the malicious-URL list; matching posts auto-flag.
 
-Mods of multiple subs work from one unified inbox at `/modlog` with three modes: **open** (pending flags awaiting decision, expand any row to see the body, flag breakdown, and rule inline), **inbox** (deduped current state with a per-target event count), and **audit** (every event flat). Click any mod or user in any column to filter by them. The same audit table — minus pending data — is what `/sub/<name>/modlog` shows the public.
+Each knob has a hardcoded floor. Operators tighten, never loosen.
 
-### Spam defenses that don't require an arms-race team
+### Text only
 
-A small, transparent layer that stops the obvious bots without invasive surveillance:
-
-- **Magic-link auth** raises the floor: every account costs a working inbox.
-- **Account-age tiered rate limits**: new accounts post sparingly; established accounts post freely.
-- **Per-post link cap**: 1 link for new accounts, 5 for trusted — keeps comment sections from becoming link farms.
-- **Spam pattern file** (`spam-patterns.txt`): version-controlled regex set, operator appends per spam wave. Matching content auto-collapses pending mod review.
-- **URLhaus integration**: hourly cron pulls the community-maintained malicious-URL list. Posts linking to known-bad hosts auto-flag.
-
-Each knob has a PRD-locked floor. Operators can tighten via `config.json`, never loosen — the codebase is the safety net.
-
-### Text only — and that's the whole point
-
-Markdown for post bodies. Hyperlinks for everything else. plato does not host images, videos, files, embeds, or auto-played anything. Markdown image syntax becomes a plain link to wherever you parked the picture.
-
-The result is a forum that loads instantly on any device, on any connection, in any decade, without depending on twelve content-delivery networks staying in business.
+- Markdown post bodies. Hyperlinks for everything else.
+- No image hosting, no video, no embeds, no auto-play.
+- Markdown image syntax becomes a plain link.
+- Loads instantly on any device, on any connection.
 
 ### You own what you write
 
-- **Markdown source on disk.** Every post is a real file on real disk. The database is an index. Lose either, regenerate from the other.
-- **One-command export.** Take your full history. Take a sub's archive. The format is plain markdown plus a JSON manifest — readable in any text editor.
-- **Apache 2.0 license.** Fork the code, fork the archive, run your own. You don't need permission.
+- **Markdown on disk** — every post is a real file. The database is an index, regenerable.
+- **One-command export** — full history or a sub's archive, plain markdown + JSON manifest.
+- **Apache 2.0** — fork without asking.
 
-The word "interoperable" gets misused on most platforms. On plato it's the architecture: every artifact is a plain file, every protocol is one a 25-year-old mail server understands.
+### Stay current with RSS
 
-### Stay current with RSS, the way the web was meant to
-
-Every sub publishes a feed at `/sub/<name>/feed.xml`. **If you want to stay up to date with a sub, point any RSS reader at it** — [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), [Reeder](https://reederapp.com), or whatever you already use — and posts arrive in your reader alongside blogs, newsletters, and other feeds. No notification system to fight with. No app to install. No account. RSS is the open-web pattern for staying current; plato wires into it by default rather than building yet another in-app feed.
+Every sub publishes `/sub/<name>/feed.xml`. Point [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), [Reeder](https://reederapp.com), or whatever you use. No notification system, no app, no account.
 
 ### Lightweight, on purpose
 
-One process, one database file, one HTTP port. Runs on a $5 VPS. Backups are two `cp` commands. No frontend framework, no build step, no client-side JavaScript in the basic path. The whole thing fits on a thumb drive.
+- One process, one database file, one HTTP port.
+- Runs on a $5 VPS. Backups = two `cp` commands.
+- No build step, no frontend framework, no client-side JS in the basic path.
 
 ### Retro, on purpose
 
-Monospace font. Dark by default. Terminal-honest. Three-blue-dot logo that doubles as the loading animation. The visual language says: this is infrastructure, not a product designed to extract your time.
+Monospace font. Dark by default. Terminal-honest. Three-blue-dot logo doubles as the loading animation. Looks like a tool, not a product.
 
 ---
 
 ## What plato will never do
 
-These are decisions, not roadmap items.
+Decisions, not roadmap items:
 
-- Show ads. Run analytics. Drop tracking pixels. Embed third-party JavaScript.
-- Personalize your feed by what an algorithm thinks you want.
-- Show karma scores, follower counts, post counts, "online now" badges, leaderboards, or any other status game.
-- Ask for your real name, phone number, photo, location, or anything identifying.
-- Host images, videos, or files you upload.
-- Add tags, hashtags, or anything that grows into spam-bait.
-- Allow private subs, DMs, or hidden side-channels that bypass the public mod log.
-- Add password auth, OAuth, SSO, or anything other than the magic link.
-
-Each refusal maps to an illusion modern platforms sell — interoperability you can't actually use, privacy that's a settings toggle hiding a tracker, control that ends at the suspension button, ownership of content the platform can revoke. plato gives you the structural property instead.
+- Ads, analytics, tracking pixels, third-party JavaScript.
+- Algorithmic feeds.
+- Karma, follower counts, post counts, "online now" badges, leaderboards.
+- Real names, phone numbers, photos, locations.
+- Image / video / file uploads.
+- Tags, hashtags.
+- Private subs, DMs, hidden side-channels.
+- Password auth, OAuth, SSO.
 
 ---
 
 ## Where plato sits
 
-Shaped like Reddit (subs, threaded comments, upvotes, mods who answer to a public log). Built like a classic forum (one program, one file, fork it without asking). Without the bloat either accumulated.
+Reddit-shaped (subs, threads, votes, public-modlog mods). Classic-forum-built (one program, one file, fork without asking). None of the bloat either accumulated.
 
 ### Closest cousin: Lemmy
-
-[Lemmy](https://join-lemmy.org) is the open-source Reddit clone most often suggested. plato is in that conversation but a smaller bet:
 
 | | Lemmy | plato |
 |---|---|---|
@@ -125,13 +111,11 @@ Shaped like Reddit (subs, threaded comments, upvotes, mods who answer to a publi
 | Backup | Database dump + image server | Copy two folders |
 | If the operator goes bad | Move to another instance | Fork the code + your archive, run your own |
 
-**Federation, in plain English** — many independent Lemmy sites that talk to each other so users on one can read and comment on another. Sounds great, costs a lot:
+**Federation** — many Lemmy sites talking to each other so users on one can read and comment on another. plato refuses it:
 
-- Your server downloads and stores images and posts from servers run by strangers (you become legally responsible for their content).
-- Every site needs heavy backend plumbing — kills the "runs on a cheap VPS" promise.
-- "Who's responsible when something goes wrong" gets muddy.
-
-For a 100-person forum, that's a tax with no payoff. plato's answer to "you can leave" isn't federation — it's *fork the code and the archive, run your own*. Same exit, none of the weight.
+- Your server caches strangers' images and posts → you become legally responsible for them.
+- Federation needs heavy backend plumbing → kills the "runs on a cheap VPS" promise.
+- Plato's answer to "you can leave" is fork-the-archive, not cross-server protocol. Same exit, none of the weight.
 
 ### The broader landscape
 
@@ -143,7 +127,7 @@ For a 100-person forum, that's a tax with no payoff. plato's answer to "you can 
 | [Discourse](https://www.discourse.org) | Modern Ruby discussion forum | The public-modlog instinct | Heavy server requirements |
 | [phpBB](https://www.phpbb.com) / Discuz! / vBulletin | Classic PHP forums | Self-host ethos, plain-files philosophy | BBCode, avatar uploads, plugin sprawl, paid extensions |
 
-The lineage plato claims: **the structural defaults of Reddit's small-subs era, the self-host ethics of phpBB's golden era, none of the bloat either accumulated.**
+**Lineage**: Reddit's small-subs interaction model + phpBB's self-host ethics — bloat from both.
 
 ---
 
@@ -164,9 +148,10 @@ npm run migrate
 npm start
 ```
 
-Open http://localhost:8080 and post.
+Open `http://localhost:8080` and post.
 
-For magic-link emails in development, [Mailpit](https://github.com/axllent/mailpit) on port 1025 is the easiest setup — it catches every outgoing mail and shows it in a browser. For production, follow the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
+- **Dev mail**: [Mailpit](https://github.com/axllent/mailpit) on port 1025 catches every outgoing email.
+- **Production mail**: see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 
 ---
 
