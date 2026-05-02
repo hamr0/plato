@@ -565,3 +565,54 @@ test('safeLocalRedirect: legitimate /sub/x is preserved', async (t) => {
   assert.equal(res.status, 302);
   assert.equal(res.headers.get('location'), '/sub/lobby');
 });
+
+test('GET /communities: lists subs with sort + filter', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  await bootstrapMod(ctx, { sub: 'alpha-room' });
+  await bootstrapMod(ctx, { sub: 'beta-zone' });
+  const res = await fetch(baseUrl + '/communities');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /\/sub\/alpha-room/);
+  assert.match(body, /\/sub\/beta-zone/);
+  assert.match(body, /community-filter/, 'has the client-side filter input');
+  assert.match(body, /most recent|most posts|a-z/, 'has sort chips');
+});
+
+test('GET /?tab=comments: renders the comments feed', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { ownerHandle } = await bootstrapMod(ctx);
+  // Seed a post + a comment.
+  const author = 'n'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_cf', sub: 'lobby', handle: author, title: 'COMMENT-FEED-MARK' });
+  db.prepare(`INSERT INTO comments (id, post_id, handle, body, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run('c_cf', 'p_cf', author, 'a witty reply', Date.now());
+  const res = await fetch(baseUrl + '/?tab=comments');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /COMMENT-FEED-MARK/, 'parent post title shown as context');
+  assert.match(body, /a witty reply/, 'comment body excerpt rendered');
+});
+
+test('GET /?sort=top&date=24h: cross-sub posts feed honors filter', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  await bootstrapMod(ctx);
+  const author = 'o'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  // One recent (24h), one old.
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, score, created_at) VALUES (?, 'lobby', ?, ?, ?, ?, ?)`)
+    .run('p_recent', author, 'RECENT-POST', 'posts/p_recent.md', 5, Date.now() - 60 * 60 * 1000);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, score, created_at) VALUES (?, 'lobby', ?, ?, ?, ?, ?)`)
+    .run('p_old', author, 'OLD-POST', 'posts/p_old.md', 99, Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const res = await fetch(baseUrl + '/?sort=top&date=24h');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /RECENT-POST/);
+  assert.doesNotMatch(body, /OLD-POST/, 'date=24h excludes old post');
+});
