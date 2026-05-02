@@ -139,16 +139,13 @@ function authorMeta(post, pseudonym, { showComments = false } = {}) {
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
     <span class="name">${pseudonym}</span>
     <span class="sep">·</span>
-    <a class="sub-link sub-${subColorIndex(post.sub_name)}" href="/sub/${post.sub_name}">/sub/${post.sub_name}</a>
+    <a class="sub-link sub-${subColorIndex(post.sub_name)}" href="/sub/${post.sub_name}">//${post.sub_name}</a>
     <span class="sep">·</span>
     <span class="when">${relativeTime(post.created_at)}</span>
     ${showComments
       ? html`<span class="sep">·</span>
         <a class="reply-count${count === 0 ? ' reply-count-zero' : ''}" href="${permalinkFor(post)}#comments">
-          <svg class="reply-icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
-            <path fill="currentColor" d="M14 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2v3l3-3h7a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"/>
-          </svg>
-          <span class="reply-count-n">${count}</span>
+          <span class="reply-count-n">${count}</span> ${count === 1 ? 'reply' : 'replies'}
         </a>`
       : html``}
   </div>`;
@@ -274,7 +271,7 @@ function postFormFor({ currentHandle, defaultSub, postableSubs }) {
     subField = html`<input type="hidden" name="sub_name" value="${defaultSub}">`;
   } else {
     subField = html`<select name="sub_name" required>
-      ${postableSubs.map((s) => html`<option value="${s.name}">/sub/${s.name}</option>`)}
+      ${postableSubs.map((s) => html`<option value="${s.name}">//${s.name}</option>`)}
     </select>`;
   }
 
@@ -405,7 +402,7 @@ function subEntry(s) {
 }
 
 function subsStripView({ subs, currentHandle }) {
-  const allLink = html`<a class="all-subs" href="/communities">all</a>`;
+  const allLink = html`<a class="all-subs" href="/subs">all</a>`;
   if (subs.length === 0) {
     return html`<div class="subs-strip" title="active subs · last 24h">
       <span class="label">subs</span>
@@ -447,7 +444,7 @@ function subsStripView({ subs, currentHandle }) {
 
 // Home top-nav filter values. Sort applies to both posts and comments
 // tabs ('hot' is post-only); date narrows the time window.
-const HOME_SORTS = ['new', 'top', 'hot'];
+const HOME_SORTS = ['new', 'old', 'top', 'hot'];
 const HOME_DATES = { '24h': 24 * 60 * 60 * 1000, week: 7 * 24 * 60 * 60 * 1000, all: null };
 
 function parseHomeFilters(searchParams) {
@@ -482,6 +479,7 @@ function homeNav(filters) {
     <span class="filter-sep">·</span>
     <span class="filter-group">
       ${chip('sort', 'new', 'new', filters.sort === 'new')}
+      ${chip('sort', 'old', 'old', filters.sort === 'old')}
       ${chip('sort', 'top', 'top', filters.sort === 'top')}
       ${filters.tab === 'posts'
         ? chip('sort', 'hot', 'hot', filters.sort === 'hot')
@@ -508,7 +506,7 @@ function commentRowsView({ comments, pseudonyms, currentHandle }) {
         <img src="/avatar/${c.handle}.svg" width="18" height="18" alt="">
         <span class="name">${pseudonym}</span>
         <span class="sep">·</span>
-        <a class="sub-link sub-${subColorIndex(c.sub_name)}" href="/sub/${c.sub_name}">/sub/${c.sub_name}</a>
+        <a class="sub-link sub-${subColorIndex(c.sub_name)}" href="/sub/${c.sub_name}">//${c.sub_name}</a>
         <span class="sep">·</span>
         <span class="when">${relativeTime(c.created_at)}</span>
         <span class="sep">·</span>
@@ -575,25 +573,26 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const currentHandle = auth.handleFromRequest(req);
   const sortLink = (val, label) => {
     const cls = sort === val ? 'filter-btn filter-btn-active' : 'filter-btn';
-    return html`<a class="${cls}" href="/communities?sort=${val}">${label}</a>`;
+    return html`<a class="${cls}" href="/subs?sort=${val}">${label}</a>`;
   };
   const rows = subs.length === 0
-    ? html`<p class="muted">no communities yet. <a href="/sub/create">create one</a>.</p>`
+    ? html`<p class="muted">no subs yet. <a href="/sub/create">create one</a>.</p>`
     : html`<table class="communities">
-        <thead><tr><th>community</th><th>description</th><th>posts</th><th>last activity</th><th>owner</th></tr></thead>
+        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>last activity</th><th>owner</th></tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">/sub/${s.name}</a></td>
+          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a></td>
           <td class="muted">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
+          <td class="num muted" title="subscriber count lights up in M6">—</td>
           <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
           <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
         </tr>`)}</tbody>
       </table>`;
-  send(res, 200, layout('communities', html`
-    ${siteHeader({ db, currentHandle, title: 'communities' })}
+  send(res, 200, layout('subs', html`
+    ${siteHeader({ db, currentHandle, title: 'subs' })}
     <p><a href="/">← home</a></p>
-    <h2>// communities</h2>
-    <p class="muted">every community on this instance. click a sub name to read or post.</p>
+    <h2>// subs</h2>
+    <p class="muted">every sub on this instance. click a sub name to read or post.</p>
     <p class="modlog-filters muted">
       sort: ${sortLink('active', 'most recent')} ${sortLink('posts', 'most posts')} ${sortLink('name', 'a-z')}
       <span class="filter-sep">·</span>
@@ -610,7 +609,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
         input.addEventListener('input', () => {
           const q = input.value.trim().toLowerCase();
           for (const r of rows) {
-            const name = r.querySelector('a.sub-link')?.textContent?.replace(/^\\/sub\\//, '') ?? '';
+            const name = r.querySelector('a.sub-link')?.textContent?.replace(/^\\/\\//, '') ?? '';
             r.style.display = !q || name.startsWith(q) ? '' : 'none';
           }
         });
@@ -654,16 +653,16 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
   send(
     res,
     200,
-    layout(`/sub/${subName}`, html`
+    layout(`//${subName}`, html`
       ${siteHeader({
         db,
         currentHandle,
-        title: html`/sub/${subName}`,
+        title: html`//${subName}`,
         subtitle: sub.description || null,
       })}
       <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a></p>
       ${anonHintFor(currentHandle)}
-      <h3 class="section">// new post in /sub/${subName}</h3>
+      <h3 class="section">// new post in //${subName}</h3>
       ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
@@ -793,21 +792,21 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     if (linkBlock) {
       return send(res, 400, errorPage(req, { db, auth }, {
         title: 'too many links', message: linkBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
       }));
     }
     const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig);
     if (rateBlock) {
       return send(res, 429, errorPage(req, { db, auth }, {
         title: 'rate limited', message: rateBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
       }));
     }
     const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
     if (subBlock) {
       return send(res, 429, errorPage(req, { db, auth }, {
         title: 'rate limited', message: subBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to /sub/${subName}</a></p>`,
+        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
       }));
     }
     try {
@@ -831,7 +830,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       const target = banMatch ? banMatch[1] : subName;
       return send(res, 400, errorPage(req, { db, auth }, {
         title: 'post failed', message: err.message,
-        links: html`<p><a href="/sub/${target}">← back to /sub/${target}</a></p>`,
+        links: html`<p><a href="/sub/${target}">← back to //${target}</a></p>`,
       }));
     }
   }
@@ -902,7 +901,7 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
     if (subBlock) {
       return send(res, 429, errorPage(req, { db, auth }, {
         title: 'rate limited', message: subBlock.message,
-        links: html`<p><a href="/sub/${draftRow.sub_name}">← back to /sub/${draftRow.sub_name}</a></p>`,
+        links: html`<p><a href="/sub/${draftRow.sub_name}">← back to //${draftRow.sub_name}</a></p>`,
       }));
     }
   }
@@ -916,7 +915,7 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
     if (linkBlock) {
       return send(res, 400, errorPage(req, { db, auth }, {
         title: 'too many links', message: linkBlock.message,
-        links: html`<p><a href="/sub/${draftFull.sub_name}">← back to /sub/${draftFull.sub_name}</a></p>`,
+        links: html`<p><a href="/sub/${draftFull.sub_name}">← back to //${draftFull.sub_name}</a></p>`,
       }));
     }
   }
@@ -936,7 +935,7 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
     // a "back to /sub/<name>" recovery link.
     const banMatch = /banned from ([a-z0-9-]+)/.exec(err.message);
     const links = banMatch
-      ? html`<p><a href="/sub/${banMatch[1]}">← back to /sub/${banMatch[1]}</a></p>`
+      ? html`<p><a href="/sub/${banMatch[1]}">← back to //${banMatch[1]}</a></p>`
       : html``;
     return send(res, 400, errorPage(req, { db, auth }, {
       title: 'post failed', message: err.message, links,
@@ -1147,7 +1146,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     200,
     layout(post.title, html`
       ${siteHeader({ db, currentHandle })}
-      <p><a href="/">← home</a> · <a href="/sub/${subName}">/sub/${subName}</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
@@ -2390,7 +2389,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if (path === '/logout' && method === 'POST') return handleLogout(req, res, { auth });
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir }, url.searchParams);
-      if (path === '/communities' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
+      if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts });
       }

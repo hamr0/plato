@@ -566,12 +566,12 @@ test('safeLocalRedirect: legitimate /sub/x is preserved', async (t) => {
   assert.equal(res.headers.get('location'), '/sub/lobby');
 });
 
-test('GET /communities: lists subs with sort + filter', async (t) => {
+test('GET /subs: lists subs with sort + filter', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
   await bootstrapMod(ctx, { sub: 'alpha-room' });
   await bootstrapMod(ctx, { sub: 'beta-zone' });
-  const res = await fetch(baseUrl + '/communities');
+  const res = await fetch(baseUrl + '/subs');
   assert.equal(res.status, 200);
   const body = await res.text();
   assert.match(body, /\/sub\/alpha-room/);

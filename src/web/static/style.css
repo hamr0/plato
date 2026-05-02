@@ -981,3 +981,25 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .comment-feed .comment-body { margin-top: 0.35rem; opacity: 0.92; }
 .comment-feed .comment-body p:first-child { margin-top: 0; }
 .comment-feed .comment-body p:last-child { margin-bottom: 0; }
+
+/* ============================================================
+ * UX-A2 (M5/B8): post-page + general spacing compaction
+ * Reduces vertical airiness on the post page where there's lots
+ * of empty space — section headers, article line-height, post
+ * cards, form margins. Reading column inside <article> bodies
+ * stays comfortable; the page chrome around it gets denser.
+ * ============================================================ */
+h3.section { margin: 1rem 0 0.4rem; }
+.post-page article { margin-top: 0.4rem; }
+.post-page > p:first-of-type { margin: 0.3rem 0 0.5rem; }
+article { line-height: 1.55; margin-top: 0.6rem; }
+article h1, article h2, article h3 { margin-top: 1rem; margin-bottom: 0.3rem; }
+article p { margin: 0.5rem 0; }
+article hr { margin: 1rem 0; }
+form { margin: 0.6rem 0 1rem; gap: 6px; }
+.post { padding: 0.7rem 0; }
+.preview { margin-top: 0.35rem; }
+.preview p { margin: 0.3rem 0; }
+.comment-tree { margin-top: 0.4rem; }
+.comment { padding: 0.4rem 0; }
+.replies { margin-top: 0.2rem; }
