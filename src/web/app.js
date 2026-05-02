@@ -10,18 +10,21 @@ import {
   getPostPreview,
   listRecentPostsCappedPerSub,
   listPostsInSub,
+  listPostsAcrossSubs,
   SUB_SORTS,
 } from '../content/post.js';
 import {
   createSub,
   getSubByName,
   validateSubName,
+  listAllSubs,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
 import {
   addComment,
   listCommentsForPost,
   buildCommentTree,
+  listRecentCommentsAcrossSubs,
   COMMENT_SORTS,
 } from '../content/comment.js';
 import { castVote, getVote } from '../content/vote.js';
@@ -131,15 +134,36 @@ function relativeTime(ms) {
 }
 
 function authorMeta(post, pseudonym, { showComments = false } = {}) {
+  const count = post.comment_count ?? 0;
   return html`<div class="meta">
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
     <span class="name">${pseudonym}</span>
-    <span>· <a href="/sub/${post.sub_name}">/sub/${post.sub_name}</a></span>
-    <span class="when">· ${relativeTime(post.created_at)}</span>
+    <span class="sep">·</span>
+    <a class="sub-link sub-${subColorIndex(post.sub_name)}" href="/sub/${post.sub_name}">/sub/${post.sub_name}</a>
+    <span class="sep">·</span>
+    <span class="when">${relativeTime(post.created_at)}</span>
     ${showComments
-      ? html`<span>· <a href="${permalinkFor(post)}#comments">${post.comment_count ?? 0} ${(post.comment_count ?? 0) === 1 ? 'reply' : 'replies'}</a></span>`
+      ? html`<span class="sep">·</span>
+        <a class="reply-count${count === 0 ? ' reply-count-zero' : ''}" href="${permalinkFor(post)}#comments">
+          <svg class="reply-icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+            <path fill="currentColor" d="M14 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2v3l3-3h7a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"/>
+          </svg>
+          <span class="reply-count-n">${count}</span>
+        </a>`
       : html``}
   </div>`;
+}
+
+// Deterministic sub palette: hash the sub name into one of 8 accent
+// hues so the same sub keeps the same color across renders. Cheap djb2
+// hash; 8 buckets keeps the visual variety bounded so users see "this
+// is the X-color sub" not "every link is a different color." Colors
+// themselves live in CSS as --sub-color-0 .. --sub-color-7, so forks
+// can override the palette in one place.
+function subColorIndex(subName) {
+  let h = 5381;
+  for (let i = 0; i < subName.length; i++) h = ((h << 5) + h + subName.charCodeAt(i)) >>> 0;
+  return h % 8;
 }
 
 function pseudonymsByHandle(db, handles) {
@@ -381,10 +405,12 @@ function subEntry(s) {
 }
 
 function subsStripView({ subs, currentHandle }) {
+  const allLink = html`<a class="all-subs" href="/communities">all</a>`;
   if (subs.length === 0) {
     return html`<div class="subs-strip" title="active subs · last 24h">
       <span class="label">subs</span>
       <span class="muted"><em>none yet</em></span>
+      ${allLink}
       ${currentHandle
         ? html`<a class="new-sub" href="/sub/create">+ new</a>`
         : html``}
@@ -398,6 +424,7 @@ function subsStripView({ subs, currentHandle }) {
     return html`<div class="subs-strip" title="active subs · last 24h">
       <span class="label">subs</span>
       ${top.map(subEntry)}
+      ${allLink}
       ${currentHandle
         ? html`<a class="new-sub" href="/sub/create">+ new</a>`
         : html``}
@@ -409,6 +436,7 @@ function subsStripView({ subs, currentHandle }) {
       <span class="label">subs</span>
       ${top.map(subEntry)}
       <span class="more-toggle">+ show all (${rest.length})</span>
+      ${allLink}
       ${currentHandle
         ? html`<a class="new-sub" href="/sub/create">+ new</a>`
         : html``}
@@ -417,18 +445,111 @@ function subsStripView({ subs, currentHandle }) {
   </details>`;
 }
 
-function renderHome(req, res, { db, auth, postsDir }) {
-  const posts = listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
-  const handles = [...new Set(posts.map((p) => p.handle))];
-  const pseudonyms = pseudonymsByHandle(db, handles);
+// Home top-nav filter values. Sort applies to both posts and comments
+// tabs ('hot' is post-only); date narrows the time window.
+const HOME_SORTS = ['new', 'top', 'hot'];
+const HOME_DATES = { '24h': 24 * 60 * 60 * 1000, week: 7 * 24 * 60 * 60 * 1000, all: null };
+
+function parseHomeFilters(searchParams) {
+  const tab = searchParams?.get('tab') === 'comments' ? 'comments' : 'posts';
+  const rawSort = searchParams?.get('sort');
+  const sort = HOME_SORTS.includes(rawSort) ? rawSort : 'new';
+  const rawDate = searchParams?.get('date');
+  const date = rawDate in HOME_DATES ? rawDate : 'all';
+  return { tab, sort, date };
+}
+
+function homeNav(filters) {
+  const href = (overrides) => {
+    const params = new URLSearchParams();
+    const merged = { ...filters, ...overrides };
+    for (const [k, v] of Object.entries(merged)) {
+      if (v == null || v === '' || (k === 'sort' && v === 'new') || (k === 'date' && v === 'all') || (k === 'tab' && v === 'posts')) continue;
+      params.set(k, String(v));
+    }
+    const qs = params.toString();
+    return qs ? `/?${qs}` : '/';
+  };
+  const chip = (key, value, label, active) => {
+    const cls = active ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${href({ [key]: value })}">${label}</a>`;
+  };
+  return html`<nav class="home-nav muted">
+    <span class="filter-group">
+      ${chip('tab', 'posts', 'posts', filters.tab === 'posts')}
+      ${chip('tab', 'comments', 'comments', filters.tab === 'comments')}
+    </span>
+    <span class="filter-sep">·</span>
+    <span class="filter-group">
+      ${chip('sort', 'new', 'new', filters.sort === 'new')}
+      ${chip('sort', 'top', 'top', filters.sort === 'top')}
+      ${filters.tab === 'posts'
+        ? chip('sort', 'hot', 'hot', filters.sort === 'hot')
+        : html``}
+    </span>
+    <span class="filter-sep">·</span>
+    <span class="filter-group">
+      ${chip('date', '24h', '24h', filters.date === '24h')}
+      ${chip('date', 'week', 'week', filters.date === 'week')}
+      ${chip('date', 'all', 'all', filters.date === 'all')}
+    </span>
+  </nav>`;
+}
+
+function commentRowsView({ comments, pseudonyms, currentHandle }) {
+  if (comments.length === 0) {
+    return html`<p class="muted">no comments match.</p>`;
+  }
+  return html`<div class="comment-feed">${comments.map((c) => {
+    const pseudonym = pseudonyms.get(c.handle) ?? c.handle.slice(0, 8);
+    const preview = c.body.length > 280 ? c.body.slice(0, 280).trimEnd() + '…' : c.body;
+    return html`<article class="comment-row">
+      <div class="meta">
+        <img src="/avatar/${c.handle}.svg" width="18" height="18" alt="">
+        <span class="name">${pseudonym}</span>
+        <span class="sep">·</span>
+        <a class="sub-link sub-${subColorIndex(c.sub_name)}" href="/sub/${c.sub_name}">/sub/${c.sub_name}</a>
+        <span class="sep">·</span>
+        <span class="when">${relativeTime(c.created_at)}</span>
+        <span class="sep">·</span>
+        <span class="muted">on <a href="/sub/${c.sub_name}/post/${c.post_id}#comment-${c.id}">${c.post_title}</a></span>
+      </div>
+      <div class="comment-body">${raw(renderMarkdown(preview))}</div>
+    </article>`;
+  })}</div>`;
+}
+
+function renderHome(req, res, { db, auth, postsDir }, searchParams) {
+  const filters = parseHomeFilters(searchParams);
+  const sinceMs = HOME_DATES[filters.date] ? Date.now() - HOME_DATES[filters.date] : null;
   const subsNav = listSubsForNav(db);
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
-  const previews = buildPreviews(posts, postsDir, 280);
-  const voteState = votesForPostList(db, posts, currentHandle);
-  const flaggedSet = currentHandle
-    ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
-    : new Set();
+
+  let feedView;
+  if (filters.tab === 'comments') {
+    const comments = listRecentCommentsAcrossSubs(db, {
+      sort: filters.sort === 'hot' ? 'top' : filters.sort,
+      sinceMs: sinceMs ?? undefined,
+      limit: 50,
+    });
+    const pseudonyms = pseudonymsByHandle(db, [...new Set(comments.map((c) => c.handle))]);
+    feedView = commentRowsView({ comments, pseudonyms, currentHandle });
+  } else {
+    // Posts: default (no filter) keeps the per-sub-cap recency feed; any
+    // active filter switches to global cross-sub ordering.
+    const isFiltered = filters.sort !== 'new' || filters.date !== 'all';
+    const posts = isFiltered
+      ? listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: 50 })
+      : listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
+    const pseudonyms = pseudonymsByHandle(db, [...new Set(posts.map((p) => p.handle))]);
+    const previews = buildPreviews(posts, postsDir, 280);
+    const voteState = votesForPostList(db, posts, currentHandle);
+    const flaggedSet = currentHandle
+      ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
+      : new Set();
+    feedView = postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/', flaggedSet });
+  }
 
   send(
     res,
@@ -439,10 +560,63 @@ function renderHome(req, res, { db, auth, postsDir }) {
       ${subsStripView({ subs: subsNav, currentHandle })}
       <h3 class="section">// new post</h3>
       ${postFormFor({ currentHandle, postableSubs })}
-      <h3 class="section">// recent (2 per sub)</h3>
-      ${postRowsView({ posts, pseudonyms, previews, voteState, currentHandle, returnTo: '/', flaggedSet })}
+      ${homeNav(filters)}
+      ${feedView}
     `)
   );
+}
+
+function renderCommunities(req, res, { db, auth }, searchParams) {
+  const sort = ['name', 'posts', 'active'].includes(searchParams?.get('sort'))
+    ? searchParams.get('sort') : 'active';
+  const subs = listAllSubs(db, { sort });
+  const ownerHandles = [...new Set(subs.map((s) => s.owner_handle).filter(Boolean))];
+  const pseudonyms = pseudonymsByHandle(db, ownerHandles);
+  const currentHandle = auth.handleFromRequest(req);
+  const sortLink = (val, label) => {
+    const cls = sort === val ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="/communities?sort=${val}">${label}</a>`;
+  };
+  const rows = subs.length === 0
+    ? html`<p class="muted">no communities yet. <a href="/sub/create">create one</a>.</p>`
+    : html`<table class="communities">
+        <thead><tr><th>community</th><th>description</th><th>posts</th><th>last activity</th><th>owner</th></tr></thead>
+        <tbody>${subs.map((s) => html`<tr>
+          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">/sub/${s.name}</a></td>
+          <td class="muted">${s.description || ''}</td>
+          <td class="num">${s.post_count}</td>
+          <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
+          <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
+        </tr>`)}</tbody>
+      </table>`;
+  send(res, 200, layout('communities', html`
+    ${siteHeader({ db, currentHandle, title: 'communities' })}
+    <p><a href="/">← home</a></p>
+    <h2>// communities</h2>
+    <p class="muted">every community on this instance. click a sub name to read or post.</p>
+    <p class="modlog-filters muted">
+      sort: ${sortLink('active', 'most recent')} ${sortLink('posts', 'most posts')} ${sortLink('name', 'a-z')}
+      <span class="filter-sep">·</span>
+      <input type="search" id="community-filter" placeholder="filter by name…" autocomplete="off">
+    </p>
+    ${rows}
+    <script>
+      // Client-side prefix filter on the listing. Hides rows whose
+      // sub name doesn't start with the typed prefix. No server roundtrip.
+      (function () {
+        const input = document.getElementById('community-filter');
+        if (!input) return;
+        const rows = Array.from(document.querySelectorAll('table.communities tbody tr'));
+        input.addEventListener('input', () => {
+          const q = input.value.trim().toLowerCase();
+          for (const r of rows) {
+            const name = r.querySelector('a.sub-link')?.textContent?.replace(/^\\/sub\\//, '') ?? '';
+            r.style.display = !q || name.startsWith(q) ? '' : 'none';
+          }
+        });
+      })();
+    </script>
+  `));
 }
 
 function renderSubPage(req, res, { db, auth, postsDir }, subName, sort) {
@@ -2215,7 +2389,8 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if (path === '/verify') return auth.verify(req, res);
       if (path === '/logout' && method === 'POST') return handleLogout(req, res, { auth });
 
-      if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir });
+      if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir }, url.searchParams);
+      if (path === '/communities' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts });
       }

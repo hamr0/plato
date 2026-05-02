@@ -60,7 +60,7 @@ html, body { background: var(--bg); margin: 0; }
 body {
   font: 14px/1.55 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   color: var(--text);
-  max-width: 720px;
+  max-width: 880px;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
 }
@@ -439,7 +439,7 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
  * operator can change wordmark + quote pool but keeps the glyph + "plato"
  * as upstream lineage. */
 .site-footer {
-  max-width: 720px;
+  max-width: 880px;
   margin: 3rem auto 1.5rem;
   padding: 0.8rem 0 0;
   border-top: 1px solid var(--border);
@@ -777,7 +777,7 @@ summary.subs-strip:hover .more-toggle,
   left: 50%;
   transform: translateX(-50%);
   width: calc(100% - 2rem);
-  max-width: 720px;
+  max-width: 880px;
   background: var(--bg);
   border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
@@ -896,3 +896,88 @@ article blockquote {
 article hr { border: 0; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 article a { color: var(--accent); }
 article ul, article ol { padding-left: 1.5rem; }
+
+/* ============================================================
+ * UX-A: post-meta tweaks (M5/B8)
+ * ------------------------------------------------------------
+ * - .reply-count: SVG bubble + N. Zero state stays muted but
+ *   readable (--text-dim was nearly invisible on dark mode).
+ * - .sep: separator dots between meta fields, muted.
+ * ============================================================ */
+.meta { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.meta .sep { color: var(--text-dim); margin: 0 0.05rem; }
+.meta .when { color: var(--text-dim); }
+.reply-count {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+.reply-count .reply-icon { vertical-align: -2px; opacity: 0.85; }
+.reply-count-n { font-variant-numeric: tabular-nums; }
+.reply-count-zero { color: var(--text-dim); }
+.reply-count-zero .reply-icon { opacity: 0.55; }
+.reply-count:hover { text-decoration: underline; }
+
+/* UX-C: sub color accent on feed. 8-color palette indexed by hash of
+ * sub_name (see subColorIndex in app.js). Forks override here. */
+:root {
+  --sub-color-0: #58a6ff;  /* blue */
+  --sub-color-1: #d29922;  /* amber */
+  --sub-color-2: #56d364;  /* green */
+  --sub-color-3: #f778ba;  /* pink */
+  --sub-color-4: #a371f7;  /* purple */
+  --sub-color-5: #79c0ff;  /* sky */
+  --sub-color-6: #ff7b72;  /* coral */
+  --sub-color-7: #d2a8ff;  /* lilac */
+}
+.sub-link { font-weight: 500; }
+.sub-link.sub-0 { color: var(--sub-color-0); }
+.sub-link.sub-1 { color: var(--sub-color-1); }
+.sub-link.sub-2 { color: var(--sub-color-2); }
+.sub-link.sub-3 { color: var(--sub-color-3); }
+.sub-link.sub-4 { color: var(--sub-color-4); }
+.sub-link.sub-5 { color: var(--sub-color-5); }
+.sub-link.sub-6 { color: var(--sub-color-6); }
+.sub-link.sub-7 { color: var(--sub-color-7); }
+
+/* UX-B: domain hint after outbound links — text only, no favicon image
+ * (privacy: per-link favicon proxies leak viewer→Google). Inserted by
+ * the markdown renderer, scoped to outbound `<a>` only via .ext-host. */
+.ext-host {
+  color: var(--text-dim);
+  font-size: 0.85em;
+  margin-left: 0.2rem;
+  white-space: nowrap;
+}
+.ext-host::before { content: "↗ "; opacity: 0.7; }
+
+/* UX-D: /communities directory page */
+table.communities { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.9rem; }
+table.communities th, table.communities td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+table.communities th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+table.communities td.num { font-variant-numeric: tabular-nums; text-align: right; }
+table.communities tr:hover td { background: var(--bg-soft); }
+#community-filter {
+  background: var(--bg-soft); border: 1px solid var(--border); color: var(--text);
+  padding: 0.2rem 0.5rem; border-radius: 3px; font: inherit; font-size: 0.85rem;
+  margin-left: 0.4rem; min-width: 12rem;
+}
+
+/* "all" chip in subs strip → /communities */
+.subs-strip .all-subs {
+  font-size: 0.78rem; color: var(--text-dim); margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem; border: 1px solid var(--border); border-radius: 3px;
+  text-decoration: none;
+}
+.subs-strip .all-subs:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+
+/* UX-E: home top nav (Posts | Comments tabs + sort + date) */
+.home-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.6rem 0 0.4rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+.home-nav .filter-group { display: inline-flex; gap: 0.3rem; align-items: center; }
+
+/* Cross-sub comment feed (home /comments tab) */
+.comment-feed .comment-row { padding: 0.7rem 0; border-bottom: 1px solid var(--border); }
+.comment-feed .comment-row:last-child { border-bottom: 0; }
+.comment-feed .comment-body { margin-top: 0.35rem; opacity: 0.92; }
+.comment-feed .comment-body p:first-child { margin-top: 0; }
+.comment-feed .comment-body p:last-child { margin-bottom: 0; }
