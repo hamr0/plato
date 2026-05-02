@@ -8,7 +8,7 @@
 
 ---
 
-**plato is a forum.** Reddit-shaped (subs, threads, votes, mods), built like forums used to be: a single program on a cheap server, plain files on disk, fork it the day the operator stops listening.
+**plato is a forum.** Reddit-shaped (subs, threads, votes, mods). Every sub is its own universe — the mod is its owner, the operator is a facilitator who runs the lights, not a referee for sub-level disputes. Every mod action lands in a public log; the community can reverse soft removals via votes; if a mod goes rogue, you fork the sub. People leave the mod, not the platform.
 
 ---
 
@@ -16,9 +16,8 @@
 
 - **Plain text.** Markdown for posts, hyperlinks for everything else. No image / video / file hosting. The forum loads on any device, on any connection, in any decade.
 - **Magic-link sign-in, no identity lock.** Click an emailed link → you're in. No password, no profile, no captcha, no second factor. The moment the link is sent, the email is forgotten — only a one-way fingerprint, scoped to this site, remains. Same email on two plato sites = two different pseudonyms.
-- **Public moderation log per sub.** Every soft removal (fold-behind-a-chip, body still readable, community can lift it via upvotes) and every hard removal (stub, reason required, mod-only reverse) is visible to everyone. The audit trail is the social pressure.
+- **Mods own their sub, members hold them accountable.** Every action — soft removal (fold-behind-a-chip, body still readable), hard removal (stub, reason required), ban, transfer — lands in a public log per sub. The audit trail is the social pressure. Members have symmetric levers: flag a target → 3 distinct flaggers auto-collapse it for review; upvote a soft-removed target → community auto-lifts it once the threshold is met. The mod doesn't have to be convinced; the community overrules.
 - **One dashboard for mods.** `/modlog` with three modes — open (pending flags, expand any row to decide inline), inbox (deduped current state), audit (every event flat). Click any mod or user to filter. Same audit shape is what the public sees at `/sub/<name>/modlog`.
-- **Checks and balances on mods.** Soft removals auto-revert when the community accumulates enough net upvotes since the collapse. Mods can soft-remove anything; the community has a recourse that doesn't require confrontation.
 - **RSS as it was meant to be.** Every sub publishes `/sub/<name>/feed.xml`. You pick what you follow with [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), or whatever you use. No notification system to fight, no app to install, no algorithm.
 - **Interoperable from day one.** Posts are plain markdown files on disk. The database is an index, regenerable. One-command export = full history or a sub's archive, readable in any text editor.
 - **Runs on a $5 VPS.** One process, one SQLite file, one HTTP port. Backups = two `cp` commands. No build step, no frontend framework. Apache 2.0, fork without asking.
