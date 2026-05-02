@@ -5,6 +5,9 @@
 // collide with current and future top-level routes (`/admin`, `/api`, ...)
 // or that look administrative to a user landing on /sub/<name>.
 
+import { parseFlairs, serializeFlairs } from './flair.js';
+import { FLAG_THRESHOLD_FLOOR } from './flag.js';
+
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?$/;
 
 // Floors on the per-sub auto-uncollapse thresholds (migration 006). Posts
@@ -46,6 +49,10 @@ export function createSub(db, {
   ownerHandle,
   autoUncollapsePost = AUTO_UNCOLLAPSE_POST_FLOOR,
   autoUncollapseComment = AUTO_UNCOLLAPSE_COMMENT_FLOOR,
+  flairs = [],
+  flairsRequired = false,
+  sensitive = false,
+  flagThreshold = FLAG_THRESHOLD_FLOOR,
 }) {
   validateSubName(name);
   if (!ownerHandle) {
@@ -57,14 +64,23 @@ export function createSub(db, {
   if (!Number.isInteger(autoUncollapseComment) || autoUncollapseComment < AUTO_UNCOLLAPSE_COMMENT_FLOOR) {
     throw new Error(`auto-uncollapse threshold for comments must be an integer ≥ ${AUTO_UNCOLLAPSE_COMMENT_FLOOR}`);
   }
+  if (!Number.isInteger(flagThreshold) || flagThreshold < FLAG_THRESHOLD_FLOOR) {
+    throw new Error(`flag threshold must be an integer ≥ ${FLAG_THRESHOLD_FLOOR}`);
+  }
+  const flairsJson = serializeFlairs(flairs);
+  const requiredFlag = flairsRequired ? 1 : 0;
+  if (requiredFlag && parseFlairs(flairsJson).length === 0) {
+    throw new Error('flairs_required cannot be set when no flairs are defined');
+  }
 
   db.exec('BEGIN');
   try {
     db.prepare(
       `INSERT INTO subs (name, description, owner_handle, created_at,
-                         auto_uncollapse_post, auto_uncollapse_comment)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(name, description, ownerHandle, Date.now(), autoUncollapsePost, autoUncollapseComment);
+                         auto_uncollapse_post, auto_uncollapse_comment,
+                         flairs, flairs_required, sensitive, flag_threshold)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(name, description, ownerHandle, Date.now(), autoUncollapsePost, autoUncollapseComment, flairsJson, requiredFlag, sensitive ? 1 : 0, flagThreshold);
     db.prepare(
       `INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)`
     ).run(name, ownerHandle, 'owner');
@@ -80,6 +96,41 @@ export function createSub(db, {
   return { name };
 }
 
+// Owner-only edits to flair list and flairs_required. Caller must verify
+// the actor's role; this function trusts and just runs the update.
+export function setSubFlairs(db, name, { flairs, flairsRequired }) {
+  const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
+  if (!sub) throw new Error(`sub "${name}" not found`);
+  const flairsJson = serializeFlairs(flairs);
+  const requiredFlag = flairsRequired ? 1 : 0;
+  if (requiredFlag && parseFlairs(flairsJson).length === 0) {
+    throw new Error('flairs_required cannot be set when no flairs are defined');
+  }
+  db.prepare('UPDATE subs SET flairs = ?, flairs_required = ? WHERE name = ?')
+    .run(flairsJson, requiredFlag, name);
+}
+
+export function setSubFlagThreshold(db, name, threshold) {
+  const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
+  if (!sub) throw new Error(`sub "${name}" not found`);
+  if (!Number.isInteger(threshold) || threshold < FLAG_THRESHOLD_FLOOR) {
+    throw new Error(`flag threshold must be an integer ≥ ${FLAG_THRESHOLD_FLOOR}`);
+  }
+  db.prepare('UPDATE subs SET flag_threshold = ? WHERE name = ?').run(threshold, name);
+}
+
+export function setSubSensitive(db, name, sensitive) {
+  const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
+  if (!sub) throw new Error(`sub "${name}" not found`);
+  db.prepare('UPDATE subs SET sensitive = ? WHERE name = ?').run(sensitive ? 1 : 0, name);
+}
+
+export function getSubFlairs(db, name) {
+  const row = db.prepare('SELECT flairs FROM subs WHERE name = ?').get(name);
+  if (!row) return [];
+  return parseFlairs(row.flairs);
+}
+
 export function getSubByName(db, name) {
   return db.prepare('SELECT * FROM subs WHERE name = ?').get(name) ?? null;
 }
@@ -89,7 +140,7 @@ export function getSubByName(db, name) {
 // Used by the front page to show what's lively right now (PRD §Front Page).
 export function listActiveSubs(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {}) {
   return db.prepare(
-    `SELECT s.name, s.description, COUNT(p.id) AS post_count
+    `SELECT s.name, s.description, s.sensitive, COUNT(p.id) AS post_count
      FROM subs s
      JOIN posts p ON p.sub_name = s.name
      WHERE p.created_at >= ?
@@ -110,7 +161,7 @@ export function listAllSubs(db, { sort = 'active' } = {}) {
     active: 'ORDER BY last_post_at IS NULL, last_post_at DESC, s.name ASC',
   }[sort] ?? 'ORDER BY last_post_at IS NULL, last_post_at DESC, s.name ASC';
   return db.prepare(
-    `SELECT s.name, s.description, s.owner_handle,
+    `SELECT s.name, s.description, s.owner_handle, s.sensitive,
        COUNT(p.id) AS post_count,
        MAX(p.created_at) AS last_post_at
      FROM subs s

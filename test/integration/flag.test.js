@@ -10,7 +10,7 @@ import {
   resolveFlag,
   pendingFlagsForSub,
   FLAG_CATEGORIES,
-  AUTO_HIDE_THRESHOLD,
+  FLAG_THRESHOLD_FLOOR,
 } from '../../src/content/flag.js';
 
 const OWNER = 'a'.repeat(64);
@@ -80,7 +80,7 @@ test('submitFlag: third pending flag triggers auto-hide on the post', () => {
   assert.equal(r.autoHidden, false);
   r = submitFlag(db, { targetType: 'post', targetId: 'p1', flaggerHandle: F3, category: 'spam' });
   assert.equal(r.autoHidden, true);
-  assert.equal(r.pending, AUTO_HIDE_THRESHOLD);
+  assert.equal(r.pending, FLAG_THRESHOLD_FLOOR);
   const post = db.prepare(`SELECT collapsed_at FROM posts WHERE id = 'p1'`).get();
   assert.ok(post.collapsed_at > 0);
 });

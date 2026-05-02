@@ -21,8 +21,13 @@ import {
   getSubByName,
   validateSubName,
   listAllSubs,
+  setSubFlairs,
+  setSubSensitive,
+  setSubFlagThreshold,
+  getSubFlairs,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
+import { parseFlairs } from '../content/flair.js';
 import {
   addComment,
   editComment,
@@ -42,6 +47,7 @@ import {
 import {
   submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle,
   pendingFlagsAcrossSubs, flagBreakdownsForTargets, resolveFlagsForTarget,
+  FLAG_THRESHOLD_FLOOR,
 } from '../content/flag.js';
 import { renderMarkdown } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
@@ -166,13 +172,17 @@ function relativeTime(ms) {
   return `${Math.floor(d / 86400)}d ago`;
 }
 
-function authorMeta(post, pseudonym, { showComments = false } = {}) {
+function authorMeta(post, pseudonym, { showComments = false, flair = null } = {}) {
   const count = post.comment_count ?? 0;
+  const flairPill = flair
+    ? html`<a class="flair-pill" href="/sub/${post.sub_name}?flair=${flair.slug}" style="background:${flair.color}" title="filter by ${flair.label}">${flair.label}</a>`
+    : html``;
   return html`<div class="meta">
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
     <span class="name">${pseudonym}</span>
     <span class="sep">·</span>
     <a class="sub-link sub-${subColorIndex(post.sub_name)}" href="/sub/${post.sub_name}">//${post.sub_name}</a>
+    ${flairPill}
     <span class="sep">·</span>
     <span class="when">${relativeTime(post.created_at)}</span>
     ${showComments
@@ -286,7 +296,42 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
   </header>`;
 }
 
-function postFormFor({ currentHandle, defaultSub, postableSubs }) {
+// MAX_FLAIR_ROWS — operator can bump per-instance, no PRD floor.
+const FLAIR_EDITOR_ROWS = 6;
+function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
+  const rows = [];
+  for (let i = 0; i < FLAIR_EDITOR_ROWS; i++) {
+    const f = flairs[i];
+    rows.push(html`<div class="flair-row">
+      <input name="flair_slug_${i}"  placeholder="slug"  value="${f?.slug  ?? ''}" maxlength="20" pattern="[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?">
+      <input name="flair_label_${i}" placeholder="label" value="${f?.label ?? ''}" maxlength="24">
+      <input name="flair_color_${i}" placeholder="color (#hex / named / rgb())" value="${f?.color ?? ''}" maxlength="32">
+    </div>`);
+  }
+  return html`<fieldset class="flair-editor">
+    <legend class="muted">flairs (optional, max ${FLAIR_EDITOR_ROWS})</legend>
+    ${rows}
+    <label class="threshold-row">
+      <input type="checkbox" name="flairs_required" value="1" ${flairsRequired ? 'checked' : ''}>
+      <span>require a flair on every new post</span>
+    </label>
+    <p class="muted">slug is the URL-safe id (a-z, 0-9, hyphen). label is what readers see. color sets the pill background — same syntax as <code>config.json:branding.colors</code>. clear a row to remove that flair.</p>
+  </fieldset>`;
+}
+
+function parseFlairFormFields(form) {
+  const out = [];
+  for (let i = 0; i < FLAIR_EDITOR_ROWS; i++) {
+    const slug  = (form[`flair_slug_${i}`]  ?? '').trim();
+    const label = (form[`flair_label_${i}`] ?? '').trim();
+    const color = (form[`flair_color_${i}`] ?? '').trim();
+    if (!slug && !label && !color) continue;
+    out.push({ slug, label, color });
+  }
+  return out;
+}
+
+function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false }) {
   // No default catch-all sub — every post must pick a sub with a real owner.
   // When a sub is contextually fixed (the sub page itself), the picker is
   // hidden and pinned. Otherwise both anon and logged-in users see a real
@@ -309,12 +354,23 @@ function postFormFor({ currentHandle, defaultSub, postableSubs }) {
     </select>`;
   }
 
+  // Flair picker only renders when the form is pinned to a single sub.
+  // Cross-sub forms (home page) skip it; if the picked sub requires a flair,
+  // finalizeDraft rejects the post and the user is steered to the sub page.
+  const flairField = (defaultSub && subFlairs.length > 0)
+    ? html`<select name="flair_slug" ${flairsRequired ? 'required' : ''}>
+        ${flairsRequired ? html`` : html`<option value="">(no flair)</option>`}
+        ${subFlairs.map((f) => html`<option value="${f.slug}">${f.label}</option>`)}
+      </select>`
+    : html``;
+
   return html`<form method="POST" action="/draft">
     ${currentHandle
       ? html``
       : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
     ${subField}
     <input name="title" placeholder="post title" required>
+    ${flairField}
     <textarea name="body" placeholder="markdown body" required></textarea>
     <button>post</button>
   </form>`;
@@ -368,7 +424,7 @@ function postLinksView(hosts) {
   return html`<div class="links">${hosts.map((h) => html`<span class="lh">${h}</span>`)}</div>`;
 }
 
-function postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
+function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
   if (posts.length === 0) {
     return html`<p class="muted">no posts yet — be the first.</p>`;
   }
@@ -405,7 +461,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, voteState, curren
             }) : html``}
           </div>
         </div>
-        ${authorMeta(post, name, { showComments: true })}
+        ${authorMeta(post, name, { showComments: true, flair: flairMap?.get(post.id) ?? null })}
         ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: preview
           ? html`<div class="preview">${raw(preview.html)}${preview.truncated
               ? html` <a href="${link}" class="more">read more →</a>`
@@ -460,6 +516,24 @@ function buildLinkBadges(posts, postsDir) {
   return map;
 }
 
+// Resolve each post's flair_slug against its sub's current flair list.
+// Returns Map<postId, {slug,label,color}>. Posts whose flair was removed
+// from the sub since posting render with no pill (rather than a stale slug).
+function buildFlairMap(db, posts) {
+  const out = new Map();
+  const subNames = [...new Set(posts.filter((p) => p.flair_slug).map((p) => p.sub_name))];
+  if (subNames.length === 0) return out;
+  const placeholders = subNames.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT name, flairs FROM subs WHERE name IN (${placeholders})`).all(...subNames);
+  const subFlairs = new Map(rows.map((r) => [r.name, parseFlairs(r.flairs)]));
+  for (const p of posts) {
+    if (!p.flair_slug) continue;
+    const flair = subFlairs.get(p.sub_name)?.find((f) => f.slug === p.flair_slug);
+    if (flair) out.set(p.id, flair);
+  }
+  return out;
+}
+
 // Top-of-home active-subs block — vertical list of the 4 most-active subs
 // in the last 24h. Each row: //name — description    N posts · M subs.
 // Subscriber count is a placeholder (`—`) until M6 ships subscriptions.
@@ -479,6 +553,7 @@ function activeSubsBlock({ subs, currentHandle }) {
     <div class="active-subs-list">
       ${top.map((s) => html`<div class="active-sub-row">
         <a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
+        ${s.sensitive ? html`<span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}
         <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
         <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · — subs</span>
       </div>`)}
@@ -593,11 +668,12 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
     const pseudonyms = pseudonymsByHandle(db, [...new Set(posts.map((p) => p.handle))]);
     const previews = buildPreviews(posts, postsDir, 280);
     const linksMap = buildLinkBadges(posts, postsDir);
+    const flairMap = buildFlairMap(db, posts);
     const voteState = votesForPostList(db, posts, currentHandle);
     const flaggedSet = currentHandle
       ? flaggedTargetsByHandle(db, 'post', posts.map((p) => p.id), currentHandle)
       : new Set();
-    feedView = postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo: '/', flaggedSet });
+    feedView = postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo: '/', flaggedSet });
   }
 
   send(
@@ -633,7 +709,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>last activity</th><th>owner</th></tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a></td>
+          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" title="subscriber count lights up in M6">—</td>
@@ -677,14 +753,19 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
     return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
   }
   const activeSort = SUB_SORTS.includes(sort) ? sort : 'new';
-  const posts = listPostsInSub(db, subName, { limit: 50, sort: activeSort });
+  const subFlairs = parseFlairs(sub.flairs);
+  const filterFlairSlug = searchParams?.get('flair') ?? null;
+  const activeFilter = filterFlairSlug && subFlairs.find((f) => f.slug === filterFlairSlug) ? filterFlairSlug : null;
+  const posts = listPostsInSub(db, subName, { limit: 50, sort: activeSort, flairSlug: activeFilter });
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
   const previews = buildPreviews(posts, postsDir, 600);
   const linksMap = buildLinkBadges(posts, postsDir);
+  const flairMap = buildFlairMap(db, posts);
   const voteState = votesForPostList(db, posts, currentHandle);
-  const returnTo = `/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}`;
+  const filterSuffix = activeFilter ? `&flair=${activeFilter}` : '';
+  const returnTo = `/sub/${subName}${activeSort === 'new' && !activeFilter ? '' : `?sort=${activeSort}${filterSuffix}`}`;
   const modRole = canModerate(db, subName, currentHandle);
   // Per-render flag/ban state: dim the flag button on already-flagged posts
   // and surface the right ban/unban label per author.
@@ -714,15 +795,20 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
         title: html`//${subName}`,
         subtitle: sub.description || null,
       })}
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
+      ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
-        ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [] })}
+        ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [], subFlairs, flairsRequired: !!sub.flairs_required })}
       </details>
+      ${subFlairs.length > 0 ? html`<div class="flair-filter">
+        <a class="flair-pill flair-pill-all${activeFilter ? '' : ' flair-pill-active'}" href="/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}">all</a>
+        ${subFlairs.map((f) => html`<a class="flair-pill${activeFilter === f.slug ? ' flair-pill-active' : ''}" style="background:${f.color}" href="/sub/${subName}?${activeSort === 'new' ? '' : `sort=${activeSort}&`}flair=${f.slug}">${f.label}</a>`)}
+      </div>` : html``}
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
-      ${postRowsView({ posts, pseudonyms, previews, linksMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
+      ${postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
     `)
   );
 }
@@ -757,6 +843,19 @@ function renderSubCreate(req, res, { auth }) {
           </label>
           <p class="muted">net upvotes that auto-lift a soft-removal. higher = harder to overrule a mod. applies to soft removals only — hard removals never auto-revert.</p>
         </fieldset>
+        <fieldset class="sub-thresholds">
+          <legend class="muted">flag auto-hide threshold</legend>
+          <label class="threshold-row">
+            <span>distinct flaggers (≥ 3)</span>
+            <input type="number" name="flagThreshold" value="3" min="3" step="1" required>
+          </label>
+          <p class="muted">distinct users who must flag a target before it auto-hides for mod review. higher = niche subs avoid spurious auto-hides; never below 3 (so a single flagger can't collapse).</p>
+        </fieldset>
+        ${flairEditorView()}
+        <label class="threshold-row">
+          <input type="checkbox" name="sensitive" value="1">
+          <span>sensitive content (banner advisory; not for porn — see rules)</span>
+        </label>
         <button>create</button>
       </form>
       <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>
@@ -776,6 +875,10 @@ async function handleSubCreate(req, res, { db, auth }) {
   const { name, description = '' } = form;
   const autoUncollapsePost = Number.parseInt(form.autoUncollapsePost ?? '50', 10);
   const autoUncollapseComment = Number.parseInt(form.autoUncollapseComment ?? '20', 10);
+  const flagThreshold = Number.parseInt(form.flagThreshold ?? '3', 10);
+  const flairs = parseFlairFormFields(form);
+  const flairsRequired = form.flairs_required === '1';
+  const sensitive = form.sensitive === '1';
 
   const tryAgain = html`<p><a href="/sub/create">← try again</a></p>`;
   try {
@@ -793,6 +896,10 @@ async function handleSubCreate(req, res, { db, auth }) {
       ownerHandle: currentHandle,
       autoUncollapsePost,
       autoUncollapseComment,
+      flairs,
+      flairsRequired,
+      sensitive,
+      flagThreshold,
     });
   } catch (err) {
     return send(res, 400, errorPage(req, { db, auth }, {
@@ -803,10 +910,88 @@ async function handleSubCreate(req, res, { db, auth }) {
   redirect(res, `/sub/${name}`);
 }
 
+function renderSubEdit(req, res, { db, auth }, subName) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to edit this sub.',
+    }));
+  }
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
+  }
+  if (canModerate(db, subName, currentHandle) !== 'owner') {
+    return send(res, 403, errorPage(req, { db, auth }, {
+      title: 'owner only', message: 'editing the sub is restricted to its owner.',
+      links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
+    }));
+  }
+  const flairs = parseFlairs(sub.flairs);
+  send(res, 200, layout(`edit //${subName}`, html`
+    ${siteHeader({ db, currentHandle, title: html`edit //${subName}` })}
+    <p><a href="/sub/${subName}">← back to //${subName}</a></p>
+    <form method="POST" action="/sub/${subName}/edit">
+      <input name="description" placeholder="one-line description (optional)" value="${sub.description ?? ''}">
+      ${flairEditorView({ flairs, flairsRequired: !!sub.flairs_required })}
+      <label class="threshold-row">
+        <input type="checkbox" name="sensitive" value="1" ${sub.sensitive ? 'checked' : ''}>
+        <span>sensitive content (banner advisory; not for porn — see rules)</span>
+      </label>
+      <fieldset class="sub-thresholds">
+        <legend class="muted">flag auto-hide threshold</legend>
+        <label class="threshold-row">
+          <span>distinct flaggers (≥ 3)</span>
+          <input type="number" name="flagThreshold" value="${sub.flag_threshold}" min="3" step="1" required>
+        </label>
+      </fieldset>
+      <button>save</button>
+    </form>
+    <p class="muted">name and auto-uncollapse thresholds are locked at creation.</p>
+  `));
+}
+
+async function handleSubEdit(req, res, { db, auth }, subName) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to edit this sub.',
+    }));
+  }
+  if (!getSubByName(db, subName)) {
+    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub.</p>`));
+  }
+  if (canModerate(db, subName, currentHandle) !== 'owner') {
+    return send(res, 403, errorPage(req, { db, auth }, {
+      title: 'owner only', message: 'editing the sub is restricted to its owner.',
+    }));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const description = (form.description ?? '').trim();
+  const flairs = parseFlairFormFields(form);
+  const flairsRequired = form.flairs_required === '1';
+  const sensitive = form.sensitive === '1';
+  const flagThreshold = Number.parseInt(form.flagThreshold ?? '3', 10);
+  const tryAgain = html`<p><a href="/sub/${subName}/edit">← try again</a></p>`;
+  try {
+    setSubFlairs(db, subName, { flairs, flairsRequired });
+    setSubSensitive(db, subName, sensitive);
+    setSubFlagThreshold(db, subName, flagThreshold);
+    db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(description, subName);
+  } catch (err) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'edit failed', message: err.message, links: tryAgain,
+    }));
+  }
+  redirect(res, `/sub/${subName}`);
+}
+
 async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
+  const flairSlug = (form.flair_slug ?? '').trim() || null;
   const currentHandle = auth.handleFromRequest(req);
 
   if (!title || !postBody || !subName || (!currentHandle && !email)) {
@@ -866,7 +1051,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       }));
     }
     try {
-      const { draftId } = submitDraft(db, { title, body: postBody, subName });
+      const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug });
       const { subName: published, postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
       // Spam regex check post-publish: match against title + body and,
       // if any pattern hits, auto-collapse + flag for mod review. The
@@ -902,7 +1087,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     );
   }
 
-  const { draftId } = submitDraft(db, { title, body: postBody, subName });
+  const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug });
 
   await auth.startLogin({
     email,
@@ -1160,6 +1345,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
 
   const { post, bodyHtml } = result;
   const currentHandle = auth.handleFromRequest(req);
+  const postFlair = post.flair_slug ? parseFlairs(sub.flairs).find((f) => f.slug === post.flair_slug) ?? null : null;
   const activeSort = COMMENT_SORTS.includes(sort) ? sort : 'best';
   const returnTo = `${permalinkFor(post)}${activeSort === 'best' ? '' : `?sort=${activeSort}`}`;
 
@@ -1227,7 +1413,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
               }) : html``}
             </div>
           </div>
-          ${authorMeta(post, pseudonyms.get(post.handle))}
+          ${authorMeta(post, pseudonyms.get(post.handle), { flair: postFlair })}
           ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
         </div>
@@ -1956,6 +2142,66 @@ function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
   });
 }
 
+// Map a mod action to its inverse, when one exists. Used to render
+// inline "revoke" buttons in the my-modlog audit view.
+const REVOKE_MAP = Object.freeze({
+  collapse: 'uncollapse',
+  remove:   'unremove',
+  ban:      'unban',
+});
+
+// For each row, return the inverse action to offer (or null) given the
+// target's current state. We only show revoke when the action's effect
+// is still in place — a `collapse` row whose post has since been
+// uncollapsed by anyone shouldn't show a revoke button.
+export function buildRevokeMap(db, actions, currentHandle) {
+  const out = new Map();
+  if (!currentHandle) return out;
+  const candidates = actions.filter((a) => a.mod_handle === currentHandle && REVOKE_MAP[a.action]);
+  if (candidates.length === 0) return out;
+
+  const postIds    = candidates.filter((a) => a.target_type === 'post').map((a) => a.target_id);
+  const commentIds = candidates.filter((a) => a.target_type === 'comment').map((a) => a.target_id);
+  const banPairs   = candidates.filter((a) => a.target_type === 'handle').map((a) => [a.sub_name, a.target_id]);
+
+  const postState = new Map();
+  if (postIds.length) {
+    const placeholders = postIds.map(() => '?').join(',');
+    db.prepare(`SELECT id, collapsed_at, removed_at FROM posts WHERE id IN (${placeholders})`)
+      .all(...postIds)
+      .forEach((r) => postState.set(r.id, r));
+  }
+  const commentState = new Map();
+  if (commentIds.length) {
+    const placeholders = commentIds.map(() => '?').join(',');
+    db.prepare(`SELECT id, collapsed_at, removed_at FROM comments WHERE id IN (${placeholders})`)
+      .all(...commentIds)
+      .forEach((r) => commentState.set(r.id, r));
+  }
+  const banSet = new Set();
+  for (const [subName, handle] of banPairs) {
+    const row = db.prepare('SELECT 1 FROM bans WHERE sub_name = ? AND handle = ?').get(subName, handle);
+    if (row) banSet.add(`${subName}\0${handle}`);
+  }
+
+  for (const a of candidates) {
+    let stillActive = false;
+    if (a.target_type === 'post') {
+      const s = postState.get(a.target_id);
+      stillActive = (a.action === 'collapse' && s?.collapsed_at != null)
+                 || (a.action === 'remove'   && s?.removed_at   != null);
+    } else if (a.target_type === 'comment') {
+      const s = commentState.get(a.target_id);
+      stillActive = (a.action === 'collapse' && s?.collapsed_at != null)
+                 || (a.action === 'remove'   && s?.removed_at   != null);
+    } else if (a.target_type === 'handle' && a.action === 'ban') {
+      stillActive = banSet.has(`${a.sub_name}\0${a.target_id}`);
+    }
+    if (stillActive) out.set(a.id, REVOKE_MAP[a.action]);
+  }
+  return out;
+}
+
 function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filters, modHandle }) {
   const since = filters.date === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : null;
   const actionFilter = MODLOG_TYPES[filters.type] ?? null;
@@ -1974,6 +2220,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
   });
 
   const { commentToPost, targetAuthor } = batchTargetLookups(db, actions);
+  const revokeMap = buildRevokeMap(db, actions, currentHandle);
   const modHandles = [...new Set(actions.map((a) => a.mod_handle).filter((h) => h != null))];
   const userHandles = [...new Set([
     ...actions.filter((a) => a.target_type === 'handle').map((a) => a.target_id),
@@ -2032,10 +2279,22 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
       </nav>`
     : html`<p class="muted">${total} action${total === 1 ? '' : 's'}.</p>`;
 
+  const revokeReturn = modlogHref(filters);
+  const revokeCell = (a) => {
+    const inverse = revokeMap.get(a.id);
+    if (!inverse) return html``;
+    return html`<form method="POST" action="/sub/${a.sub_name}/mod" class="modlog-revoke">
+      <input type="hidden" name="action" value="${inverse}">
+      <input type="hidden" name="target_type" value="${a.target_type}">
+      <input type="hidden" name="target_id" value="${a.target_id}">
+      <input type="hidden" name="return_to" value="${revokeReturn}">
+      <button class="action-link" title="undo this action">revoke</button>
+    </form>`;
+  };
   const rowsView = actions.length === 0
     ? html`<p class="muted">no mod actions match.</p>`
     : html`<table class="modlog">
-        <thead><tr><th>sub</th><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th></tr></thead>
+        <thead><tr><th>sub</th><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th><th></th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
           <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
           <td class="muted">${relativeTime(a.created_at)}</td>
@@ -2044,6 +2303,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
           <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
+          <td>${revokeCell(a)}</td>
         </tr>`)}</tbody>
       </table>`;
 
@@ -2406,7 +2666,7 @@ function modlogFilterBar(filters, currentHandle) {
     <span class="filter-sep">·</span>
     ${typeBtn('flagged', 'flagged')} ${typeBtn('banned', 'banned')} ${typeBtn('removed', 'removed')} ${typeBtn('all', 'all')}
     <span class="filter-sep">·</span>
-    <a class="${meCls}" href="${meHref}" title="filter to your own decisions">[me]</a>
+    <a class="${meCls}" href="${meHref}" title="filter to your own decisions">my decisions</a>
   </p>`;
 }
 
@@ -2436,6 +2696,7 @@ function modlogActiveSummary(filters, pseudonyms, resolvedModHandle) {
 }
 
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
+const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
@@ -2587,6 +2848,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));
+      }
+      if ((m = path.match(SUB_EDIT_PATH_RE)) && method === 'GET') {
+        return renderSubEdit(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_EDIT_PATH_RE)) && method === 'POST') {
+        return handleSubEdit(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'), url.searchParams);

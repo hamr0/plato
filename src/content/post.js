@@ -4,6 +4,7 @@ import { resolve, basename } from 'node:path';
 import { renderMarkdown } from './markdown.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
 import { isBanned } from './mod.js';
+import { parseFlairs } from './flair.js';
 
 // Post + draft IDs are 8 random bytes (16 hex chars). Birthday-collision
 // floor at 2^32 IDs of the same kind, which is many orders of magnitude
@@ -54,7 +55,7 @@ export const TITLE_MAX = 300;
 export const BODY_MAX = 40000;
 export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export function submitDraft(db, { title, body, subName = 'general' }) {
+export function submitDraft(db, { title, body, subName = 'general', flairSlug = null }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
     throw new Error('submitDraft: title is required');
   }
@@ -70,8 +71,8 @@ export function submitDraft(db, { title, body, subName = 'general' }) {
 
   const draftId = newId();
   db.prepare(
-    'INSERT INTO drafts (id, sub_name, title, body, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(draftId, subName, title, body, Date.now());
+    'INSERT INTO drafts (id, sub_name, title, body, flair_slug, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(draftId, subName, title, body, flairSlug, Date.now());
 
   return { draftId };
 }
@@ -91,6 +92,20 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
 
   if (isBanned(db, draft.sub_name, handle)) {
     throw new Error(`finalizeDraft: ${handle} is banned from ${draft.sub_name}`);
+  }
+
+  // Validate flair against the sub's current list. Drafts can outlive flair
+  // edits (a flair removed between draft and finalize); reject the post in
+  // that case rather than landing it with an orphan slug.
+  const subRow = db.prepare('SELECT flairs, flairs_required FROM subs WHERE name = ?').get(draft.sub_name);
+  if (subRow) {
+    const flairs = parseFlairs(subRow.flairs);
+    if (subRow.flairs_required && !draft.flair_slug) {
+      throw new Error(`finalizeDraft: //${draft.sub_name} requires a flair`);
+    }
+    if (draft.flair_slug && !flairs.find((f) => f.slug === draft.flair_slug)) {
+      throw new Error(`finalizeDraft: flair "${draft.flair_slug}" is not available in //${draft.sub_name}`);
+    }
   }
 
   // Ensure the handle row exists (pseudonymFor inserts on first sight). This
@@ -123,9 +138,9 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   db.exec('BEGIN');
   try {
     db.prepare(
-      `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(postId, draft.sub_name, handle, draft.title, filePath, createdAt);
+      `INSERT INTO posts (id, sub_name, handle, title, file_path, flair_slug, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(postId, draft.sub_name, handle, draft.title, filePath, draft.flair_slug ?? null, createdAt);
     db.prepare('UPDATE drafts SET finalized_post_id = ? WHERE id = ?').run(postId, draftId);
     renameSync(tmpPath, absPath);
     db.exec('COMMIT');
@@ -273,23 +288,26 @@ const SORT_CLAUSES = {
 
 export const SUB_SORTS = ['new', 'old', 'top', 'hot'];
 
-export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'new', now = Date.now() } = {}) {
+export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'new', flairSlug = null, now = Date.now() } = {}) {
   if (!SUB_SORTS.includes(sort)) throw new Error(`listPostsInSub: unknown sort '${sort}'`);
+
+  const flairFilter = flairSlug ? 'AND flair_slug = ?' : '';
+  const flairArg = flairSlug ? [flairSlug] : [];
 
   if (sort === 'hot') {
     return db.prepare(`
       SELECT *,
         (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
       FROM posts
-      WHERE sub_name = ?
+      WHERE sub_name = ? ${flairFilter}
       ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC
       LIMIT ? OFFSET ?
-    `).all(subName, now, limit, offset);
+    `).all(subName, ...flairArg, now, limit, offset);
   }
 
   return db.prepare(
     `SELECT *,
        (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
-     FROM posts WHERE sub_name = ? ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
-  ).all(subName, limit, offset);
+     FROM posts WHERE sub_name = ? ${flairFilter} ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
+  ).all(subName, ...flairArg, limit, offset);
 }

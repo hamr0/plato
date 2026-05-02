@@ -5,7 +5,7 @@
 // flooding flags on a single target. Categories are a closed list:
 // spam, harassment, illegal, off_topic, other.
 //
-// Auto-hide: when AUTO_HIDE_THRESHOLD distinct pending flags accumulate
+// Auto-hide: when FLAG_THRESHOLD_FLOOR distinct pending flags accumulate
 // on a target, submitFlag flips collapsed_at on that target — making it
 // invisible from default sort views — without writing to mod_actions.
 // The flags table itself is the audit trail for system collapses (you
@@ -24,9 +24,24 @@ export const FLAG_CATEGORIES = Object.freeze([
 ]);
 
 // PRD §Spam 7: "configurable per-sub, default 3 unique flaggers."
-// Per-sub override lands when M5 needs it; for now the default is the
-// only lever.
-export const AUTO_HIDE_THRESHOLD = 3;
+// FLOOR is 3 — going lower lets a single flagger collapse a target,
+// defeating the "distinct flaggers" defense. Sub owners may raise it
+// (more permissive) but cannot lower it. Default still 3 for any sub
+// that doesn't override.
+export const FLAG_THRESHOLD_FLOOR = 3;
+
+// Resolve the effective auto-hide threshold for a given target. Comments
+// inherit their post's sub. Falls back to the default if the row can't
+// be located (defensive — should not happen since submitFlag already
+// asserted the target exists).
+export function resolveFlagThreshold(db, targetType, targetId) {
+  const subName = targetType === 'post'
+    ? db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(targetId)?.sub_name
+    : db.prepare('SELECT p.sub_name FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?').get(targetId)?.sub_name;
+  if (!subName) return FLAG_THRESHOLD_FLOOR;
+  const row = db.prepare('SELECT flag_threshold FROM subs WHERE name = ?').get(subName);
+  return row?.flag_threshold ?? FLAG_THRESHOLD_FLOOR;
+}
 
 export const NOTE_MAX = 280;
 
@@ -62,8 +77,9 @@ export function submitFlag(db, {
     ).run(id, targetType, targetId, flaggerHandle, category, note, now);
 
     const pending = pendingFlagCount(db, targetType, targetId);
+    const threshold = resolveFlagThreshold(db, targetType, targetId);
     let autoHidden = false;
-    if (pending >= AUTO_HIDE_THRESHOLD) {
+    if (pending >= threshold) {
       // Only flip if not already hidden — manual mod collapses and prior
       // auto-hides shouldn't get their timestamp overwritten.
       const result = db

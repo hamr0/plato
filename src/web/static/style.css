@@ -974,6 +974,53 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .links { color: var(--text-dim); font-size: 0.75rem; margin-top: 0.25rem; display: flex; gap: 0.9rem; flex-wrap: wrap; }
 .links .lh { display: inline-flex; align-items: center; }
 
+/* Flair pill — colored background per the sub owner's choice; text uses
+   a hardcoded light shade because the owner picks any color and we can't
+   compute contrast ahead of time. Operators can override via .flair-pill
+   in a fork stylesheet if their default palette demands dark text. */
+.flair-pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: lowercase;
+  color: var(--flair-text);
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  text-decoration: none;
+  line-height: 1.4;
+  margin-left: 0.25rem;
+}
+.flair-pill:hover { text-decoration: none; filter: brightness(1.15); }
+.flair-pill-all   { background: var(--bg-soft); color: var(--text-dim); border: 1px solid var(--border); }
+.flair-pill-active { outline: 2px solid var(--text); outline-offset: 1px; }
+
+.flair-filter { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
+
+.flair-editor { border: 1px solid var(--border); padding: 0.5rem 0.7rem; margin: 0.6rem 0; }
+.flair-editor .flair-row { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 0.4rem; margin: 0.25rem 0; }
+.flair-editor .flair-row input { font-size: 0.85rem; padding: 0.2rem 0.4rem; }
+
+/* Sensitive content advisory — generic, not NSFW. The default rules ban
+   porn (see operator-guide), so calling this "NSFW" would invite content
+   the rules forbid. Operators/communities define what counts. */
+.sensitive-banner {
+  border: 1px solid var(--accent-warm);
+  color: var(--accent-warm);
+  padding: 0.4rem 0.7rem;
+  margin: 0.4rem 0;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+.sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
+
+/* My-modlog inline revoke button. Renders only on rows where the
+   current handle is the actor and the action's effect is still in
+   place. POSTs to /sub/<sub>/mod with the inverse action. */
+.modlog-revoke { display: inline; margin: 0; }
+.modlog-revoke button { background: transparent; cursor: pointer; padding: 0.1rem 0.4rem; }
+.modlog-revoke button:hover { color: var(--accent-warm); border-color: var(--accent-warm); }
+
 /* Cross-sub comment feed (home /comments tab) */
 .comment-feed .comment-row { padding: 0.7rem 0; border-bottom: 1px solid var(--border); }
 .comment-feed .comment-row:last-child { border-bottom: 0; }
