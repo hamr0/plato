@@ -102,24 +102,38 @@ Each refusal maps to an illusion modern platforms sell — interoperability you 
 
 ---
 
-## The shape of plato vs Reddit
+## Where plato sits
 
-| | Reddit | plato |
+plato is a Reddit-shaped forum built like a phpBB-era forum should have been: one binary, one SQLite file, plain markdown on disk, fork without asking. **The interaction model of Reddit's small-subs era** — subs, threaded comments, upvotes, mods answerable to a public log — **assembled with the operational discipline of the self-host PHP forum era** — one process, plain files, no plugin marketplace — **minus the bloat both eras accumulated**: Reddit's algorithmic-feed/karma/ads layer, and the PHP era's bbcode-and-avatar-upload-and-monetization-plugin sprawl.
+
+### Closest neighbour: Lemmy
+
+[Lemmy](https://join-lemmy.org) is the FOSS Reddit clone most open-web folks reach for. plato is in that conversation but a different bet:
+
+| | Lemmy | plato |
 |---|---|---|
-| Owner | Public company | One operator (forkable) |
-| Sign-up | Email + password | One-time link, email forgotten |
-| Identity | Persistent username | Pseudonym derived from your email |
-| Karma | Yes | None |
-| Follower graph | Yes | None |
-| Algorithmic feed | Yes (default) | None |
-| Image / video hosting | Yes | None — link out |
-| Mod actions | Mostly invisible | Public log per sub |
-| Community override of mod | None | Yes — auto, on cumulative votes |
-| Ads | Yes | None |
-| Tracking | Yes | None |
-| Export | Limited | One command, full archive |
-| Where data lives | Their servers | Plain files, your machine |
-| When the operator goes bad | You leave the platform | You fork the archive |
+| Stack | Rust + Postgres + Pictrs image server | Node 22 + SQLite, one process |
+| Install | Docker compose, ~5 services | `git clone && npm start` on a $5 VPS |
+| Federation | ActivityPub across instances | None — one site, one operator |
+| Image / video | Hosted via Pictrs | Link out, never hosted |
+| Identity | Username + password | Pseudonym from a one-time email link; email forgotten |
+| Mod transparency | Visible to instance admins | Public log per sub, for everyone, with community auto-override on votes |
+| Backup | `pg_dump` + Pictrs volume | `cp` two paths |
+| When the operator goes dark | Migrate to another instance via federation | `git clone`, fork the archive, keep your markdown |
+
+Lemmy is the right pick if you want a federated alternative to Reddit at the network level. plato is the right pick if you want one small forum that runs forever, on one box, with every mod action visible to every user, and an operator nobody can capture.
+
+### In the broader self-hostable forum landscape
+
+| Tool | Shape | Stack | What plato kept | What plato refused |
+|---|---|---|---|---|
+| Reddit (closed) | subs + votes + threaded + mods | private | interaction model | algorithm, karma, ads, follower graph |
+| [Lemmy](https://join-lemmy.org) | Reddit, federated | Rust + PG + Pictrs | the FOSS shape | federation overhead, image hosting |
+| [NodeBB](https://nodebb.org) | bbforum (categories / topics) | Node + Mongo/PG + Redis | none — bbforum shape isn't ours | plugin marketplace, theme system, multi-DB |
+| [Discourse](https://www.discourse.org) | opinionated discussion | Ruby + PG + Redis + Sidekiq | public-modlog instinct | heavy stack, server requirements |
+| [phpBB](https://www.phpbb.com) / Discuz! / vBulletin | bbforum, classic PHP era | PHP + MySQL | self-host ethos, plain-files philosophy | bbcode, avatar uploads, plugin sprawl, monetization plugins |
+
+The lineage plato claims: **the structural defaults of Reddit's small-subs era, the self-host ethics of phpBB's golden era, none of the bloat either accumulated.**
 
 ---
 
