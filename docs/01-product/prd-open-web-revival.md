@@ -147,7 +147,7 @@ Same page for everyone — logged in, logged out, no personalization. Two sectio
 
 **Top-nav filters (M5/B8)**: the home feed exposes three orthogonal axes — `Posts | Comments` tab (comments tab shows `listRecentCommentsAcrossSubs`, removed-comments excluded), sort `new | top | hot` (hot is post-only; uses HN-shape `score / (age_hours + 2)^1.5`), and date `24h | week | all`. Default state (no params) keeps the per-sub-cap chronological recency feed described above; activating any filter switches to the global cross-sub ordering. `Subscribed | All` toggle deferred to M6.
 
-**`/communities` directory (M5/B8)**: a separate page listing every sub on the instance with description, owner pseudonym, post count, and last-activity timestamp. Sortable (`active | posts | name`), client-side prefix filter. Linked from the home subs strip as the `all` chip. The home page covers "what's lively right now"; `/communities` covers "what exists at all."
+**`/subs` directory (M5/B8)**: a separate page listing every sub on the instance with description, owner pseudonym, post count, last-activity timestamp, and a subscribers column (placeholder `—` until M6 ships subscriptions). Sortable (`active | posts | name`), client-side prefix filter. Linked from the home subs strip as the `all` chip. The home page covers "what's lively right now"; `/subs` covers "what exists at all."
 
 That's the home page. Two lists by default, both chronological, both deduped sensibly. No "for you," no algorithm, no ranking magic.
 

@@ -73,8 +73,8 @@ Validate at boot: missing required env fails fast with a clear error. The server
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | front page: active subs strip + recent posts (cap 2/sub). Top-nav filters: `?tab=posts\|comments`, `?sort=new\|top\|hot`, `?date=24h\|week\|all`. Default tab = posts, default sort = new, default date = all. |
-| GET | `/communities` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter |
+| GET | `/` | front page: active subs strip + recent posts (cap 2/sub). Top-nav filters: `?tab=posts\|comments`, `?sort=new\|old\|top\|hot`, `?date=24h\|week\|all`. Default tab = posts, default sort = new, default date = all. |
+| GET | `/subs` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter, subscriber column (placeholder until M6) |
 | GET | `/sub/<name>` | sub feed (sort: new/old/top/hot via `?sort=`) |
 | GET | `/sub/create` | new-sub form (logged-in only) |
 | POST | `/sub/create` | create sub (validates name + thresholds) |

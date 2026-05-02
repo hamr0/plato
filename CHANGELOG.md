@@ -163,13 +163,14 @@ A code-review audit of M1–M4 (the pre-M5 surface) flagged a handful of issues 
 
 A small read-the-design-mockups + close-the-feedback-loop pass:
 
-- **`/communities` directory page.** Sortable list of every sub (most recent / most posts / a-z) with description, owner pseudonym, post count, last-activity timestamp. Client-side prefix filter via the search input. Linked from the subs strip as the `all` chip.
-- **Comment-count icon on feed.** Replaced the bare "47 replies" text with an inline SVG bubble + tabular-numeric count. Zero-reply state stays muted but readable (was ~invisible against the dim text token on dark mode).
+- **`/subs` directory page.** Sortable list of every sub (most recent / most posts / a-z) with description, owner pseudonym, post count, **subscribers** column (placeholder `—` until M6), and last-activity timestamp. Client-side prefix filter via the search input. Linked from the subs strip as the `all` chip.
+- **`//<sub>` display style.** Replaced `/sub/<x>` text in feed post-meta, comment-feed context line, post-page breadcrumb, sub-page heading, post-form dropdown, and back-to-sub error links with `//<x>` (Reddit-shape with a leaner sigil). The actual route stays `/sub/<x>`; only display text changed.
+- **Reply-count link on feed.** "47 replies" / "1 reply" / "0 replies" text link replacing the SVG bubble experiment (icon felt foreign to the terminal aesthetic; text is denser and reads in any column-width). Zero-reply state stays muted but readable.
 - **Sub color accent on feed.** `/sub/<x>` links in post-meta and the communities directory now use a deterministic 8-color palette indexed by hash of the sub name (`subColorIndex` in `app.js`). Same sub keeps the same color across renders — visual anchor without an avatar / image / icon. Forks override the palette in one place (`--sub-color-0..7` on `:root`).
 - **Domain hint after outbound links.** `markdown.js` link renderer now appends a `↗ host.com` span after every absolute http(s) link. Pure text, no favicon image (the design mocks had favicons via `s2/favicons` but that proxy leaks viewer→Google; self-hosting favicons reintroduces the no-uploads exception). Reader sees where each link goes before clicking.
 - **Home top-nav: Posts | Comments + sort + date.** Tab strip above the home feed:
   - **Posts** (default, capped per-sub on the unfiltered feed; switches to global `listPostsAcrossSubs` when any filter is active) | **Comments** (`listRecentCommentsAcrossSubs`, `removed_at IS NULL`).
-  - Sort chips: **new** (default, `created_at DESC`) | **top** (`score DESC`) | **hot** (post-only, HN-shape `score / (age_hours + 2)^1.5`).
+  - Sort chips: **new** (default, `created_at DESC`) | **old** (`created_at ASC`) | **top** (`score DESC`) | **hot** (post-only, HN-shape `score / (age_hours + 2)^1.5`).
   - Date chips: **24h** | **week** | **all** (default).
   - `Subscribed | All` toggle deferred to **M6** (subscriptions table doesn't exist yet).
 - **Width tightening.** Body `max-width` 720px → 880px globally — comment trees + modlog table + post-meta now breathe at 4-deep nesting without wrapping. Reading column inside `<article>` bodies is unchanged.
