@@ -163,3 +163,18 @@ test('MOD_ACTIONS exposes all 9 known actions and is frozen', () => {
   assert.equal(MOD_ACTIONS.length, 9);
   assert.ok(Object.isFrozen(MOD_ACTIONS));
 });
+
+test('recordAction: transfer_owner to a nonexistent handle throws cleanly', () => {
+  const db = freshDb();
+  const ghost = 'f'.repeat(64);
+  assert.throws(
+    () => recordAction(db, {
+      subName: 'lobby', modHandle: OWNER, action: 'transfer_owner',
+      targetType: 'handle', targetId: ghost,
+    }),
+    /not a known handle/,
+  );
+  // Sub still owned by HANDLE — transaction rolled back.
+  const sub = db.prepare(`SELECT owner_handle FROM subs WHERE name = 'lobby'`).get();
+  assert.equal(sub.owner_handle, OWNER);
+});

@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
-import { addComment, listCommentsForPost, buildCommentTree, COMMENT_SORTS } from '../../src/content/comment.js';
+import {
+  addComment, listCommentsForPost, buildCommentTree, COMMENT_SORTS, COMMENT_BODY_MAX,
+} from '../../src/content/comment.js';
 import { recordAction } from '../../src/content/mod.js';
 
 const HANDLE = 'a'.repeat(64);
@@ -159,4 +161,51 @@ test('addComment: banned user rejected from sub', () => {
     () => addComment(db, { postId: 'p1', handle: HANDLE_B, body: 'sneaky' }),
     /banned from lobby/,
   );
+});
+
+test('addComment: rejects body over cap', () => {
+  const db = fixture();
+  assert.throws(
+    () => addComment(db, { postId: 'p1', handle: HANDLE, body: 'x'.repeat(COMMENT_BODY_MAX + 1) }),
+    /exceeds/,
+  );
+});
+
+test('addComment: rejects when parent post has been hard-removed', () => {
+  const db = fixture();
+  db.prepare(`UPDATE posts SET removed_at = ? WHERE id = 'p1'`).run(Date.now());
+  assert.throws(
+    () => addComment(db, { postId: 'p1', handle: HANDLE, body: 'reply' }),
+    /has been removed/,
+  );
+});
+
+test('addComment: rejects reply to a removed parent comment', () => {
+  const db = fixture();
+  const { commentId } = addComment(db, { postId: 'p1', handle: HANDLE, body: 'parent' });
+  db.prepare(`UPDATE comments SET removed_at = ? WHERE id = ?`).run(Date.now(), commentId);
+  assert.throws(
+    () => addComment(db, { postId: 'p1', parentId: commentId, handle: HANDLE, body: 'child' }),
+    /has been removed/,
+  );
+});
+
+test('buildCommentTree: surfaces a cycle node as root rather than infinite-looping', () => {
+  // Construct a fake row set with a self-cycle (a → a). Returns within
+  // bounded time and does not stack-overflow.
+  const rows = [{ id: 'a', parent_comment_id: 'a', body: 'x', handle: HANDLE, post_id: 'p', created_at: 1, score: 0 }];
+  const tree = buildCommentTree(rows);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].id, 'a');
+  assert.equal(tree[0].replies.length, 0);
+});
+
+test('buildCommentTree: surfaces an a→b→a cycle as roots', () => {
+  const rows = [
+    { id: 'a', parent_comment_id: 'b', body: 'x', handle: HANDLE, post_id: 'p', created_at: 1, score: 0 },
+    { id: 'b', parent_comment_id: 'a', body: 'y', handle: HANDLE, post_id: 'p', created_at: 2, score: 0 },
+  ];
+  const tree = buildCommentTree(rows);
+  // Both surface as roots so neither node infinite-recurses.
+  assert.equal(tree.length, 2);
 });

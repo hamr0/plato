@@ -499,3 +499,69 @@ test('errorPage: banned-from-sub error renders site chrome + back link', async (
   assert.match(body, /plato/);
   assert.match(body, /href="\/sub\/lobby"/);
 });
+
+test('safeLocalRedirect: //evil.com falls back to default', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar, ownerHandle } = await bootstrapMod(ctx);
+  const author = 'k'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 90 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_or', sub: 'lobby', handle: author });
+  seedFlag(db, { id: 'f_or', targetType: 'post', targetId: 'p_or', flagger: ownerHandle });
+
+  const res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p_or', sub_name: 'lobby', decision: 'dismiss',
+      return_to: '//evil.com/path',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/modlog', 'fell back to /modlog');
+});
+
+test('safeLocalRedirect: /\\evil falls back to default', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar, ownerHandle } = await bootstrapMod(ctx);
+  const author = 'l'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 90 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_or2', sub: 'lobby', handle: author });
+  seedFlag(db, { id: 'f_or2', targetType: 'post', targetId: 'p_or2', flagger: ownerHandle });
+
+  const res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p_or2', sub_name: 'lobby', decision: 'dismiss',
+      return_to: '/\\evil.com',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/modlog');
+});
+
+test('safeLocalRedirect: legitimate /sub/x is preserved', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar, ownerHandle } = await bootstrapMod(ctx);
+  const author = 'm'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 90 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_or3', sub: 'lobby', handle: author });
+  seedFlag(db, { id: 'f_or3', targetType: 'post', targetId: 'p_or3', flagger: ownerHandle });
+
+  const res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p_or3', sub_name: 'lobby', decision: 'dismiss',
+      return_to: '/sub/lobby',
+    }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/lobby');
+});

@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../../src/db/index.js';
-import { submitDraft, finalizeDraft, getPost, listRecentPosts } from '../../src/content/post.js';
+import {
+  submitDraft, finalizeDraft, getPost, listRecentPosts, TITLE_MAX, BODY_MAX,
+} from '../../src/content/post.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 
 function freshDb() {
@@ -226,4 +228,68 @@ test('listRecentPosts: empty DB returns empty array', () => {
   const db = freshDb();
   const rows = listRecentPosts(db);
   assert.deepEqual(rows, []);
+});
+
+test('submitDraft: rejects title over cap', () => {
+  const db = freshDb();
+  assert.throws(
+    () => submitDraft(db, { title: 'x'.repeat(TITLE_MAX + 1), body: 'b' }),
+    /title exceeds/,
+  );
+});
+
+test('submitDraft: rejects body over cap', () => {
+  const db = freshDb();
+  assert.throws(
+    () => submitDraft(db, { title: 't', body: 'x'.repeat(BODY_MAX + 1) }),
+    /body exceeds/,
+  );
+});
+
+test('finalizeDraft: writes only one canonical .md file on success, no .tmp leftover', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'lobby' });
+  finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
+  const files = readdirSync(postsDir);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^\d{4}-\d{2}-\d{2}-[0-9a-f]{16}\.md$/);
+});
+
+test('finalizeDraft: rollback removes the .tmp temp file', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'lobby' });
+  db.exec('DROP TABLE posts');
+  try { finalizeDraft(db, { draftId, handle: HANDLE, postsDir }); } catch { /* expected */ }
+  const files = readdirSync(postsDir);
+  assert.equal(files.length, 0, 'temp file unlinked on rollback');
+});
+
+test('parseFrontmatter: round-trips a body containing its own ---', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const trickyBody = 'before\n\n---\nfake: true\n---\n\nafter';
+  const { draftId } = submitDraft(db, { title: 't', body: trickyBody, subName: 'lobby' });
+  const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
+  const { body } = getPost(db, postId, postsDir);
+  assert.equal(body.trim(), trickyBody, 'body with --- sentinel survives round-trip');
+});
+
+test('parseFrontmatter: body that itself starts with --- is not mis-parsed', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const body = '---\nthis is not frontmatter, just a body that opens with dashes\n---\nplus text';
+  const { draftId } = submitDraft(db, { title: 't', body, subName: 'lobby' });
+  const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
+  const got = getPost(db, postId, postsDir);
+  assert.equal(got.body.trim(), body);
 });

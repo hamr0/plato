@@ -142,3 +142,28 @@ test('FLAG_CATEGORIES exposes 5 known categories and is frozen', () => {
   assert.ok(Object.isFrozen(FLAG_CATEGORIES));
   assert.deepEqual([...FLAG_CATEGORIES].sort(), ['harassment', 'illegal', 'off_topic', 'other', 'spam']);
 });
+
+import { NOTE_MAX } from '../../src/content/flag.js';
+
+test('submitFlag: rejects note over cap', () => {
+  const db = freshDb();
+  assert.throws(
+    () => submitFlag(db, {
+      targetType: 'post', targetId: 'p1', flaggerHandle: F1, category: 'spam',
+      note: 'x'.repeat(NOTE_MAX + 1),
+    }),
+    /exceeds/,
+  );
+});
+
+test('submitFlag: a fresh handle (no prior post/comment) auto-creates handles row', () => {
+  const db = freshDb();
+  const fresh = 'f'.repeat(64);
+  // No INSERT INTO handles for `fresh`. Should not throw FK violation.
+  const result = submitFlag(db, {
+    targetType: 'post', targetId: 'p1', flaggerHandle: fresh, category: 'spam',
+  });
+  assert.match(result.id, /^[0-9a-f]{16}$/);
+  const row = db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(fresh);
+  assert.ok(row, 'handles row created on first flag');
+});

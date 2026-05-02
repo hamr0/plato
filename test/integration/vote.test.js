@@ -257,3 +257,15 @@ test('castVote: per-sub threshold override is honored (post threshold = 3 fires 
   const snap = db.prepare(`SELECT collapsed_at FROM posts WHERE id = 'p1'`).get();
   assert.equal(snap.collapsed_at, null, 'fired at the per-sub threshold of 3');
 });
+
+test('castVote: fresh voter with no handle row auto-creates one (no FK crash)', () => {
+  const db = fixture();
+  const fresh = 'f'.repeat(64);
+  // Delete any pre-seeded row to be sure.
+  db.prepare('DELETE FROM handles WHERE handle = ?').run(fresh);
+  // Should not throw "handle not found"; handles row is auto-created.
+  const r = castVote(db, { targetType: 'post', targetId: 'p1', voterHandle: fresh, direction: 'up' });
+  assert.equal(r.vote, 'up');
+  const row = db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(fresh);
+  assert.ok(row, 'handles row auto-created on first vote');
+});
