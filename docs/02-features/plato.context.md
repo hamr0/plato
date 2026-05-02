@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.1 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.2 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 M1–M4 audit hardening shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -115,6 +115,10 @@ These have hardcoded constants because the right value is the same for almost ev
 
 - **`COLLAPSE_THRESHOLD = -3`** (`src/web/app.js`) — score below which a comment auto-folds.
 - **`MAX_DEPTH = 4`** (`src/web/app.js`) — beyond this, comment replies fold into a `+ N more` summary.
+- **`HARD_DEPTH = 64`** (`src/web/app.js`) — hard recursion guard in `commentNodeView`. Beyond this, replies stop rendering entirely (defense-in-depth against pathological threads or re-parenting bugs).
+- **`TITLE_MAX = 300` / `BODY_MAX = 40000`** (`src/content/post.js`) — server-side caps on draft input. Forms also carry `maxlength` but the server is authoritative.
+- **`COMMENT_BODY_MAX = 10000`** (`src/content/comment.js`) — same shape as the post caps.
+- **`NOTE_MAX = 280`** (`src/content/flag.js`) — server-side cap on flag notes.
 - **`COMMENT_PREVIEW_CHARS = 280`** (`src/web/app.js`) — long-comment fold threshold; matches the post-preview cap on the home page.
 - **`AUTO_HIDE_THRESHOLD = 3`** (`src/content/flag.js`) — distinct flaggers needed to auto-collapse pending mod review. Per-sub override is a follow-up.
 - **`RATE_LIMIT_FLOOR`** (`src/content/rateLimit.js`) — PRD-locked floor for per-account + per-sub rate limits. Operator can tighten via `config.json`; loosening throws at boot.
