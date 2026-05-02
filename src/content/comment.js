@@ -81,6 +81,28 @@ export function listCommentsForPost(db, postId, { sort = 'best' } = {}) {
 // nodes; each node has a `replies` array. Comments whose parent is missing
 // (e.g. parent removed by mod in M4) are surfaced as roots so they don't
 // vanish from the page. Stable ordering by created_at within each level.
+// Cross-sub recent comments for the home /comments tab. Returns each
+// comment plus the parent post's id, title, and sub_name so the renderer
+// can show "<comment body excerpt> · /sub/<x> · <post title>". Filters
+// out removed comments. `sort` is 'new' | 'top'; date filter via sinceMs.
+export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50 } = {}) {
+  const where = sinceMs != null ? 'AND c.created_at >= ?' : '';
+  const params = sinceMs != null ? [sinceMs] : [];
+  const order = sort === 'top'
+    ? 'ORDER BY c.score DESC, c.created_at DESC'
+    : 'ORDER BY c.created_at DESC';
+  return db.prepare(
+    `SELECT c.id, c.post_id, c.handle, c.body, c.score, c.created_at,
+       c.collapsed_at, c.removed_at,
+       p.title AS post_title, p.sub_name
+     FROM comments c
+     JOIN posts p ON p.id = c.post_id
+     WHERE c.removed_at IS NULL ${where}
+     ${order}
+     LIMIT ?`
+  ).all(...params, limit);
+}
+
 export function buildCommentTree(comments) {
   const byId = new Map();
   for (const c of comments) {

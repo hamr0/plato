@@ -199,6 +199,27 @@ export function listRecentPostsCappedPerSub(db, { limit = 50, perSub = 2 } = {})
   ).all(perSub, limit);
 }
 
+// Cross-sub home feed with sort + date filters. Used by the home page's
+// top-nav (UX-E): no per-sub cap, just a global ordering with optional
+// recency window. `sort` is one of 'new' | 'top' | 'hot'; `sinceMs` is
+// the lower bound on created_at (or undefined for all-time).
+export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, now = Date.now() } = {}) {
+  const where = sinceMs != null ? 'WHERE created_at >= ?' : '';
+  const params = sinceMs != null ? [sinceMs] : [];
+  const baseSelect = `SELECT *,
+    (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
+    FROM posts ${where}`;
+  if (sort === 'hot') {
+    return db.prepare(
+      `${baseSelect} ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC LIMIT ?`
+    ).all(...params, now, limit);
+  }
+  const order = sort === 'top'
+    ? 'ORDER BY score DESC, created_at DESC'
+    : 'ORDER BY created_at DESC';
+  return db.prepare(`${baseSelect} ${order} LIMIT ?`).all(...params, limit);
+}
+
 // Sub-page post listing with PRD §sort modes: new / old / top / hot.
 // - new: newest first (ORDER BY created_at DESC)
 // - old: oldest first

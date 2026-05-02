@@ -71,8 +71,31 @@ md.use({
         : token;
       return escapeHtml(text);
     },
+    // Anchor + outbound-host hint. For absolute http(s) URLs we append a
+    // muted "↗ host.com" span so the reader sees where the link goes
+    // before clicking. Relative URLs (/sub/x, #anchor), mailto, and empty
+    // hrefs render as a plain anchor with no badge.
+    link(token) {
+      const href = token.href ?? '';
+      const inner = (token.tokens ?? []).map((t) => this.parser.parseInline([t])).join('') || escapeHtml(token.text ?? '');
+      const titleAttr = token.title ? ` title="${escapeHtml(token.title)}"` : '';
+      if (!href) return `<a${titleAttr}>${inner}</a>`;
+      const anchor = `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`;
+      const host = outboundHost(href);
+      return host ? `${anchor}<span class="ext-host">${escapeHtml(host)}</span>` : anchor;
+    },
   },
 });
+
+function outboundHost(href) {
+  if (!/^https?:\/\//i.test(href)) return null;
+  try {
+    const u = new URL(href);
+    return u.hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
 
 export function renderMarkdown(source) {
   if (typeof source !== 'string' || source.length === 0) return '';

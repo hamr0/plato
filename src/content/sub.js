@@ -97,3 +97,25 @@ export function listActiveSubs(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 
      ORDER BY post_count DESC, s.name ASC`
   ).all(sinceMs);
 }
+
+// Full directory listing for /communities. Returns every sub with
+// description, owner_handle, total post count, and last-post timestamp.
+// Sort modes: 'name' (alpha), 'posts' (post_count DESC), 'active'
+// (last_post_at DESC, NULLs last). The page does client-side search by
+// prefix, so the query returns all rows.
+export function listAllSubs(db, { sort = 'active' } = {}) {
+  const order = {
+    name:   'ORDER BY s.name ASC',
+    posts:  'ORDER BY post_count DESC, s.name ASC',
+    active: 'ORDER BY last_post_at IS NULL, last_post_at DESC, s.name ASC',
+  }[sort] ?? 'ORDER BY last_post_at IS NULL, last_post_at DESC, s.name ASC';
+  return db.prepare(
+    `SELECT s.name, s.description, s.owner_handle,
+       COUNT(p.id) AS post_count,
+       MAX(p.created_at) AS last_post_at
+     FROM subs s
+     LEFT JOIN posts p ON p.sub_name = s.name
+     GROUP BY s.name
+     ${order}`
+  ).all();
+}
