@@ -15,26 +15,37 @@ function newId() {
   return randomBytes(ID_BYTES).toString('hex');
 }
 
+export const COMMENT_BODY_MAX = 10000;
+
 export function addComment(db, { postId, parentId = null, handle, body, now = Date.now() }) {
   if (!postId) throw new Error('addComment: postId is required');
   if (!handle) throw new Error('addComment: handle is required');
   if (typeof body !== 'string' || body.trim().length === 0) {
     throw new Error('addComment: body is required');
   }
+  if (body.length > COMMENT_BODY_MAX) {
+    throw new Error(`addComment: body exceeds ${COMMENT_BODY_MAX} characters`);
+  }
 
   // FK on post_id covers post existence; we re-check explicitly so the
   // error message is friendlier than "FOREIGN KEY constraint failed".
-  const post = db.prepare('SELECT id, sub_name FROM posts WHERE id = ?').get(postId);
+  const post = db.prepare('SELECT id, sub_name, removed_at FROM posts WHERE id = ?').get(postId);
   if (!post) throw new Error(`addComment: post ${postId} not found`);
+  if (post.removed_at != null) {
+    throw new Error(`addComment: post ${postId} has been removed`);
+  }
   if (isBanned(db, post.sub_name, handle)) {
     throw new Error(`addComment: ${handle} is banned from ${post.sub_name}`);
   }
 
   if (parentId) {
-    const parent = db.prepare('SELECT post_id FROM comments WHERE id = ?').get(parentId);
+    const parent = db.prepare('SELECT post_id, removed_at FROM comments WHERE id = ?').get(parentId);
     if (!parent) throw new Error(`addComment: parent comment ${parentId} not found`);
     if (parent.post_id !== postId) {
       throw new Error('addComment: parent comment belongs to a different post');
+    }
+    if (parent.removed_at != null) {
+      throw new Error(`addComment: parent comment ${parentId} has been removed`);
     }
   }
 
@@ -76,10 +87,27 @@ export function buildCommentTree(comments) {
     byId.set(c.id, { ...c, replies: [] });
   }
   const roots = [];
+  // Detect cycles: a comment's parent chain must eventually reach null
+  // (root) without revisiting any node. If a cycle is found (shouldn't be
+  // possible via addComment but a bad operator-script edit could land
+  // one), surface the node as a root so the page doesn't infinite-loop.
   for (const c of comments) {
     const node = byId.get(c.id);
-    if (c.parent_comment_id && byId.has(c.parent_comment_id)) {
-      byId.get(c.parent_comment_id).replies.push(node);
+    let parentId = c.parent_comment_id;
+    let cycle = false;
+    if (parentId && byId.has(parentId)) {
+      const seen = new Set([c.id]);
+      let cur = parentId;
+      while (cur != null) {
+        if (seen.has(cur)) { cycle = true; break; }
+        seen.add(cur);
+        const parentNode = byId.get(cur);
+        if (!parentNode) break;
+        cur = parentNode.parent_comment_id;
+      }
+    }
+    if (parentId && byId.has(parentId) && !cycle) {
+      byId.get(parentId).replies.push(node);
     } else {
       roots.push(node);
     }

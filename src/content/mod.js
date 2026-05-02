@@ -99,6 +99,10 @@ function applyState(db, { action, targetType, targetId, subName, modHandle, reas
   if (action === 'transfer_owner') {
     const sub = db.prepare('SELECT owner_handle FROM subs WHERE name = ?').get(subName);
     if (!sub) throw new Error(`recordAction: sub ${subName} not found`);
+    const targetExists = db.prepare('SELECT 1 FROM handles WHERE handle = ?').get(targetId);
+    if (!targetExists) {
+      throw new Error(`recordAction: transfer_owner target ${targetId.slice(0, 8)} is not a known handle`);
+    }
     db.prepare('UPDATE subs SET owner_handle = ? WHERE name = ?').run(targetId, subName);
     // Old owner becomes a co-mod so they retain participation tools.
     if (sub.owner_handle && sub.owner_handle !== targetId) {

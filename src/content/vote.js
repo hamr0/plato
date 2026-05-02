@@ -15,6 +15,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { isBanned } from './mod.js';
+import { pseudonymFor } from '../identity/pseudonym.js';
 
 const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const YOUNG_POST_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +54,11 @@ export function castVote(db, { targetType, targetId, voterHandle, direction, now
     throw new Error(`castVote: direction must be 'up' or 'down', got ${direction}`);
   }
   if (!voterHandle) throw new Error('castVote: voterHandle is required');
+
+  // Ensure handle row exists. A user whose first action is a vote (no
+  // post or comment yet) won't have a handles row yet — without this,
+  // the FK on votes.handle and the isNewAccount lookup both blow up.
+  pseudonymFor(db, voterHandle);
 
   const table = TARGET_TABLE[targetType];
   const target = db.prepare(`SELECT id, handle, created_at, score, collapsed_at, score_at_collapse FROM ${table} WHERE id = ?`).get(targetId);

@@ -14,6 +14,7 @@
 // way, mods can manually uncollapse via recordAction.
 
 import { randomBytes } from 'node:crypto';
+import { pseudonymFor } from '../identity/pseudonym.js';
 
 const ID_BYTES = 8;
 const newId = () => randomBytes(ID_BYTES).toString('hex');
@@ -27,6 +28,8 @@ export const FLAG_CATEGORIES = Object.freeze([
 // only lever.
 export const AUTO_HIDE_THRESHOLD = 3;
 
+export const NOTE_MAX = 280;
+
 export function submitFlag(db, {
   targetType, targetId, flaggerHandle, category, note = null, now = Date.now(),
 }) {
@@ -37,6 +40,12 @@ export function submitFlag(db, {
     throw new Error(`submitFlag: invalid category ${category}`);
   }
   if (!flaggerHandle) throw new Error('submitFlag: flaggerHandle required');
+  // Ensure handle row exists so the FK on flags.flagger_handle holds for a
+  // user whose first action is a flag (no post or comment yet).
+  pseudonymFor(db, flaggerHandle);
+  if (typeof note === 'string' && note.length > NOTE_MAX) {
+    throw new Error(`submitFlag: note exceeds ${NOTE_MAX} characters`);
+  }
 
   // Existence check before the UNIQUE collision so the error message is
   // friendlier than "FOREIGN KEY constraint failed".
@@ -71,9 +80,13 @@ export function submitFlag(db, {
 }
 
 export function pendingFlagCount(db, targetType, targetId) {
+  // PRD §Spam 7 talks in distinct flaggers. UNIQUE(target_type, target_id,
+  // flagger_handle) makes count(*) and count(DISTINCT flagger_handle)
+  // equivalent today, but spelling the intent prevents drift if the
+  // UNIQUE ever changes.
   return db
     .prepare(
-      `SELECT count(*) AS n FROM flags
+      `SELECT count(DISTINCT flagger_handle) AS n FROM flags
        WHERE target_type = ? AND target_id = ? AND resolution = 'pending'`
     )
     .get(targetType, targetId).n;
