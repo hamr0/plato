@@ -30,7 +30,7 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Add or remove disposable-email domains | `disposable-domains.txt` |
 | Re-skin the forum (colors, logo color) | `:root` block in `src/web/static/style.css` |
 | Replace the favicon / logo mark | `src/web/static/favicon.svg` and `logoMark()` in `src/web/app.js` |
-| Change the tagline | `PLATO_TAGLINE` in `src/web/app.js` (locked-in default — see below) |
+| Change the forum name + tagline + "hosted by" line | `config.json` `branding` block (`forumName`, `tagline`, `hostedBy`). Logo + footer quote are locked. |
 | Reserve more sub-name namespaces | `RESERVED_SUB_NAMES` in `src/content/sub.js` |
 | Change new-account window or weight | `NEW_ACCOUNT_WINDOW_MS` / weight literal in `src/content/vote.js` |
 | Change young-post window for new-account voting | `YOUNG_POST_WINDOW_MS` in `src/content/vote.js` |
@@ -131,8 +131,9 @@ These have hardcoded constants because the right value is the same for almost ev
 
 These are deliberate product decisions. The PRD treats them as load-bearing; changing them changes what plato *is*.
 
-- **Tagline: "opinion is the medium between knowledge and ignorance."** Source of the project's name. `PLATO_TAGLINE` in `src/web/app.js`. Changing it is a fork.
-- **Logo: three blue dots, ascending opacity.** Three-dot wave pattern doubles as the loading animation. Replacing it on your instance is fine; the project uses this canonically.
+- **Project quote: "opinion is the medium between knowledge and ignorance."** Renders in the footer below the operator's "instance hosted by" line. Source of the project's name. `PLATO_QUOTE` in `src/web/app.js`. Locked across all forks.
+- **Logo: three blue dots, ascending opacity.** Three-dot wave pattern doubles as the loading animation. Locked across all forks (top wordmark + footer mark). Forks change the name next to the mark via `config.json:branding.forumName`; the mark itself stays.
+- **Operator-replaceable**: forum name (top + footer wordmark, page title), home-page tagline, and an optional "instance hosted by" footer line. Set via `config.json` → `branding`. See operator-guide for the schema.
 - **Magic-link auth, no passwords.** Plaintext email never stored. Handle = HMAC-SHA256(email, KNOWLESS_SECRET). Changing this means rebuilding the auth layer.
 - **Pseudonym + identicon, no uploads.** Two-word pseudonym from `unique-names-generator`, deterministic per handle. Avatars are bottts-neutral SVG dicebear. No image uploads, ever (PRD §no inline embeds).
 - **Markdown-only post bodies, raw HTML escaped.** `image:` markdown is rewritten as a link. URL schemes allow-listed (`http(s)`, `mailto`, fragments, relatives).

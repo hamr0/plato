@@ -74,7 +74,23 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
-**Tagline.** `PLATO_TAGLINE` in `src/web/app.js`. The default ("opinion is the medium between knowledge and ignorance.") is the source of the project's name — changing it on your instance is fine, but be aware it's the canonical line.
+**Branding (operator-replaceable, `config.json`).** Three knobs:
+
+```json
+{
+  "branding": {
+    "forumName": "plato",
+    "tagline": "a forum that lives at one URL",
+    "hostedBy": "@tedvdb"
+  }
+}
+```
+
+- `forumName` shows in the top wordmark, footer wordmark, page title, and the "check your email" header.
+- `tagline` shows as the subtitle on the home page.
+- `hostedBy` (optional) renders as a footer line: `a <forumName> instance hosted by <hostedBy>`. Hidden when empty.
+
+**Locked across all forks.** The 3-blue-dot logo and the footer quote `— "opinion is the medium between knowledge and ignorance."` travel with the project. Forks rename the forum, never the mark or the quote.
 
 **SMTP, port, DB path, public URL.** All in `.env`. Standard environment configuration.
 

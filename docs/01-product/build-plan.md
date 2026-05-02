@@ -300,6 +300,32 @@ What does **not** change:
 - Vote arrows + score on the left of every post
 - Typography hierarchy: title > meta > body
 - Server-rendered HTML, no client JS in v1
+- **Logo (3-blue-dot mark)** — appears in top wordmark and footer, never replaced or recolored across forks
+- **Project quote** in the footer: `— "opinion is the medium between knowledge and ignorance."` — locked, source of plato's name
+
+### Branding (operator-replaceable via `config.json:branding`)
+
+Three values an operator can override at boot:
+
+| Field | Default | Where it appears |
+|---|---|---|
+| `forumName` | `"plato"` | Top wordmark next to the logo, footer wordmark, page `<title>`, "check your email" page header |
+| `tagline` | `"a forum that lives at one URL"` | Subtitle line under the wordmark on the home page |
+| `hostedBy` | `null` (line hidden when empty) | Footer line: `a <forumName> instance hosted by <hostedBy>` |
+
+Example `config.json`:
+
+```json
+{
+  "branding": {
+    "forumName": "plato",
+    "tagline": "a forum that lives at one URL",
+    "hostedBy": "@tedvdb"
+  }
+}
+```
+
+What's **not** replaceable: the logo (the 3-blue-dot mark) and the locked project quote in the footer. Forks can rename the forum and change the tagline; the mark and the quote travel with the project.
 
 ### HTML rendering — tagged-template `html\`\`` + `raw()`
 
