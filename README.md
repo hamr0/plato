@@ -121,16 +121,14 @@ plato is a Reddit-shaped forum built like a phpBB-era forum should have been: on
 | Backup | `pg_dump` + Pictrs volume | `cp` two paths |
 | When the operator goes dark | Migrate to another instance via federation | `git clone`, fork the archive, keep your markdown |
 
-**Federation, briefly**: many independent servers running the same software, talking through a shared protocol (ActivityPub) so a user on instance A can subscribe to and comment on content hosted by instance B. Mastodon and Lemmy are the well-known examples. It's the answer to "what if my admin goes bad" at network scale — you migrate to another instance and keep following the same content.
+**Federation** = many servers talking via a shared protocol (ActivityPub) so users on one can follow content on another. Mastodon and Lemmy do this. plato refuses it on purpose:
 
-**Why plato refused it, deliberately**:
+- **Trust model.** One operator + public modlog + one-command fork is cleaner than "this content came from a server I don't admin."
+- **Stack weight.** ActivityPub needs inbound queues, signature verification, retry workers, thumbnail caching. The "$5 VPS, two `cp` backups" property dies on contact.
+- **Image hosting drags in.** Federated thumbnails cache locally — you become a host (DMCA, content-scanning) for content you didn't post. Incompatible with plato's "link out, never host" rule.
+- **Walk-away doesn't need it.** Federation says "leave one instance for another." plato says "fork the code + archive, run your own." Same exit, no 5-service install.
 
-- **Federation muddles the trust model.** plato's pitch is "one operator, every mod action in a public log, fork the archive if they go bad." Federation pulls in content from servers you don't admin — Lemmy has wrestled with that mod story for years. Single-operator + public-modlog + one-command-fork is a cleaner answer for hobby-scale.
-- **Federation forces a heavy stack.** ActivityPub needs inbound queues, signature verification, retry workers, dedup, thumbnail caching. The "$5 VPS, two `cp` backups" property dies the moment you add it.
-- **Federation drags in image hosting.** When a federated post fetches a thumbnail, your server caches it — and you're now hosting content you didn't post (DMCA target, content-scanning obligation). plato's "link out, never host" rule is incompatible.
-- **The walk-away property doesn't need federation.** Federation says "leave one instance, follow your friends to another." plato says "fork the code + the archive, run your own." Both achieve "you can leave"; plato gets there without a 5-service install.
-
-For a 100-person forum, federation is a tax with no payoff. For Reddit-scale, it's the right answer. plato is in the first lane on purpose. Lemmy is the right pick if you want a federated alternative to Reddit at the network level. plato is the right pick if you want one small forum that runs forever, on one box, with every mod action visible to every user, and an operator nobody can capture.
+For a 100-person forum, federation is a tax with no payoff. Lemmy is the pick if you want network-scale; plato is the pick if you want one small forum that runs forever on one box, with every mod action visible.
 
 ### In the broader self-hostable forum landscape
 
