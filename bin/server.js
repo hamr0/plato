@@ -40,6 +40,7 @@ const handler = createApp({
   spamPatternsFile: operatorConfig.spamPatternsFile ?? SPAM_PATTERNS_PATH,
   linkCaps: operatorConfig.linkCaps ?? {},
   urlhausCacheFile: operatorConfig.urlhausCacheFile ?? URLHAUS_CACHE_PATH,
+  branding: operatorConfig.branding ?? {},
 });
 
 const server = http.createServer(handler);

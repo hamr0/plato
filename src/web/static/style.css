@@ -452,6 +452,11 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
   color: var(--text-dim);
   letter-spacing: 0.04em;
 }
+.site-footer .hosted-by {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+}
 .site-footer .quote {
   display: block;
   margin-top: 0.3rem;

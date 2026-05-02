@@ -65,11 +65,18 @@ function layout(title, body) {
 </html>`);
 }
 
-// The plato mark: three dots, blue · amber · blue. The two outer dots
-// (knowledge / ignorance) match; the middle (opinion, the medium between)
-// carries the warm accent. The mark IS the tagline. Logo stays across
-// forks; operator name and tagline can be customized, mark stays.
-const PLATO_TAGLINE = 'opinion is the medium between knowledge and ignorance.';
+// LOCKED project quote — appears in the footer below the operator's
+// "instance hosted by" line. Source of plato's name; not for forking.
+const PLATO_QUOTE = 'opinion is the medium between knowledge and ignorance.';
+
+// Module-scoped branding, set by createApp at boot from operator config.
+// One process per instance, so a module-level object is safe (no
+// cross-instance leakage). Defaults are the canonical plato values.
+const branding = {
+  forumName: 'plato',
+  tagline: 'a forum that lives at one URL',
+  hostedBy: null,
+};
 
 // Inline SVG of the mark. `loading` adds the wave animation (the only
 // animation in the entire app). aria-hidden because the wordmark next to
@@ -94,8 +101,11 @@ function logoMark({ size = 22, loading = false } = {}) {
 
 function siteFooter() {
   return html`<footer class="site-footer">
-    <a href="/" class="logo-home">${logoMark({ size: 22 })}<span class="wordmark">plato</span></a>
-    <span class="quote muted">— "${PLATO_TAGLINE}"</span>
+    <a href="/" class="logo-home">${logoMark({ size: 22 })}<span class="wordmark">${branding.forumName}</span></a>
+    ${branding.hostedBy
+      ? html`<span class="hosted-by muted">a ${branding.forumName} instance hosted by ${branding.hostedBy}</span>`
+      : html``}
+    <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
 
@@ -239,9 +249,9 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
   // a page passes neither, it gets the home default — every error or
   // listing page reads the same so the user is always sure where they
   // are in the app.
-  const effectiveTitle = title ?? html`plato`;
+  const effectiveTitle = title ?? html`${branding.forumName}`;
   const effectiveSubtitle = title === undefined && subtitle === undefined
-    ? 'a forum that lives at one URL'
+    ? branding.tagline
     : subtitle;
   return html`<header class="site">
     <div class="brand">
@@ -552,7 +562,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   send(
     res,
     200,
-    layout('plato', html`
+    layout(branding.forumName, html`
       ${siteHeader({ db, currentHandle, subtitle: 'a forum that lives at one URL' })}
       ${anonHintFor(currentHandle)}
       ${subsStripView({ subs: subsNav, currentHandle })}
@@ -861,7 +871,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       'check your email',
       html`
         <header>
-          <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}plato · check your email</a></h1>
+          <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${branding.forumName} · check your email</a></h1>
         </header>
         <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
         <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
@@ -2361,7 +2371,17 @@ async function handleLogout(req, res, { auth }) {
 }
 
 
-export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null }) {
+export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {} }) {
+  // Operator-replaceable branding: forum name (top + footer wordmark),
+  // top tagline (subtitle under the wordmark on the home page), and
+  // hostedBy (handle/name/owner — appended to the footer's
+  // "a <forumName> instance hosted by ..." line; line hidden if empty).
+  // The logo (3-blue-dot mark) and the project quote
+  // ("opinion is the medium between knowledge and ignorance.") are
+  // LOCKED across forks. See docs/01-product/build-plan.md §Locked.
+  branding.forumName = (brandingOverrides.forumName ?? 'plato').trim() || 'plato';
+  branding.tagline   = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
+  branding.hostedBy  = (brandingOverrides.hostedBy  ?? '').trim() || null;
   // Resolve operator overrides against the floor at boot. Bad config
   // throws here, so the operator sees the error before serving any
   // request rather than at the moment a user happens to trip a check.
