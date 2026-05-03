@@ -67,7 +67,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=13">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=2" defer></script>
@@ -510,9 +510,13 @@ function voteWidget({ targetType, targetId, score, currentVote, currentHandle, r
   </div>`;
 }
 
-function postLinksView(hosts) {
-  if (!hosts?.length) return html``;
-  return html`<div class="links">${hosts.map((h) => html`<span class="lh">${h}</span>`)}</div>`;
+function postLinksView(hosts, readMoreHref) {
+  const hasHosts = !!hosts?.length;
+  if (!hasHosts && !readMoreHref) return html``;
+  return html`<div class="links">
+    ${readMoreHref ? html`<a href="${readMoreHref}" class="more">read more →</a>` : html``}
+    ${hasHosts ? hosts.map((h) => html`<span class="lh">${h}</span>`) : html``}
+  </div>`;
 }
 
 function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors }) {
@@ -554,11 +558,9 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
         </div>
         ${authorMeta(post, name, { showComments: true, flair: flairMap?.get(post.id) ?? null })}
         ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: preview
-          ? html`<div class="preview">${raw(preview.html)}${preview.truncated
-              ? html` <a href="${link}" class="more">read more →</a>`
-              : html``}</div>`
+          ? html`<div class="preview">${raw(preview.html)}</div>`
           : html`` })}
-        ${postLinksView(linksMap?.get(post.id))}
+        ${postLinksView(linksMap?.get(post.id), preview?.truncated ? link : null)}
       </div>
     </div>`;
   });

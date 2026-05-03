@@ -993,8 +993,9 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .action-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
 
 /* Outbound-link badges on feed post rows */
-.links { color: var(--text-dim); font-size: 0.75rem; margin-top: 0.25rem; display: flex; gap: 0.9rem; flex-wrap: wrap; }
+.links { color: var(--text-dim); font-size: 0.75rem; margin-top: 0.25rem; display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: baseline; }
 .links .lh { display: inline-flex; align-items: center; }
+.links .more { font-size: 0.75rem; }
 
 /* Flair pill — colored background per the sub owner's choice; text uses
    a hardcoded light shade because the owner picks any color and we can't
