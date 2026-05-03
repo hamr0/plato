@@ -221,6 +221,20 @@ Plato's auth flow (via knowless) treats unknown emails, rate-limited new-handle 
 
 The contract extends to the link-click stage. Sham, expired, and used-token clicks redirect to **home** (`/`), not to `/login`. A logged-out user landing on the home page after a sham click looks identical to a user arriving at the site for the first time — there is no observable signal that a login attempt occurred or was rejected. Adopters wrapping knowless must set `failureRedirect: '/'` (or any non-login destination); knowless's library default of `cfg.loginPath` is a partial leak.
 
+### Dev/prod env split
+
+Plato uses a two-file env layout so production-shaped config and dev-only knobs don't share a file:
+
+- **`.env`** (gitignored) — secret + base config (`KNOWLESS_SECRET`, `KNOWLESS_BASE_URL`, `KNOWLESS_FROM`, `PORT`, `DB_PATH`). Looks the same in every environment.
+- **`.env.dev`** (committed) — dev-only knobs that loosen security floors so localhost testing isn't blocked. Currently: `KNOWLESS_DEV_LOG_LINKS=true` (print magic links to stderr when SMTP fails), `KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR=100` (raise per-IP first-login cap from default 3), `KNOWLESS_MAX_LOGIN_REQUESTS_PER_IP_PER_HOUR=1000` (raise per-IP total-login cap from default 30 — past which knowless silently early-returns and the magic-link log fallback stops firing).
+
+Two npm scripts:
+
+- **`npm start`** — loads `.env` only. Production-shaped: floors at their secure defaults, no magic links printed, no caps loosened.
+- **`npm run dev`** — loads `.env` then `.env.dev`. Node 22 multi-`--env-file` is left-to-right with later overriding earlier, so dev-knob values win.
+
+`.env.dev` is safe to commit because it contains no secrets — only tunables that everyone running the dev recipe should share. Devs who need personal overrides can keep them in `.env` (already gitignored) since `.env.dev` is loaded second and would be overridden by neither — except that's exactly the wrong way around for this layout. The cleaner pattern when personal overrides are needed is to add a third `.env.local` (gitignored) loaded last via a second `--env-file` in a personal alias.
+
 ## Email-as-Transport (Optional Mode)
 
 A user can also subscribe to a sub by email. Three modes:

@@ -11,6 +11,7 @@ Read [`README.md`](README.md) for the user-facing pitch and [`docs/02-features/p
 ## How to do work here
 
 - **Tests pass before saying done.** `npm test` runs the full suite (~298 tests, ~3s). Don't claim a feature is shipped without a green run.
+- **`npm run dev` for local testing, `npm start` for prod-shape.** Dev script stacks `.env` + `.env.dev` so dev-only knobs (magic-link stderr fallback, raised per-IP caps) override base config. `.env.dev` is committed; `.env` is gitignored. New dev tunables go in `.env.dev`, never in `.env`. See PRD §Authentication Flow → Dev/prod env split.
 - **No new emojis.** The visual language is terminal-honest. Emojis don't belong in code, comments, file names, or UI strings unless the user explicitly asks.
 - **No new markdown docs unless asked.** Update existing docs (CHANGELOG, PRD, operator-guide, plato.context) when shipping; don't spawn new ones.
 - **Read the PRD before changing locked behavior.** Items in the operator-guide's "Locked" section and PRD's "Permanently out" section are load-bearing. Changing one of those is a fork, not a feature.
