@@ -63,6 +63,25 @@ import {
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
 
+// Canonical page chrome. Every user-facing page goes through `page()`;
+// the title parameter doubles as the document title and the wordmark
+// replacement in the shared site header. Never call siteHeader directly
+// from a renderer — use page() so the rule that "every page reads the
+// same as home, with the forum name replaced by the page action" holds
+// in code, not in convention.
+function pageView({ db, currentHandle = null, title, subtitle }, body) {
+  return layout(title, html`
+    ${siteHeader({ db, currentHandle, title, subtitle })}
+    ${body}
+  `);
+}
+
+// One-line error/notice pages. Kept terse so the call sites stay readable
+// while still going through pageView so chrome is consistent.
+function quickPage(req, { db, auth }, title, body) {
+  return pageView({ db, currentHandle: auth?.handleFromRequest(req) ?? null, title }, body);
+}
+
 function layout(title, body) {
   return render(html`<!doctype html>
 <html lang="en">
@@ -72,7 +91,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=16">
+<link rel="stylesheet" href="/static/style.css?v=17">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -160,8 +179,7 @@ function safeLocalRedirect(returnTo, fallback) {
 
 function errorPage(req, { db, auth }, { title, message, links }) {
   const currentHandle = auth?.handleFromRequest(req);
-  return layout(title, html`
-    ${siteHeader({ db, currentHandle })}
+  return pageView({ db, currentHandle, title }, html`
     <p><a href="/">← home</a></p>
     <h2>// ${title}</h2>
     <p class="muted">${message}</p>
@@ -480,7 +498,6 @@ function postRetryView({ db, currentHandle, subName, errorMessage, defaults }) {
     ? html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`
     : html`<p><a href="/">← back home</a></p>`;
   return html`
-    ${siteHeader({ db, currentHandle })}
     ${backLink}
     <h2 class="section">// post not accepted</h2>
     <div class="post-error-banner">${errorMessage}</div>
@@ -854,8 +871,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   send(
     res,
     200,
-    layout(branding.forumName, html`
-      ${siteHeader({ db, currentHandle, subtitle: branding.tagline })}
+    pageView({ db, currentHandle, title: branding.forumName, subtitle: branding.tagline }, html`
       ${anonHintFor(currentHandle)}
       ${activeSubsBlock({ subs: subsNav, currentHandle })}
       <details class="new-post-toggle">
@@ -893,8 +909,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
           <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
         </tr>`)}</tbody>
       </table>`;
-  send(res, 200, layout('subs', html`
-    ${siteHeader({ db, currentHandle, title: 'subs' })}
+  send(res, 200, pageView({ db, currentHandle, title: 'subs' }, html`
     <p><a href="/">← home</a></p>
     <h2>// subs</h2>
     <p class="muted">every sub on this instance. click a sub name to read or post.</p>
@@ -926,7 +941,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
 function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchParams) {
   const sub = getSubByName(db, subName);
   if (!sub) {
-    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
   }
   const activeSort = SUB_SORTS.includes(sort) ? sort : 'new';
   const subFlairs = parseFlairs(sub.flairs);
@@ -968,13 +983,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
   send(
     res,
     200,
-    layout(`//${subName}`, html`
-      ${siteHeader({
-        db,
-        currentHandle,
-        title: html`//${subName}`,
-        subtitle: sub.description || null,
-      })}
+    pageView({ db, currentHandle, title: html`//${subName}`, subtitle: sub.description || null }, html`
       <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
@@ -1000,8 +1009,7 @@ function renderSubCreate(req, res, { db, auth }) {
     return send(
       res,
       401,
-      layout('login required', html`
-        ${siteHeader({ db, currentHandle: null, title: 'login required' })}
+      pageView({ db, currentHandle: null, title: 'login required' }, html`
         <p class="muted">creating a sub requires a session. <a href="/">back</a> and post once to get one.</p>
       `)
     );
@@ -1009,8 +1017,7 @@ function renderSubCreate(req, res, { db, auth }) {
   send(
     res,
     200,
-    layout('create a sub', html`
-      ${siteHeader({ db, currentHandle, title: 'create a sub' })}
+    pageView({ db, currentHandle, title: 'create a sub' }, html`
       <p><a href="/">← home</a></p>
       <form method="POST" action="/sub/create">
         <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
@@ -1103,7 +1110,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   }
   const sub = getSubByName(db, subName);
   if (!sub) {
-    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
   }
   if (canModerate(db, subName, currentHandle) !== 'owner') {
     return send(res, 403, errorPage(req, { db, auth }, {
@@ -1112,8 +1119,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
     }));
   }
   const flairs = parseFlairs(sub.flairs);
-  send(res, 200, layout(`edit //${subName}`, html`
-    ${siteHeader({ db, currentHandle, title: html`edit //${subName}` })}
+  send(res, 200, pageView({ db, currentHandle, title: html`edit //${subName}` }, html`
     <p><a href="/sub/${subName}">← back to //${subName}</a></p>
     <form method="POST" action="/sub/${subName}/edit">
       <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200" value="${sub.description ?? ''}">
@@ -1143,7 +1149,7 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
     }));
   }
   if (!getSubByName(db, subName)) {
-    return send(res, 404, layout('sub not found', html`<p class="muted">no such sub.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub.</p>`));
   }
   if (canModerate(db, subName, currentHandle) !== 'owner') {
     return send(res, 403, errorPage(req, { db, auth }, {
@@ -1196,8 +1202,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     return send(
       res,
       400,
-      layout(
-        'missing fields',
+      quickPage(req, { db, auth }, 'missing fields',
         html`<p class="muted">all fields are required, including the sub. <a href="/">back</a></p>`
       )
     );
@@ -1208,8 +1213,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     return send(
       res,
       400,
-      layout(
-        'no default sub',
+      quickPage(req, { db, auth }, 'no default sub',
         html`<p class="muted">/sub/general is archive-only. pick a real sub or <a href="/sub/create">create one</a>.</p>`
       )
     );
@@ -1219,8 +1223,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     return send(
       res,
       400,
-      layout(
-        'unknown sub',
+      quickPage(req, { db, auth }, 'unknown sub',
         html`<p class="muted">/sub/${subName} doesn't exist. <a href="/">back</a></p>`
       )
     );
@@ -1228,7 +1231,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
 
   if (currentHandle) {
     const formDefaults = { title, body: postBody, subName, flairSlug, sensitive };
-    const retry = (status, message) => send(res, status, layout('post not accepted', postRetryView({
+    const retry = (status, message) => send(res, status, pageView({ db, currentHandle, title: 'post not accepted' }, postRetryView({
       db, currentHandle, subName, errorMessage: message, defaults: formDefaults,
     })));
 
@@ -1266,8 +1269,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     return send(
       res,
       400,
-      layout(
-        'rejected',
+      quickPage(req, { db, auth }, 'rejected',
         html`<p class="muted">disposable email domains aren't accepted. <a href="/">back</a></p>`
       )
     );
@@ -1284,10 +1286,9 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   send(
     res,
     200,
-    layout(
-      `${branding.forumName} · check your email`,
+    pageView(
+      { db, currentHandle: auth.handleFromRequest(req), title: html`${branding.forumName} · check your email` },
       html`
-        ${siteHeader({ db, currentHandle: auth.handleFromRequest(req), title: html`${branding.forumName} · check your email` })}
         <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
         <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
         <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
@@ -1302,8 +1303,7 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
     return send(
       res,
       401,
-      layout(
-        'not logged in',
+      quickPage(req, { db, auth }, 'not logged in',
         html`<p class="muted">your session expired. <a href="/">post again</a> to get a fresh magic link.</p>`
       )
     );
@@ -1522,11 +1522,11 @@ function commentVotesFor(db, comments, currentHandle) {
 function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort) {
   const sub = getSubByName(db, subName);
   if (!sub) {
-    return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">sub not found.</p>`));
   }
   const result = getPost(db, postId, postsDir);
   if (!result || result.post.sub_name !== subName) {
-    return send(res, 404, layout('not found', html`<p class="muted">post not found in this sub.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">post not found in this sub.</p>`));
   }
 
   const { post, bodyHtml } = result;
@@ -1574,8 +1574,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
   send(
     res,
     200,
-    layout(post.title, html`
-      ${siteHeader({ db, currentHandle })}
+    pageView({ db, currentHandle, title: post.title }, html`
       <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
@@ -1627,7 +1626,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
 async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, subName, postId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to comment.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to comment.</p>`));
   }
   const body = await readBody(req);
   const form = parseForm(body);
@@ -1730,19 +1729,18 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
 
 function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
   const handle = auth.handleFromRequest(req);
-  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const result = getPost(db, postId, postsDir);
   if (!result || result.post.sub_name !== subName) {
-    return send(res, 404, layout('not found', html`<p class="muted">post not found.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">post not found.</p>`));
   }
   const { post, body } = result;
-  if (post.handle !== handle) return send(res, 403, layout('forbidden', html`<p class="muted">not your post.</p>`));
+  if (post.handle !== handle) return send(res, 403, quickPage(req, { db, auth }, 'forbidden', html`<p class="muted">not your post.</p>`));
   if (Date.now() - post.created_at > POST_EDIT_WINDOW_MS) {
-    return send(res, 403, layout('edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="${permalinkFor(post)}">back</a></p>`));
+    return send(res, 403, quickPage(req, { db, auth }, 'edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="${permalinkFor(post)}">back</a></p>`));
   }
   const permalink = permalinkFor(post);
-  send(res, 200, layout(`edit: ${post.title}`, html`
-    ${siteHeader({ db, currentHandle: handle })}
+  send(res, 200, pageView({ db, currentHandle: handle, title: `edit: ${post.title}` }, html`
     <p><a href="${permalink}">← back to post</a></p>
     <h2 class="section">// edit post</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
@@ -1762,7 +1760,7 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
 
 async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId) {
   const handle = auth.handleFromRequest(req);
-  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
   const body = form.body ?? '';
   const sensitive = form.sensitive === '1';
@@ -1778,17 +1776,16 @@ async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId)
 
 function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentId) {
   const handle = auth.handleFromRequest(req);
-  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId);
   if (!comment || comment.post_id !== postId) {
-    return send(res, 404, layout('not found', html`<p class="muted">comment not found.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">comment not found.</p>`));
   }
-  if (comment.handle !== handle) return send(res, 403, layout('forbidden', html`<p class="muted">not your comment.</p>`));
+  if (comment.handle !== handle) return send(res, 403, quickPage(req, { db, auth }, 'forbidden', html`<p class="muted">not your comment.</p>`));
   if (Date.now() - comment.created_at > COMMENT_EDIT_WINDOW_MS) {
-    return send(res, 403, layout('edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="/sub/${subName}/post/${postId}#comment-${commentId}">back</a></p>`));
+    return send(res, 403, quickPage(req, { db, auth }, 'edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="/sub/${subName}/post/${postId}#comment-${commentId}">back</a></p>`));
   }
-  send(res, 200, layout('edit comment', html`
-    ${siteHeader({ db, currentHandle: handle })}
+  send(res, 200, pageView({ db, currentHandle: handle, title: 'edit comment' }, html`
     <p><a href="/sub/${subName}/post/${postId}#comment-${commentId}">← back</a></p>
     <h2 class="section">// edit comment</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/comment/${commentId}/edit" class="post-form">
@@ -1804,7 +1801,7 @@ function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentI
 
 async function handleCommentEdit(req, res, { db, auth }, subName, postId, commentId) {
   const handle = auth.handleFromRequest(req);
-  if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
+  if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
   const body = form.body ?? '';
   try {
@@ -1829,7 +1826,7 @@ async function handleVote(req, res, { db, auth }) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
     if (wantsJson(req)) return sendJson(res, 401, { error: 'login required' });
-    return send(res, 401, layout('login required', html`<p class="muted">log in to vote.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to vote.</p>`));
   }
   const body = await readBody(req);
   const form = parseForm(body);
@@ -1839,7 +1836,7 @@ async function handleVote(req, res, { db, auth }) {
     result = castVote(db, { targetType, targetId, voterHandle: handle, direction });
   } catch (err) {
     if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
-    return send(res, 400, layout('vote failed', html`<p class="muted">${err.message}</p>`));
+    return send(res, 400, quickPage(req, { db, auth }, 'vote failed', html`<p class="muted">${err.message}</p>`));
   }
   if (wantsJson(req)) return sendJson(res, 200, result);
   // Native form path: redirect back to where the user came from. Whitelist
@@ -1849,9 +1846,9 @@ async function handleVote(req, res, { db, auth }) {
 }
 
 // Legacy /post/<id> from M1/M2: redirect to the canonical sub-namespaced URL.
-function redirectLegacyPost(req, res, { db }, postId) {
+function redirectLegacyPost(req, res, { db, auth }, postId) {
   const post = db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(postId);
-  if (!post) return send(res, 404, layout('not found', html`<p class="muted">post not found.</p>`));
+  if (!post) return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">post not found.</p>`));
   res.writeHead(301, { Location: `/sub/${post.sub_name}/post/${postId}` });
   res.end();
 }
@@ -1988,7 +1985,7 @@ function flagButton({ targetType, targetId, returnTo, alreadyFlagged }) {
 async function handleFlag(req, res, { db, auth }) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to flag.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to flag.</p>`));
   }
   const body = await readBody(req);
   const form = parseForm(body);
@@ -2002,7 +1999,7 @@ async function handleFlag(req, res, { db, auth }) {
     // UNIQUE collision = same user re-flagging the same target. Treat as
     // success-ish (their concern is registered) so the redirect is clean.
     if (!/UNIQUE/.test(err.message)) {
-      return send(res, 400, layout('flag failed', html`<p class="muted">${err.message}</p>`));
+      return send(res, 400, quickPage(req, { db, auth }, 'flag failed', html`<p class="muted">${err.message}</p>`));
     }
   }
   const safeReturn = safeLocalRedirect(returnTo, '/');
@@ -2207,7 +2204,7 @@ const MEMLOG_KIND_LABELS = {
 function renderMemlog(req, res, { db, auth }, searchParams) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to see your memlog.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to see your memlog.</p>`));
   }
   pruneOldNotifications(db);
   const filters = memlogParseFilters(searchParams);
@@ -2262,8 +2259,7 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
           </tr>`;
         })}</tbody>
       </table>`;
-  send(res, 200, layout('memlog', html`
-    ${siteHeader({ db, currentHandle: handle, title: 'memlog' })}
+  send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <p><a href="/">← home</a></p>
     <h2>// memlog</h2>
     <p class="muted">your private notification log. comments and replies you received, plus mod actions on your content. read items stay visible for 90 days.</p>
@@ -2290,18 +2286,18 @@ async function handleMemlogMarkRead(req, res, { db, auth }) {
 function handleMemlogGo(req, res, { db, auth }, idParam) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to follow this link.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to follow this link.</p>`));
   }
   const id = Number(idParam);
   if (!Number.isInteger(id) || id <= 0) {
-    return send(res, 400, layout('bad notification', html`<p class="muted">invalid notification id.</p>`));
+    return send(res, 400, quickPage(req, { db, auth }, 'bad notification', html`<p class="muted">invalid notification id.</p>`));
   }
   const row = db.prepare(
     `SELECT id, kind, sub_name, target_type, target_id
      FROM notifications WHERE id = ? AND recipient_handle = ?`
   ).get(id, handle);
   if (!row) {
-    return send(res, 404, layout('not found', html`<p class="muted">no such notification. <a href="/memlog">back</a></p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">no such notification. <a href="/memlog">back</a></p>`));
   }
   markNotificationRead(db, handle, id);
   const target = memlogTargetLink(db, row);
@@ -2317,7 +2313,7 @@ function handleMemlogGo(req, res, { db, auth }, idParam) {
 function renderModLog(req, res, { db, auth }, subName, searchParams) {
   const sub = getSubByName(db, subName);
   if (!sub) {
-    return send(res, 404, layout('not found', html`<p class="muted">sub not found.</p>`));
+    return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">sub not found.</p>`));
   }
   const currentHandle = auth.handleFromRequest(req);
   const modParam = searchParams?.get('mod') ?? null;
@@ -2437,8 +2433,7 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
         </tr>`)}</tbody>
       </table>`;
 
-  send(res, 200, layout(`/sub/${subName}/modlog`, html`
-    ${siteHeader({ db, currentHandle })}
+  send(res, 200, pageView({ db, currentHandle, title: `/sub/${subName}/modlog` }, html`
     <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a> · //modlog</p>
     <h2>// modlog</h2>
     <p class="muted">every moderator action in this sub. public.</p>
@@ -2518,11 +2513,11 @@ function modlogHref(overrides) {
 function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
-    return send(res, 401, layout('login required', html`<p class="muted">log in to view your mod log.</p>`));
+    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to view your mod log.</p>`));
   }
   const modSubs = listSubsModeratedBy(db, currentHandle);
   if (modSubs.length === 0) {
-    return send(res, 403, layout('not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
+    return send(res, 403, quickPage(req, { db, auth }, 'not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
   }
   const filters = parseModlogFilters(searchParams, modSubs);
   // Default-mode landing: open if anything is pending, else audit. Spec
@@ -2734,8 +2729,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, layout('/modlog', html`
-    ${siteHeader({ db, currentHandle })}
+  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -2915,8 +2909,7 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, layout('/modlog', html`
-    ${siteHeader({ db, currentHandle })}
+  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3027,8 +3020,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, layout('/modlog', html`
-    ${siteHeader({ db, currentHandle })}
+  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3122,18 +3114,18 @@ const SUB_POST_COMMENT_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f
 // the email field was missing). The wrappers below reuse plato's check-
 // your-email layout for login, and redirect logout to / so the user
 // lands on a useful page instead of a blank 200.
-async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
+async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, return_to: returnTo } = form;
   if (!email) {
-    return send(res, 400, layout('login', html`<p class="muted">email required. <a href="/">back</a></p>`));
+    return send(res, 400, quickPage(req, { db, auth }, 'login', html`<p class="muted">email required. <a href="/">back</a></p>`));
   }
   if (isDisposableEmail(email, disposableDomains)) {
     return send(
       res,
       400,
-      layout('login rejected', html`<p class="muted">disposable email domains aren't accepted. <a href="/">back</a></p>`)
+      quickPage(req, { db, auth }, 'login rejected', html`<p class="muted">disposable email domains aren't accepted. <a href="/">back</a></p>`)
     );
   }
   const landing = safeLocalRedirect(returnTo, '/');
@@ -3145,8 +3137,7 @@ async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
   send(
     res,
     200,
-    layout(`${branding.forumName} · check your email`, html`
-      ${siteHeader({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline })}
+    pageView({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline }, html`
       <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
       <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
       <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
@@ -3154,7 +3145,7 @@ async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
   );
 }
 
-async function handleLogout(req, res, { auth }) {
+async function handleLogout(req, res, { db, auth }) {
   // Capture knowless's clearing Set-Cookie via a thin response proxy,
   // then drop a 302 to / so the user lands somewhere useful. Without
   // this, knowless's logout returns a 200 with empty body — looks like
@@ -3175,7 +3166,7 @@ async function handleLogout(req, res, { auth }) {
   };
   await auth.logout(req, proxy);
   if (blocked403) {
-    return send(res, 403, layout('logout failed', html`<p class="muted">request blocked (origin check). <a href="/">back</a></p>`));
+    return send(res, 403, quickPage(req, { db, auth }, 'logout failed', html`<p class="muted">request blocked (origin check). <a href="/">back</a></p>`));
   }
   if (setCookieValue) res.setHeader('Set-Cookie', setCookieValue);
   redirect(res, '/');
@@ -3247,10 +3238,10 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if (await applyStaticRoute(req, res)) return;
 
       if (path === '/login' && method === 'GET') return auth.loginForm(req, res);
-      if (path === '/login' && method === 'POST') return handleLogin(req, res, { auth, baseUrl, disposableDomains });
+      if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);
       if (path === '/verify') return auth.verify(req, res);
-      if (path === '/logout' && method === 'POST') return handleLogout(req, res, { auth });
+      if (path === '/logout' && method === 'POST') return handleLogout(req, res, { db, auth });
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir }, url.searchParams);
       if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
@@ -3315,13 +3306,13 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
         return handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, m[1]);
       }
       if ((m = path.match(/^\/post\/([0-9a-f]{16})$/)) && method === 'GET') {
-        return redirectLegacyPost(req, res, { db }, m[1]);
+        return redirectLegacyPost(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(/^\/avatar\/([0-9a-f]+)\.svg$/)) && method === 'GET') {
         return renderAvatar(res, m[1]);
       }
 
-      send(res, 404, layout('not found', html`<p class="muted">not found</p>`));
+      send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">not found</p>`));
     } catch (err) {
       console.error(err);
       send(res, 500, '<pre>500</pre>');

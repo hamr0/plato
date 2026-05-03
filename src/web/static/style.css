@@ -980,8 +980,9 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .filter-btn-disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
 /* memlog (per-user notification log) chrome. */
-.memlog-link { color: var(--text); text-decoration: none; }
-.memlog-link:hover strong { color: var(--accent); }
+.memlog-link { color: var(--accent); text-decoration: none; }
+.memlog-link strong { color: var(--accent); font-weight: 600; }
+.memlog-link:hover strong { text-decoration: underline; }
 .memlog-chip {
   color: var(--accent);
   font-weight: 600;
