@@ -71,7 +71,7 @@ function layout(title, body) {
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=2" defer></script>
-<script src="/static/flair.js?v=1" defer></script>
+<script src="/static/flair.js?v=2" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -240,7 +240,7 @@ function pseudonymsByHandle(db, handles) {
 // remain readable for archaeology, but new posts can't land there.
 function listPostableSubs(db) {
   return db.prepare(
-    "SELECT name FROM subs WHERE name != 'general' ORDER BY name ASC"
+    "SELECT name, flairs, flairs_required FROM subs WHERE name != 'general' ORDER BY name ASC"
   ).all();
 }
 
@@ -406,11 +406,11 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     </select>`;
   }
 
-  // Flair picker only renders when the form is pinned to a single sub.
-  // Cross-sub forms (home page) skip it; if the picked sub requires a flair,
-  // finalizeDraft rejects the post and the user is steered to the sub page.
-  // data-flair-colors carries the slug→color map so flair-form.js can paint
-  // the preview pill without a server round-trip.
+  // Flair picker. Pinned-sub form (per-sub page) uses its passed-in flairs.
+  // Cross-sub form (home) carries a per-sub flair map; flair.js rebuilds the
+  // select options when the sub dropdown changes, and toggles `required` for
+  // subs with flairs_required. No-JS fallback: finalizeDraft rejects mismatch
+  // and re-renders via postRetryView with the typed values preserved.
   let flairField = html``;
   if (defaultSub && subFlairs.length > 0) {
     const colorMap = subFlairs.reduce((acc, f) => { acc[f.slug] = f.color; return acc; }, {});
@@ -418,6 +418,24 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
       <select name="flair_slug" class="flair-form-select" ${flairsRequired ? 'required' : ''}>
         ${flairsRequired ? html`` : html`<option value="" ${dFlair === '' ? 'selected' : ''}>(no flair)</option>`}
         ${subFlairs.map((f) => html`<option value="${f.slug}" ${dFlair === f.slug ? 'selected' : ''}>${f.label}</option>`)}
+      </select>
+      <span class="flair-form-preview" aria-hidden="true"></span>
+    </div>`;
+  } else if (!defaultSub && postableSubs.some((s) => s.flairs)) {
+    const subFlairMap = {};
+    const colorMap = {};
+    for (const s of postableSubs) {
+      const f = parseFlairs(s.flairs);
+      if (f.length === 0 && !s.flairs_required) continue;
+      subFlairMap[s.name] = { flairs: f, required: !!s.flairs_required };
+      for (const fl of f) colorMap[fl.slug] = fl.color;
+    }
+    const initialSubName = defaults.subName || postableSubs[0]?.name;
+    const initial = subFlairMap[initialSubName];
+    flairField = html`<div class="flair-form-row" data-flair-colors='${JSON.stringify(colorMap)}' data-sub-flairs='${JSON.stringify(subFlairMap)}'${initial ? html`` : html` hidden`}>
+      <select name="flair_slug" class="flair-form-select" ${initial?.required ? 'required' : ''}>
+        ${initial?.required ? html`` : html`<option value="" ${dFlair === '' ? 'selected' : ''}>(no flair)</option>`}
+        ${(initial?.flairs ?? []).map((f) => html`<option value="${f.slug}" ${dFlair === f.slug ? 'selected' : ''}>${f.label}</option>`)}
       </select>
       <span class="flair-form-preview" aria-hidden="true"></span>
     </div>`;

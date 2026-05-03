@@ -34,7 +34,7 @@
     });
   });
 
-  // Post-form flair preview pill.
+  // Post-form flair preview pill + cross-sub flair rebuild.
   document.querySelectorAll('.flair-form-row').forEach((row) => {
     const sel = row.querySelector('.flair-form-select');
     const preview = row.querySelector('.flair-form-preview');
@@ -60,5 +60,40 @@
     };
     sel.addEventListener('change', update);
     update();
+
+    // Cross-sub form: rebuild flair options when the sub dropdown changes.
+    let subMap = null;
+    try { subMap = JSON.parse(row.getAttribute('data-sub-flairs') || 'null'); } catch { /* ignore */ }
+    if (!subMap) return;
+    const form = row.closest('form');
+    const subSel = form && form.querySelector('select[name="sub_name"]');
+    if (!subSel) return;
+    const rebuild = () => {
+      const entry = subMap[subSel.value];
+      sel.innerHTML = '';
+      if (!entry) {
+        row.hidden = true;
+        sel.removeAttribute('required');
+        preview.innerHTML = '';
+        return;
+      }
+      row.hidden = false;
+      if (entry.required) sel.setAttribute('required', '');
+      else {
+        sel.removeAttribute('required');
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = '(no flair)';
+        sel.appendChild(blank);
+      }
+      for (const f of entry.flairs) {
+        const opt = document.createElement('option');
+        opt.value = f.slug;
+        opt.textContent = f.label;
+        sel.appendChild(opt);
+      }
+      update();
+    };
+    subSel.addEventListener('change', rebuild);
   });
 })();
