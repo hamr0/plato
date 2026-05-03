@@ -75,7 +75,7 @@ function layout(title, body) {
 <link rel="stylesheet" href="/static/style.css?v=15">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
-<script src="/static/comment.js?v=2" defer></script>
+<script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>

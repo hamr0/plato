@@ -200,10 +200,37 @@
     else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
   }
 
+  // Anchor expand-on-jump: when the URL hash names a comment (typical
+  // path is /memlog/go/<id> → 302 to /sub/x/post/y#comment-z), open every
+  // enclosing <details> so a long-collapsed, score-collapsed, or
+  // depth-folded body becomes visible. Without this the anchor scrolls
+  // to the right slot but the user sees a collapsed summary.
+  function expandToHash() {
+    if (!location.hash || location.hash.length < 2) return;
+    let target;
+    try { target = document.querySelector(location.hash); }
+    catch (_) { return; }
+    if (!target) return;
+    let el = target.parentElement;
+    while (el && el !== document.body) {
+      if (el.tagName === 'DETAILS' && !el.open) el.open = true;
+      el = el.parentElement;
+    }
+    target.scrollIntoView({ block: 'center' });
+    target.classList.add('comment-just-added');
+    setTimeout(() => target.classList.remove('comment-just-added'), 1500);
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { fillLoginReturnTo(); maybeReplayStash(); });
+    document.addEventListener('DOMContentLoaded', () => {
+      fillLoginReturnTo();
+      maybeReplayStash();
+      expandToHash();
+    });
   } else {
     fillLoginReturnTo();
     maybeReplayStash();
+    expandToHash();
   }
+  window.addEventListener('hashchange', expandToHash);
 })();
