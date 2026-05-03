@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M5/B14 Guest comment composer
+
+- **Always-visible composer on post pages** — the `// comments` composer renders for every visitor, logged in or out. The "log in to comment" placeholder is gone. Without JS the form posts normally and the existing 401 page catches it (honest fallback). Replies still require auth-first; only the top-level composer is guest-friendly in v1.
+- **Login-deferred submit (localStorage stash)** — when a logged-out visitor types a comment and hits *comment*, JS stashes `{postPath, body, ts}` under `plato:pendingComment` (24h TTL), opens the header `log in` details, focuses the email field, scrolls it into view, and shows an inline `.guest-notice` banner on the composer: *saved — sign in above to post it*. Nothing reaches the server; the comment endpoint still 401s anonymous POSTs. No new schema, no anonymous-content abuse surface.
+- **Auto-submit on magic-link return** — on every page load `comment.js` checks the stash; if the user is now signed in, the path matches, and a non-guest composer is on the page, it fills the textarea and `requestSubmit()`s through the existing JSON splice path. The new comment lands in place with the same loading-dots wave as a normal logged-in submit.
+- **Login `return_to`** — header login form now carries a hidden `return_to` field; `comment.js` fills it with `location.pathname + location.search` so the magic-link `nextUrl` lands the visitor back on the post they tried to comment on (instead of `/`). Validated server-side with the existing `safeLocalRedirect` helper. No new endpoint.
+
 ### Added — M5/B9 Branding + UI polish (in progress)
 
 - **Vote widget** — single rule: arrows default grey, hover brightens to text; voted-up arrow holds green (`--up`), voted-down arrow holds blue (`--down`). Score number is the primary signal: green if positive, blue if negative, grey at zero. JS handler updates the score class live so a vote that flips the sign re-colors the number without a page reload.

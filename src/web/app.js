@@ -67,10 +67,10 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
-<script src="/static/comment.js?v=1" defer></script>
+<script src="/static/comment.js?v=2" defer></script>
 <script src="/static/flair.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
@@ -268,6 +268,7 @@ function loginStatusFor(db, currentHandle) {
         <summary>log in</summary>
         <form method="POST" action="/login" class="login-form">
           <input name="email" type="email" placeholder="your email" required>
+          <input type="hidden" name="return_to" value="">
           <button>send link</button>
         </form>
       </details>
@@ -1579,12 +1580,11 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         : html`<div class="comment-tree">${tree.map((node) => commentNodeView(node, treeCtx, 0))}</div>`}
 
       <div class="composer-bar">
-        ${currentHandle
-          ? html`<form method="POST" action="/sub/${subName}/post/${postId}/comment">
-              <textarea name="body" placeholder="join the conversation" required></textarea>
-              <button>comment</button>
-            </form>`
-          : html`<p class="muted">log in to comment.</p>`}
+        <form method="POST" action="/sub/${subName}/post/${postId}/comment"${currentHandle ? html`` : html` data-guest="1"`}>
+          <textarea name="body" placeholder="join the conversation" required></textarea>
+          <div class="guest-notice" hidden>saved — sign in above to post it. we'll submit it for you when you confirm.</div>
+          <button>comment</button>
+        </form>
       </div>
     `)
   );
@@ -2870,7 +2870,7 @@ const SUB_POST_COMMENT_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f
 async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
   const body = await readBody(req);
   const form = parseForm(body);
-  const { email } = form;
+  const { email, return_to: returnTo } = form;
   if (!email) {
     return send(res, 400, layout('login', html`<p class="muted">email required. <a href="/">back</a></p>`));
   }
@@ -2881,9 +2881,10 @@ async function handleLogin(req, res, { auth, baseUrl, disposableDomains }) {
       layout('login rejected', html`<p class="muted">disposable email domains aren't accepted. <a href="/">back</a></p>`)
     );
   }
+  const landing = safeLocalRedirect(returnTo, '/');
   await auth.startLogin({
     email,
-    nextUrl: `${baseUrl}/`,
+    nextUrl: `${baseUrl}${landing}`,
     sourceIp: req.socket?.remoteAddress,
   });
   send(

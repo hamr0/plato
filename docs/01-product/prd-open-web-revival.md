@@ -311,6 +311,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | B9.4: feed pagination | shipped (M5/B9 polish) | server-side pages, no infinite scroll; `feedPageSize` operator config (default 50); `?page=N` shareable |
 | B12: per-sub flag-threshold | shipped (M5/B12) | raise-only, floor 3 |
 | B13: inline revoke in /modlog | shipped (M5/B13) | actor-only, sub-keys excluded |
+| B14: guest comment composer | shipped (M5/B14) | logged-out post page renders the composer; submit stashes `{postPath, body, ts}` in `localStorage` (key `plato:pendingComment`, 24h TTL), opens header login, focuses email; magic-link `return_to` lands user back on the post; `comment.js` autoposts via existing JSON splice. No server schema; comment endpoint still 401s anonymous POSTs. Top-level only — replies still require auth-first. |
 
 The deferred items aren't blockers for an unannounced public trial; the shipped layer is enough that an attacker who gets through magic-link → tiered rate limit → link cap → spam regex → URLhaus has already done more work than spamming a typical small instance is worth.
 

@@ -15,6 +15,29 @@
   if (!window.fetch || !document.addEventListener) return;
 
   const COMMENT_ACTION_RE = /\/sub\/[^/]+\/post\/[^/]+\/comment$/;
+  const PENDING_KEY = 'plato:pendingComment';
+  const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
+
+  function readStash() {
+    try {
+      const raw = localStorage.getItem(PENDING_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || typeof obj.body !== 'string' || typeof obj.postPath !== 'string') return null;
+      if (!obj.ts || Date.now() - obj.ts > PENDING_TTL_MS) {
+        localStorage.removeItem(PENDING_KEY);
+        return null;
+      }
+      return obj;
+    } catch (_) { return null; }
+  }
+  function writeStash(obj) {
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(obj)); return true; }
+    catch (_) { return false; }
+  }
+  function clearStash() {
+    try { localStorage.removeItem(PENDING_KEY); } catch (_) {}
+  }
 
   function loadingMarkSvg() {
     return '<svg class="logo-mark" width="22" height="7" viewBox="0 0 24 8" aria-hidden="true" data-loading><circle cx="3" cy="4" r="3" opacity="0.4"/><circle cx="12" cy="4" r="3" opacity="0.7"/><circle cx="21" cy="4" r="3"/></svg>';
@@ -59,6 +82,35 @@
     if (!(form instanceof HTMLFormElement)) return;
     const action = form.getAttribute('action') || '';
     if (!COMMENT_ACTION_RE.test(action)) return;
+
+    // Guest composer: stash to localStorage, nudge user to the header
+    // login affordance, and never hit the server. The auto-submit on
+    // page load (after magic-link confirm) replays the stash via the
+    // logged-in path below.
+    if (form.dataset.guest === '1') {
+      e.preventDefault();
+      const textarea = form.querySelector('textarea[name="body"]');
+      const body = textarea ? textarea.value.trim() : '';
+      if (!body) return;
+      const stashed = writeStash({ postPath: location.pathname, body, ts: Date.now() });
+      const notice = form.querySelector('.guest-notice');
+      if (notice) {
+        notice.textContent = stashed
+          ? 'saved — sign in above to post it. we’ll submit it for you when you confirm.'
+          : 'your browser is blocking storage, so we can’t hold the draft. sign in first, then comment.';
+        notice.hidden = false;
+      }
+      const trigger = document.querySelector('details.login-trigger');
+      if (trigger) {
+        trigger.open = true;
+        const emailInput = trigger.querySelector('input[name="email"]');
+        if (emailInput) {
+          emailInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setTimeout(() => emailInput.focus(), 250);
+        }
+      }
+      return;
+    }
 
     e.preventDefault();
     const button = form.querySelector('button');
@@ -122,4 +174,36 @@
       button.innerHTML = originalLabel;
     }
   });
+
+  // Fill the header login form's return_to so the magic-link nextUrl
+  // lands the user back on the page they tried to comment from.
+  function fillLoginReturnTo() {
+    const inputs = document.querySelectorAll('form.login-form input[name="return_to"]');
+    inputs.forEach((el) => { el.value = location.pathname + location.search; });
+  }
+
+  // Auto-submit a stashed guest comment after the user signs in. We
+  // detect "logged in on this post" by finding a comment composer form
+  // without data-guest. Replay reuses the existing JSON splice path.
+  function maybeReplayStash() {
+    const stash = readStash();
+    if (!stash) return;
+    if (stash.postPath !== location.pathname) return;
+    const form = Array.from(document.querySelectorAll('form'))
+      .find((f) => COMMENT_ACTION_RE.test(f.getAttribute('action') || '') && f.dataset.guest !== '1');
+    if (!form) return;
+    const textarea = form.querySelector('textarea[name="body"]');
+    if (!textarea) return;
+    textarea.value = stash.body;
+    clearStash();
+    if (typeof form.requestSubmit === 'function') form.requestSubmit();
+    else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { fillLoginReturnTo(); maybeReplayStash(); });
+  } else {
+    fillLoginReturnTo();
+    maybeReplayStash();
+  }
 })();
