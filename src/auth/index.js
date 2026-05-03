@@ -27,5 +27,8 @@ export function createAuth(env = process.env, overrides = {}) {
   if (env.KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR) {
     cfg.maxNewHandlesPerIpPerHour = Number(env.KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR);
   }
+  if (env.KNOWLESS_MAX_LOGIN_REQUESTS_PER_IP_PER_HOUR) {
+    cfg.maxLoginRequestsPerIpPerHour = Number(env.KNOWLESS_MAX_LOGIN_REQUESTS_PER_IP_PER_HOUR);
+  }
   return knowless({ ...cfg, ...overrides });
 }

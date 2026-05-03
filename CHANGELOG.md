@@ -6,6 +6,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — Sham/expired-token redirect leak
+
+- **Anti-enumeration silent-miss now extends to the link-click stage.** Knowless's POST `/login` flow takes pains to make valid/invalid/rate-limited responses indistinguishable, but `failureRedirect` defaulted to `loginPath` (`/login`) — meaning a user clicking a sham/expired/used token landed on a "Sign in" page that telegraphed the failure. Plato now passes `failureRedirect: '/'` to knowless (`src/auth/index.js`); rejected clicks now land on home, looking identical to any logged-out visit. The home page reveals nothing about whether a login attempt occurred.
+
+### Added — Branded `/login` page
+
+- **GET `/login` rendered with plato chrome** instead of knowless's bare fallback form. New `renderLogin()` uses `pageView` + `siteHeader` + `siteFooter` so deliberate navigation to `/login` (bookmark, "Sign in" link, popover-escape) lands on a styled page rather than a stylesheet-less standalone HTML. Already-logged-in users see a "you're already signed in" notice with a home link. The `?next=` param round-trips through `return_to` for post-login destination.
+
+### Added — Auto-uncollapse round-trip on flag-collapsed targets
+
+- **Flag-count auto-collapse now snaps `score_at_collapse`** alongside `collapsed_at` (`src/content/flag.js`). Without this, posts/comments collapsed by 3+ distinct flaggers could never auto-uncollapse since `vote.js` gates the threshold check on `score_at_collapse != null`. Mirrors the urlhaus + spam-pattern paths. The third community-signal collapse path now has the symmetric reversibility: community-flag-down can be community-upvote-up. Mod-collapses still don't auto-undo (by design — `score_at_collapse` stays NULL on manual mod actions).
+
+### Added — Modlog open-items counter chip
+
+- **Header now surfaces an open-items counter next to `modlog`** for active mods. New `countPendingTargetsAcrossSubs(db, subNames)` in `flag.js` counts distinct (target_type, target_id) pairs with pending flags across the calling mod's subs. Renders as ` · modlog (N)` when N > 0, links to `/modlog?mode=open`. Same `.memlog-chip` styling as the unread-notifications counter. `style.css?v=20`.
+
+### Added — Dev/prod env split
+
+- **`npm run dev` loads `.env` then `.env.dev`** via Node 22 multi-`--env-file`, so dev-only knobs override base config. `.env.dev` (committed) holds `KNOWLESS_DEV_LOG_LINKS=true`, `KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR=100`, and `KNOWLESS_MAX_LOGIN_REQUESTS_PER_IP_PER_HOUR=1000`; `.env` (gitignored) keeps the secret + production-shaped config. `npm start` does NOT read `.env.dev`, so prod stays prod. New env wiring in `src/auth/index.js` for both per-IP cap overrides — the total-login cap (default 30/hour) silently early-returns without an SMTP attempt when exceeded, so dev sessions cross it quickly and lose the magic-link log fallback; bumped to 1000 in `.env.dev`.
+
+### Fixed — Back-button stale-auth + login popover layout
+
+- **`Cache-Control: no-store` is now the default** for every HTML response and redirect (`src/web/request.js`). Browser bfcache no longer revives a logged-in page after logout. Static assets and avatars bypass `send()` so their long cache stays.
+- **Login form is an absolute-positioned popover** (`style.css`) instead of an in-flow flex item; opening the `<details>` no longer pushes surrounding nav chips onto a second line.
+- **Memlog filter wrapper switched from `<p>` to `<div>`** so the inline `<form>` for "mark all read" sits on the same line as the `show:` / `kind:` chips. The HTML5 spec auto-closes `<p>` on a child `<form>`, which was visibly breaking the layout.
+- **Header pseudonym no longer rendered bold** — `<strong>` removed from the markup; pseudonym now reads as part of the nav weight, not an emphasis.
+- **Subs page "last activity" column relabeled `active`** — single word, fits the table row without wrapping.
+
 ### Changed — Owner comment cap doubled in own sub
 
 - **Sub owners get 2× the daily comment cap when commenting in their own sub** — engagement carve-out for leading discussion. New owner: 10/day → 20/day. Recent: 30/day → 60/day. Established: still uncapped. The cap is *doubled, not lifted* — a compromised owner can't drop unlimited comments. `checkCommentRate` gained a `{ doubledForOwner }` option; `handleAddComment` passes it when `canModerate(...) === 'owner'`. One new test in `rateLimit.test.js` verifies the doubling and that the doubled cap also bites at 20.

@@ -215,6 +215,12 @@ plato's job ends at "publish RSS for each sub"; whatever reader the user picks h
 
 For repeat users, posting feels almost as fast as logged-in posting. For first-timers, it's two clicks more than a session-based platform.
 
+### Silent-miss extends to the link-click stage
+
+Plato's auth flow (via knowless) treats unknown emails, rate-limited new-handle creation, and valid emails identically at the POST `/login` stage — same response shape, same timing, same sham-mailing path. This is anti-enumeration: an attacker probing whether `victim@example.com` is a registered user can't tell from the response.
+
+The contract extends to the link-click stage. Sham, expired, and used-token clicks redirect to **home** (`/`), not to `/login`. A logged-out user landing on the home page after a sham click looks identical to a user arriving at the site for the first time — there is no observable signal that a login attempt occurred or was rejected. Adopters wrapping knowless must set `failureRedirect: '/'` (or any non-login destination); knowless's library default of `cfg.loginPath` is a partial leak.
+
 ## Email-as-Transport (Optional Mode)
 
 A user can also subscribe to a sub by email. Three modes:
