@@ -994,20 +994,23 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
   );
 }
 
-function renderSubCreate(req, res, { auth }) {
+function renderSubCreate(req, res, { db, auth }) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
     return send(
       res,
       401,
-      layout('login required', html`<p class="muted">creating a sub requires a session. <a href="/">back</a> and post once to get one.</p>`)
+      layout('login required', html`
+        ${siteHeader({ db, currentHandle: null, title: 'login required' })}
+        <p class="muted">creating a sub requires a session. <a href="/">back</a> and post once to get one.</p>
+      `)
     );
   }
   send(
     res,
     200,
     layout('create a sub', html`
-      <header><h1>create a sub</h1></header>
+      ${siteHeader({ db, currentHandle, title: 'create a sub' })}
       <p><a href="/">← home</a></p>
       <form method="POST" action="/sub/create">
         <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
@@ -3256,7 +3259,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });
-      if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { auth });
+      if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { db, auth });
       if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
 
       let m;
