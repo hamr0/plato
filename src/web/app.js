@@ -10,7 +10,6 @@ import {
   editPost,
   getPostPreview,
   getPostRawBody,
-  listRecentPostsCappedPerSub,
   listPostsInSub,
   listPostsAcrossSubs,
   SUB_SORTS,
@@ -799,12 +798,12 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
     const pseudonyms = pseudonymsByHandle(db, [...new Set(comments.map((c) => c.handle))]);
     feedView = commentRowsView({ comments, pseudonyms, currentHandle });
   } else {
-    // Posts: default (no filter) keeps the per-sub-cap recency feed; any
-    // active filter switches to global cross-sub ordering.
-    const isFiltered = filters.sort !== 'new' || filters.date !== 'all';
-    const raw = isFiltered
-      ? listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: overFetch, offset })
-      : listRecentPostsCappedPerSub(db, { limit: overFetch, offset, perSub: 2 });
+    // Posts: one feed shape — global cross-sub ordering. The sort + date
+    // chips do all the curation; the user controls diversity by hopping
+    // into a sub or (M6) by subscription. No algorithmic per-sub cap —
+    // "no algorithm decides what you see" is the load-bearing rule, and
+    // capping per-sub on the default view is itself a small algorithm.
+    const raw = listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: overFetch, offset });
     const sliced = sliceForPage(raw, limit);
     hasNext = sliced.hasNext;
     const posts = sliced.items;

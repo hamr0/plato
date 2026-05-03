@@ -143,9 +143,9 @@ Same page for everyone — logged in, logged out, no personalization. Two sectio
 - ...
 ```
 
-**Recent posts (last 24h, chronological)**: a stream of posts from any sub on the instance, newest first, capped at 2 posts per sub so one busy sub doesn't drown out everything else. Shows time, sub, title, score.
+**Recent posts (chronological by default)**: a stream of posts from any sub on the instance, newest first. Shows time, sub, title, score. As of M5/B9 polish, no per-sub cap — one busy sub *can* dominate the feed; the reader's response is to use the date filter, click into a specific sub, or (M6) subscribe so the home becomes "their subs." A per-sub cap would be a small algorithmic intervention, and "no algorithm decides what you see" is load-bearing.
 
-**Top-nav filters (M5/B8)**: the home feed exposes three orthogonal axes — `Posts | Comments` tab (comments tab shows `listRecentCommentsAcrossSubs`, removed-comments excluded), sort `new | top | hot` (hot is post-only; uses HN-shape `score / (age_hours + 2)^1.5`), and date `24h | week | all`. Default state (no params) keeps the per-sub-cap chronological recency feed described above; activating any filter switches to the global cross-sub ordering. `Subscribed | All` toggle deferred to M6.
+**Top-nav filters (M5/B8)**: the home feed exposes three orthogonal axes — `Posts | Comments` tab (comments tab shows `listRecentCommentsAcrossSubs`, removed-comments excluded), sort `new | old | top | hot` (hot is post-only; uses HN-shape `score / (age_hours + 2)^1.5`), and date `24h | week | all`. One feed shape: `listPostsAcrossSubs(sort, sinceMs)` for every combination, defaults `sort=new` + `date=all`. `Subscribed | All` toggle deferred to M6.
 
 **`/subs` directory (M5/B8)**: a separate page listing every sub on the instance with description, owner pseudonym, post count, last-activity timestamp, and a subscribers column (placeholder `—` until M6 ships subscriptions). Sortable (`active | posts | name`), client-side prefix filter. Linked from the home subs strip as the `all` chip. The home page covers "what's lively right now"; `/subs` covers "what exists at all."
 
@@ -165,16 +165,15 @@ Clicking a sub takes you to its posts. The user picks a sort order: **hot** (vot
 
 Hot is offered *within* a sub because that's where users want to see what their community is engaging with right now. It's not offered on the home page or the my-subs page because at those layers, chronological with per-sub dedup is dumber and harder to game.
 
-### Why time-based ranking with per-sub caps
+### Why time-based ranking, no algorithmic cap
 
 The simplest possible version that doesn't break:
 
-- **Easy to reason about.** "Posted in the last 24 hours, newest first, max 2 per sub" is one sentence. There are no tuning constants.
-- **Hard to game.** No magic numbers, no decay function, no early-vote concentration to exploit.
+- **Easy to reason about.** "Newest first, optionally filter by date or sort by top/hot" is one sentence. There are no tuning constants.
+- **Hard to game.** No magic numbers, no decay function (except hot, which is opt-in), no early-vote concentration to exploit.
 - **Doesn't hide slow-burn content.** A thoughtful post that accumulates votes over 3 days isn't punished by an algorithm that thinks it's "old."
-- **Doesn't create a single point of optimization.** Hot ranking on the home page would mean every poster optimizes for hot. Chronological removes that target.
-
-The downside — a noisy sub dominating — is killed by the per-sub cap. If layering in a vote weighting later becomes necessary, that's a v2 conversation. v1 stays dumb on purpose.
+- **Doesn't create a single point of optimization.** Hot ranking on the home page would mean every poster optimizes for hot. Chronological default removes that target.
+- **No algorithmic per-sub cap (M5/B9 polish).** An earlier draft capped the default home feed at 2 posts per sub for diversity. That cap was itself a small unstated algorithm, and conflicted with "no algorithm decides what you see." The chips give the reader the levers; (M6) subscriptions will turn the home into "your subs" by user choice, not by code. The downside — a noisy sub dominating until M6 — is acceptable: it's *honest*. The reader can hop into a quieter sub or use the date filter.
 
 ### Sub subscription mechanics
 

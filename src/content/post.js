@@ -231,26 +231,6 @@ export function listRecentPosts(db, { limit = 50, offset = 0 } = {}) {
   ).all(limit, offset);
 }
 
-// Front-page recent feed with a per-sub cap (PRD §Front Page). Without the
-// cap, one chatty sub can crowd out everything else. ROW_NUMBER() partitions
-// by sub_name so each sub contributes at most `perSub` of its newest posts.
-// comment_count joined via correlated subquery — at M2/M3 scale this is fast
-// and avoids an N+1 walk in the route layer.
-export function listRecentPostsCappedPerSub(db, { limit = 50, offset = 0, perSub = 2 } = {}) {
-  return db.prepare(
-    `WITH ranked AS (
-       SELECT *, ROW_NUMBER() OVER (PARTITION BY sub_name ORDER BY created_at DESC) AS rn
-       FROM posts
-     )
-     SELECT id, sub_name, handle, title, file_path, created_at, score,
-       (SELECT COUNT(*) FROM comments WHERE post_id = ranked.id) AS comment_count
-     FROM ranked
-     WHERE rn <= ?
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`
-  ).all(perSub, limit, offset);
-}
-
 // Cross-sub home feed with sort + date filters. Used by the home page's
 // top-nav (UX-E): no per-sub cap, just a global ordering with optional
 // recency window. `sort` is one of 'new' | 'top' | 'hot'; `sinceMs` is

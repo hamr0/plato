@@ -449,7 +449,7 @@ test('M2: GET /sub/<unknown> returns 404', async (t) => {
   assert.equal(res.status, 404);
 });
 
-test('M2: home page caps recent posts to 2 per sub', async (t) => {
+test('M5/B9 polish: home page is one unified feed (no per-sub cap)', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
@@ -458,7 +458,9 @@ test('M2: home page caps recent posts to 2 per sub', async (t) => {
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, 'capper-test', Date.now());
 
-  // 5 posts in 'general'. Cap is 2 → only the 2 newest should appear.
+  // 5 posts in 'general'. Default home now shows all of them — no
+  // algorithmic per-sub diversity cap. Sort/date chips are the only
+  // curation lever.
   const insert = db.prepare(
     `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
      VALUES (?, 'general', ?, ?, ?, ?)`
@@ -476,11 +478,9 @@ test('M2: home page caps recent posts to 2 per sub', async (t) => {
 
   const res = await fetch(baseUrl + '/');
   const body = await res.text();
-  assert.match(body, /general-post-0/, 'newest visible');
-  assert.match(body, /general-post-1/, 'second-newest visible');
-  assert.doesNotMatch(body, /general-post-2/, '3rd post must be capped');
-  assert.doesNotMatch(body, /general-post-3/);
-  assert.doesNotMatch(body, /general-post-4/);
+  for (let i = 0; i < 5; i++) {
+    assert.match(body, new RegExp(`general-post-${i}`), `post ${i} visible`);
+  }
 });
 
 test('M2: /draft to unknown sub returns 400', async (t) => {

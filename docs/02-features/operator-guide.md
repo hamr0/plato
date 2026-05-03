@@ -29,7 +29,7 @@ Plato is *not* for: image-first communities, communities that want voice/video, 
 
 ## What you get out of the box
 
-- Front page that shows what's lively in the last 24 hours, capped at 2 posts per sub so no one sub dominates.
+- Front page: a chronological stream of recent posts across every sub. Sort chips (new / old / top / hot) and date chips (24h / week / all) are the only curation levers; no algorithmic per-sub cap and no recommendation feed. Once M6 ships subscriptions, the home becomes "your subs."
 - Sub feeds with new/old/top/hot sort. "Hot" is HN-shaped (`score / (age + 2)^1.5`) — no recurring rank job.
 - Hierarchical comments, indented up to 4 levels deep, with `+ N more replies` folds beyond that.
 - Upvote/downvote with new-account safeguards (half weight, posts-only, posts < 24h only, for the first 7 days).
