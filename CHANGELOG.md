@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M5/B15 Sub description length cap
+
+- **Sub description capped at 200 chars.** New `validateSubDescription` rejects oversize input at `createSub` and `setSubDescription`. Form inputs on `/sub/create` and `/sub/<name>/edit` carry `maxlength="200"` so the no-JS path can't trip the server check accidentally. Closes a small but real abuse vector — long descriptions could inflate every sub-listing row.
+
 ### Added — M5/B14 Guest comment composer
 
 - **Always-visible composer on post pages** — the `// comments` composer renders for every visitor, logged in or out. The "log in to comment" placeholder is gone. Without JS the form posts normally and the existing 401 page catches it (honest fallback). Replies still require auth-first; only the top-level composer is guest-friendly in v1.

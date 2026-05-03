@@ -28,6 +28,19 @@ export const RESERVED_SUB_NAMES = new Set([
   'health',
 ]);
 
+export const SUB_DESCRIPTION_MAX = 200;
+
+export function validateSubDescription(description) {
+  if (description == null) return '';
+  if (typeof description !== 'string') {
+    throw new Error('sub description must be a string');
+  }
+  if (description.length > SUB_DESCRIPTION_MAX) {
+    throw new Error(`sub description must be ≤ ${SUB_DESCRIPTION_MAX} characters`);
+  }
+  return description;
+}
+
 export function validateSubName(name) {
   if (typeof name !== 'string') {
     throw new Error('sub name must be a string');
@@ -55,6 +68,7 @@ export function createSub(db, {
   flagThreshold = FLAG_THRESHOLD_FLOOR,
 }) {
   validateSubName(name);
+  description = validateSubDescription(description);
   if (!ownerHandle) {
     throw new Error('createSub: ownerHandle is required');
   }
@@ -122,7 +136,8 @@ export function setSubFlagThreshold(db, name, threshold) {
 export function setSubDescription(db, name, description) {
   const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
   if (!sub) throw new Error(`sub "${name}" not found`);
-  db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(description, name);
+  const validated = validateSubDescription(description);
+  db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(validated, name);
 }
 
 export function setSubSensitive(db, name, sensitive) {

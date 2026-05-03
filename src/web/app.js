@@ -1000,7 +1000,7 @@ function renderSubCreate(req, res, { auth }) {
       <p><a href="/">← home</a></p>
       <form method="POST" action="/sub/create">
         <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
-        <input name="description" placeholder="one-line description (optional)">
+        <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200">
         <fieldset class="sub-thresholds">
           <legend class="muted">auto-uncollapse (soft mod)</legend>
           <label class="threshold-row">
@@ -1102,7 +1102,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
     ${siteHeader({ db, currentHandle, title: html`edit //${subName}` })}
     <p><a href="/sub/${subName}">← back to //${subName}</a></p>
     <form method="POST" action="/sub/${subName}/edit">
-      <input name="description" placeholder="one-line description (optional)" value="${sub.description ?? ''}">
+      <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200" value="${sub.description ?? ''}">
       ${flairEditorView({ flairs, flairsRequired: !!sub.flairs_required })}
       <label class="threshold-row">
         <input type="checkbox" name="sensitive" value="1" ${sub.sensitive ? 'checked' : ''}>
