@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.7 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.3.0 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -86,6 +86,9 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | POST | `/sub/<name>/mod` | mod action (collapse/uncollapse/remove/unremove/ban/...) |
 | GET | `/modlog` | unified mod inbox for any user moderating ≥1 sub. Modes: `?mode=open`/`inbox`/`audit`. Filters: `mode`, `date`, `type`, `sub`, `mod`, `user`, `page`. Default = open if pending exist, else audit. |
 | POST | `/modlog/resolve` | one-shot decision endpoint for the open-mode form: `decision=uphold-soft|uphold-hard|dismiss` |
+| GET | `/memlog` | per-user notification log (recipient-only). Filters: `?show=unread\|all`, `?kind=all\|comments\|replies\|mod-actions`. 90-day lazy-prune retention. |
+| POST | `/memlog/mark-read` | mark all visible (respecting active `kind` filter) as read |
+| GET | `/memlog/go/<id>` | mark a single notification read + 302 to its deep link |
 | POST | `/draft` | submit a draft post (logged-in: inlines finalize) |
 | GET | `/draft/<id>/finalize` | finalize after magic-link click |
 | GET | `/post/<id>` | canonical post permalink |

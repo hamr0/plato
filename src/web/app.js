@@ -54,6 +54,11 @@ import { checkPostRate, checkPostRatePerSub, checkCommentRate, resolveRateLimitC
 import { loadSpamPatterns, matchSpamPatterns, applySpamMatches, SYSTEM_HANDLE } from '../content/spamPatterns.js';
 import { checkLinkCap, resolveLinkCapConfig } from '../content/linkCap.js';
 import { loadUrlhausCache, matchUrlhaus, applyUrlhausMatches } from '../content/urlhaus.js';
+import {
+  recordNotification, unreadCount, listNotifications,
+  markNotificationRead, markAllNotificationsRead, pruneOldNotifications,
+  NOTIFICATION_KINDS,
+} from '../content/notification.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -67,7 +72,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=14">
+<link rel="stylesheet" href="/static/style.css?v=15">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=2" defer></script>
@@ -282,9 +287,15 @@ function loginStatusFor(db, currentHandle) {
   const modLogLink = modSubs.length > 0
     ? html` · <a href="/modlog">modlog</a>`
     : html``;
+  // Pseudonym is the entry point to /memlog (personal notification log).
+  // Unread count chip uses .reply-count colors so non-zero pops accent.
+  const unread = unreadCount(db, currentHandle);
+  const unreadChip = unread > 0
+    ? html` <a class="memlog-chip" href="/memlog" title="${unread} unread">(${unread})</a>`
+    : html``;
   return html`<div class="status muted">
     <img src="/avatar/${currentHandle}.svg" width="16" height="16" alt="">
-    <strong>${pseudonym}</strong> · <a href="/subs">subs</a>${modLogLink} ·
+    <a class="memlog-link" href="/memlog"><strong>${pseudonym}</strong></a>${unreadChip} · <a href="/subs">subs</a>${modLogLink} ·
     <form method="POST" action="/logout" class="inline">
       <button class="link">logout</button>
     </form>
@@ -1650,6 +1661,36 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
   if (matchedHosts.length > 0) {
     applyUrlhausMatches(db, { targetType: 'comment', targetId: result.commentId, subName, matchedHosts });
   }
+  // Fire a memlog notification to the right recipient: parent comment author
+  // for replies, post author for top-level comments. recordNotification skips
+  // self-notifications so users don't ping themselves.
+  if (parentId) {
+    const parent = db.prepare('SELECT handle FROM comments WHERE id = ?').get(parentId);
+    if (parent?.handle) {
+      recordNotification(db, {
+        recipientHandle: parent.handle,
+        kind: 'reply_to_comment',
+        subName,
+        targetType: 'comment',
+        targetId: result.commentId,
+        actorHandle: handle,
+        snippet: commentBody,
+      });
+    }
+  } else {
+    const post = db.prepare('SELECT handle FROM posts WHERE id = ?').get(postId);
+    if (post?.handle) {
+      recordNotification(db, {
+        recipientHandle: post.handle,
+        kind: 'comment_on_post',
+        subName,
+        targetType: 'comment',
+        targetId: result.commentId,
+        actorHandle: handle,
+        snippet: commentBody,
+      });
+    }
+  }
   // JSON branch: client-side comment.js inserts the rendered fragment
   // in-place so the page doesn't reload. Loading-dots wave shows during
   // the round-trip. Falls back to native redirect if Accept != JSON.
@@ -1965,6 +2006,34 @@ async function handleFlag(req, res, { db, auth }) {
   redirect(res, safeReturn);
 }
 
+// Resolve the handle a mod action affects and emit a memlog notification.
+// Owner-only sub-management actions (promote/demote/transfer) don't notify;
+// those land in the public modlog for affected co-mods to see directly.
+const NOTIFIABLE_MOD_ACTIONS = new Set([
+  'collapse', 'uncollapse', 'remove', 'unremove', 'ban', 'unban',
+]);
+function notifyModAction(db, { subName, action, targetType, targetId, modHandle, reason }) {
+  if (!NOTIFIABLE_MOD_ACTIONS.has(action)) return;
+  let recipientHandle = null;
+  if (targetType === 'handle') {
+    recipientHandle = targetId;
+  } else if (targetType === 'post') {
+    recipientHandle = db.prepare('SELECT handle FROM posts WHERE id = ?').get(targetId)?.handle ?? null;
+  } else if (targetType === 'comment') {
+    recipientHandle = db.prepare('SELECT handle FROM comments WHERE id = ?').get(targetId)?.handle ?? null;
+  }
+  if (!recipientHandle) return;
+  recordNotification(db, {
+    recipientHandle,
+    kind: 'mod_action',
+    subName,
+    targetType,
+    targetId,
+    actorHandle: modHandle,
+    snippet: reason ? `${action}: ${reason}` : action,
+  });
+}
+
 async function handleModAction(req, res, { db, auth }, subName) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
@@ -1998,6 +2067,7 @@ async function handleModAction(req, res, { db, auth }, subName) {
       title: 'mod failed', message: err.message,
     }));
   }
+  notifyModAction(db, { subName, action, targetType, targetId, modHandle: handle, reason: trimmedReason });
   const safeReturn = safeLocalRedirect(returnTo, `/sub/${subName}`);
   redirect(res, safeReturn);
 }
@@ -2047,9 +2117,11 @@ async function handleModlogResolve(req, res, { db, auth }) {
   try {
     if (decision === 'uphold-soft') {
       recordAction(db, { subName, modHandle: handle, action: 'collapse', targetType, targetId, reason: trimmedReason });
+      notifyModAction(db, { subName, action: 'collapse', targetType, targetId, modHandle: handle, reason: trimmedReason });
       resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'upheld' });
     } else if (decision === 'uphold-hard') {
       recordAction(db, { subName, modHandle: handle, action: 'remove', targetType, targetId, reason: trimmedReason });
+      notifyModAction(db, { subName, action: 'remove', targetType, targetId, modHandle: handle, reason: trimmedReason });
       resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'upheld' });
     } else {
       // dismiss: close out flags + uncollapse if the auto-hide threshold
@@ -2061,6 +2133,7 @@ async function handleModlogResolve(req, res, { db, auth }) {
       resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'dismissed' });
       if (target && target.collapsed_at != null) {
         recordAction(db, { subName, modHandle: handle, action: 'uncollapse', targetType, targetId, reason: trimmedReason });
+        notifyModAction(db, { subName, action: 'uncollapse', targetType, targetId, modHandle: handle, reason: trimmedReason });
       }
     }
   } catch (err) {
@@ -2071,6 +2144,165 @@ async function handleModlogResolve(req, res, { db, auth }) {
   }
   const safeReturn = safeLocalRedirect(returnTo, '/modlog');
   redirect(res, safeReturn);
+}
+
+// Personal notification log — memlog (M6/B0). The user's private inverse
+// of /modlog: events that happened *to* their content. Same table chrome
+// as the modlog audit view so mental model stays one. Three filter chips:
+// all kinds plus a per-kind narrow. Default view is unread; "all" pulls
+// in read history (kept for 90 days, lazily pruned on every GET). Mark-
+// all-read respects the active filter so users can clear one kind without
+// losing visibility on others.
+const MEMLOG_KIND_FILTERS = [
+  { slug: 'comments',    kinds: ['comment_on_post'],   label: 'comments' },
+  { slug: 'replies',     kinds: ['reply_to_comment'],  label: 'replies' },
+  { slug: 'mod-actions', kinds: ['mod_action'],        label: 'mod actions' },
+];
+
+function memlogParseFilters(searchParams) {
+  const show = searchParams?.get('show') === 'all' ? 'all' : 'unread';
+  const kindParam = searchParams?.get('kind') || 'all';
+  const matched = MEMLOG_KIND_FILTERS.find((f) => f.slug === kindParam);
+  return { show, kindSlug: matched ? matched.slug : 'all', kinds: matched ? matched.kinds : null };
+}
+
+function memlogHref({ show, kindSlug }) {
+  const params = new URLSearchParams();
+  if (show !== 'unread') params.set('show', show);
+  if (kindSlug !== 'all') params.set('kind', kindSlug);
+  const qs = params.toString();
+  return qs ? `/memlog?${qs}` : '/memlog';
+}
+
+function memlogTargetLink(db, n) {
+  if (n.target_type === 'comment') {
+    const row = db.prepare(
+      `SELECT c.id AS comment_id, c.post_id, p.sub_name
+       FROM comments c JOIN posts p ON p.id = c.post_id
+       WHERE c.id = ?`
+    ).get(n.target_id);
+    if (!row) return null;
+    return `/sub/${row.sub_name}/post/${row.post_id}#comment-${row.comment_id}`;
+  }
+  if (n.target_type === 'post') {
+    const row = db.prepare('SELECT id, sub_name FROM posts WHERE id = ?').get(n.target_id);
+    if (!row) return null;
+    return `/sub/${row.sub_name}/post/${row.id}`;
+  }
+  if (n.target_type === 'handle' && n.sub_name) {
+    return `/sub/${n.sub_name}/modlog`;
+  }
+  return null;
+}
+
+const MEMLOG_KIND_LABELS = {
+  comment_on_post:  'comment on post',
+  reply_to_comment: 'reply',
+  mod_action:       'mod action',
+};
+
+function renderMemlog(req, res, { db, auth }, searchParams) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to see your memlog.</p>`));
+  }
+  pruneOldNotifications(db);
+  const filters = memlogParseFilters(searchParams);
+  const rows = listNotifications(db, handle, { show: filters.show, kinds: filters.kinds, limit: 200 });
+  const actorHandles = [...new Set(rows.map((r) => r.actor_handle).filter(Boolean))];
+  const pseudonyms = pseudonymsByHandle(db, actorHandles);
+  const filterLink = (slug, label, activeMatch) => {
+    const isActive = (slug === 'all' && filters.kindSlug === 'all') || filters.kindSlug === slug;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    const next = slug === 'all'
+      ? memlogHref({ ...filters, kindSlug: 'all' })
+      : memlogHref({ ...filters, kindSlug: slug });
+    return html`<a class="${cls}" href="${next}">${label}</a>`;
+  };
+  const showLink = (val, label) => {
+    const isActive = filters.show === val;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${memlogHref({ ...filters, show: val })}">${label}</a>`;
+  };
+  const markAllForm = html`<form method="POST" action="/memlog/mark-read" class="modlog-revoke">
+    <input type="hidden" name="kind" value="${filters.kindSlug}">
+    <input type="hidden" name="return_to" value="${memlogHref(filters)}">
+    <button class="action-link" title="mark all visible as read">mark all read</button>
+  </form>`;
+  const filterBar = html`<p class="modlog-filters muted">
+    show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
+    <span class="filter-sep">·</span>
+    kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
+    <span class="filter-sep">·</span>
+    ${markAllForm}
+  </p>`;
+  const body = rows.length === 0
+    ? html`<p class="muted">${filters.show === 'unread' ? 'no unread notifications.' : 'nothing in your memlog yet.'}</p>`
+    : html`<table class="modlog">
+        <thead><tr><th>when</th><th>kind</th><th>from</th><th>where</th><th>snippet</th></tr></thead>
+        <tbody>${rows.map((n) => {
+          const link = memlogTargetLink(db, n);
+          const ago = relativeTime(n.created_at);
+          const fromName = n.actor_handle ? (pseudonyms.get(n.actor_handle) ?? n.actor_handle.slice(0, 8)) : 'system';
+          const where = n.sub_name ? html`<a class="sub-link sub-${subColorIndex(n.sub_name)}" href="/sub/${n.sub_name}">//${n.sub_name}</a>` : html`—`;
+          const snippet = n.snippet ?? '';
+          const rowCls = n.read_at ? 'memlog-row-read' : '';
+          const whenCell = link
+            ? html`<a href="/memlog/go/${n.id}" title="open">${ago}</a>`
+            : html`<span class="muted">${ago}</span>`;
+          return html`<tr class="${rowCls}">
+            <td>${whenCell}</td>
+            <td class="muted">${MEMLOG_KIND_LABELS[n.kind] ?? n.kind}</td>
+            <td class="muted">${fromName}</td>
+            <td>${where}</td>
+            <td class="muted">${snippet}</td>
+          </tr>`;
+        })}</tbody>
+      </table>`;
+  send(res, 200, layout('memlog', html`
+    ${siteHeader({ db, currentHandle: handle, title: 'memlog' })}
+    <p><a href="/">← home</a></p>
+    <h2>// memlog</h2>
+    <p class="muted">your private notification log. comments and replies you received, plus mod actions on your content. read items stay visible for 90 days.</p>
+    ${filterBar}
+    ${body}
+  `));
+}
+
+async function handleMemlogMarkRead(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to clear your memlog.',
+    }));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const kindSlug = form.kind || 'all';
+  const matched = MEMLOG_KIND_FILTERS.find((f) => f.slug === kindSlug);
+  markAllNotificationsRead(db, handle, { kinds: matched ? matched.kinds : null });
+  redirect(res, safeLocalRedirect(form.return_to, '/memlog'));
+}
+
+function handleMemlogGo(req, res, { db, auth }, idParam) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, layout('login required', html`<p class="muted">log in to follow this link.</p>`));
+  }
+  const id = Number(idParam);
+  if (!Number.isInteger(id) || id <= 0) {
+    return send(res, 400, layout('bad notification', html`<p class="muted">invalid notification id.</p>`));
+  }
+  const row = db.prepare(
+    `SELECT id, kind, sub_name, target_type, target_id
+     FROM notifications WHERE id = ? AND recipient_handle = ?`
+  ).get(id, handle);
+  if (!row) {
+    return send(res, 404, layout('not found', html`<p class="muted">no such notification. <a href="/memlog">back</a></p>`));
+  }
+  markNotificationRead(db, handle, id);
+  const target = memlogTargetLink(db, row);
+  redirect(res, target ?? '/memlog');
 }
 
 // Public per-sub modlog. Audit-only (the trust surface). Same table shape
@@ -3054,6 +3286,15 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if (path === '/modlog/resolve' && method === 'POST') {
         return handleModlogResolve(req, res, { db, auth });
+      }
+      if (path === '/memlog' && method === 'GET') {
+        return renderMemlog(req, res, { db, auth }, url.searchParams);
+      }
+      if (path === '/memlog/mark-read' && method === 'POST') {
+        return handleMemlogMarkRead(req, res, { db, auth });
+      }
+      if ((m = path.match(/^\/memlog\/go\/(\d+)$/)) && method === 'GET') {
+        return handleMemlogGo(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
         return renderPostPage(req, res, { db, auth, postsDir }, m[1], m[2], url.searchParams.get('sort'));

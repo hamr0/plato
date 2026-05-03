@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M6/B0 memlog (per-user notifications)
+
+- **New table `notifications`** (migration 013) — recipient, kind, sub_name, target, actor, snippet, created_at, read_at. One row per event the user should know about. Composite index `(recipient_handle, read_at, created_at DESC)` covers the unread-count and feed queries. `target_id` is TEXT to fit both integer post/comment ids and 64-char ban handles.
+- **Three notification kinds**: `comment_on_post` (top-level comment on your post), `reply_to_comment` (someone replied to your comment), `mod_action` (your content/handle was acted on by a mod). Vote events are deliberately not recorded — score is the visible signal; per-vote pings are an engagement-bait surface plato refuses.
+- **Insert sites** wired in `handleAddComment` (post author for top-level, parent-comment author for replies) and via a new `notifyModAction` helper called after every successful `recordAction` in `handleModAction` and `handleModlogResolve`. Owner-only sub-management actions (promote/demote/transfer) are intentionally not notified — those land in the public modlog where co-mods see them directly. Self-notifications are skipped at the `recordNotification` call.
+- **`/memlog` route** — recipient-only personal feed, 401 to logged-out visitors. Same `table.modlog` chrome as the modlog audit view (one mental model). Filter row: `show: unread / all` × `kind: all / comments / replies / mod actions` plus a `mark all read` button that respects the active kind filter. Rows older than 90 days are lazily pruned on every GET regardless of read-state — bounded table, predictable retention.
+- **`/memlog/go/<id>`** — single-click follow-through. Marks that one notification read server-side, then 302s to the deep link (`/sub/x/post/y#comment-z` for content events, `/sub/x/modlog` for ban events).
+- **Header chip** — pseudonym in the top-right is now a link to `/memlog`. Non-zero unread count renders as a colored `(N)` chip next to the name, recomputed per-request via `unreadCount`. No JS, no polling.
+- **CSS**: `.memlog-link` (subtle hover), `.memlog-chip` (accent-colored unread count), `tr.memlog-row-read td { opacity: 0.55 }` so read rows visually recede in the `all` view.
+- **Tests**: 9 new (`notification.test.js`) covering insert/skip-self/unknown-kind/snippet-trim, listNotifications filters, mark-read scoping, mark-all kind filter, and prune retention.
+
 ### Added — M5/B15 Sub description length cap
 
 - **Sub description capped at 200 chars.** New `validateSubDescription` rejects oversize input at `createSub` and `setSubDescription`. Form inputs on `/sub/create` and `/sub/<name>/edit` carry `maxlength="200"` so the no-JS path can't trip the server check accidentally. Closes a small but real abuse vector — long descriptions could inflate every sub-listing row.

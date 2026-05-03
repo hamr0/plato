@@ -312,6 +312,14 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | B12: per-sub flag-threshold | shipped (M5/B12) | raise-only, floor 3 |
 | B13: inline revoke in /modlog | shipped (M5/B13) | actor-only, sub-keys excluded |
 | B14: guest comment composer | shipped (M5/B14) | logged-out post page renders the composer; submit stashes `{postPath, body, ts}` in `localStorage` (key `plato:pendingComment`, 24h TTL), opens header login, focuses email; magic-link `return_to` lands user back on the post; `comment.js` autoposts via existing JSON splice. No server schema; comment endpoint still 401s anonymous POSTs. Top-level only — replies still require auth-first. |
+| B15: sub description ≤200 chars | shipped (M5/B15) | server-validated in `validateSubDescription`; form `maxlength` mirrors. Closes inflate-every-listing-row vector. |
+
+### Build status (M6)
+
+| Feature | Status | Notes |
+|---|---|---|
+| B0: memlog (per-user notifications) | shipped (M6/B0) | migration 013 `notifications` table; three kinds (`comment_on_post`, `reply_to_comment`, `mod_action`) — vote events deliberately not recorded. Recipient-only `/memlog` route with same `table.modlog` chrome and `show × kind` filters; click-redirect via `/memlog/go/<id>` marks one read; mark-all-read respects active filter. 90-day lazy-prune on every GET regardless of read-state — bounded retention. Header pseudonym is now a link with an unread-count chip. Self-notifications skipped at insert. Owner-only sub-management mod actions (promote/demote/transfer) are not notified — they live in the public modlog where co-mods see them directly. |
+| B1: subscriptions | not started | subscribe/unsubscribe per sub, `/subs?filter=mine` view (subs page reused, no separate `/my-subs`), home-feed `subscribed | all` toggle |
 
 The deferred items aren't blockers for an unannounced public trial; the shipped layer is enough that an attacker who gets through magic-link → tiered rate limit → link cap → spam regex → URLhaus has already done more work than spamming a typical small instance is worth.
 
