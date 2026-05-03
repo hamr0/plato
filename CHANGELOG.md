@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — Chrome enforcement (post-M6/B0 polish)
+
+- **Every page now goes through `pageView`** — single canonical chrome helper. Renderers no longer compose their own header; passing `title` to `pageView` doubles as the document title *and* the wordmark replacement in `siteHeader`. ~30 bare `layout(...)` error blurbs migrated to a `quickPage(req, ctx, title, body)` sugar that wraps `pageView` so short responses stay readable. Three handlers (`handleLogin`, `handleLogout`, `redirectLegacyPost`) picked up `db` in their context so chrome reaches auth + legacy-redirect pages too. Convention is now codified in code: `layout()` and `siteHeader()` are internal to the helpers; renderers must use `pageView` or `quickPage`.
+- **Header pseudonym restyled** — accent-colored (same blue as sub links) so the "click your name → memlog" affordance is visible at a glance, with hover underline. `style.css?v=17`.
+- **Memlog deep-link click expands enclosing details on hash jump** — `comment.js` now walks up from `location.hash`, opens any `<details>` (long-collapsed body, score-collapsed comment, depth-folded subtree), re-scrolls, and pulses the highlight so the eye lands on the body the user was notified about. Works on every page that loads `comment.js` (which is every page). `comment.js?v=3`.
+- **`/sub/create` uses the shared `siteHeader`** (via `pageView`) — was rendering a bare `<header><h1>` with no logo or login affordance.
+- **`flair-form-row[hidden]` respects the hidden attribute** — `display: inline-flex` was overriding the browser-default `[hidden] { display: none }`, so the cross-sub flair picker stayed visible when the user picked a sub without flairs. Explicit override added.
+
 ### Added — M6/B0 memlog (per-user notifications)
 
 - **New table `notifications`** (migration 013) — recipient, kind, sub_name, target, actor, snippet, created_at, read_at. One row per event the user should know about. Composite index `(recipient_handle, read_at, created_at DESC)` covers the unread-count and feed queries. `target_id` is TEXT to fit both integer post/comment ids and 64-char ban handles.

@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.3.0 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.3.1 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events; chrome enforcement: every page goes through `pageView` / `quickPage`, hash-jump auto-opens collapsed details) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -284,6 +284,7 @@ Auto-uncollapse thresholds: the operator can raise either but never below the fl
 - **HMAC handles for forking.** Same email yields different handle on a different instance. Identity is per-forum by design.
 - **Score-snapshot at collapse.** When a mod soft-removes, `score_at_collapse` is captured. Cumulative-vote auto-revert checks `current_score - score_at_collapse >= per_sub_threshold` on every vote. Cheap; transactional; no background job.
 - **Soft moderation supersedable, hard moderation not.** Hard removal is `mod_handle`-only undo. Soft removal can be undone by mod *or* by community. Mutually exclusive in the UI: when hard-removed, the collapse button is dimmed.
+- **One canonical page chrome.** Every user-facing page in `src/web/app.js` goes through `pageView({db, currentHandle, title, subtitle}, body)` (or its short-error sugar `quickPage(req, ctx, title, body)`). The `title` arg doubles as the document title and the wordmark replacement in `siteHeader` — every page reads the same as the home, with the forum name swapped for the page action. Renderers must not call `layout()` or `siteHeader()` directly; both are internal to the helpers. The convention is enforced by code, not comment — drift would require deleting both helpers.
 
 ## Production usage
 
