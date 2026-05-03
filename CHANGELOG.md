@@ -6,9 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-### Changed — Owner exemption from per-sub topic-flood cap
+### Changed — Owner carve-out from per-sub + per-hour rate caps
 
-- **Sub owners now bypass `checkPostRatePerSub` when posting in their own sub.** The per-sub-day cap (5/20 by tier) is the topic-flood defense — meaningless when you own the sub. The global per-day cap (`checkPostRate`, 10/50/100 by tier) still applies, so a compromised owner account can't drain the day's quota across the instance. Wired in `handleDraft` and `handleFinalize` via a `canModerate(...) === 'owner'` check. Solves the founder-bootstrap UX pothole where new operators hit `5/day in /sub/yours` on day one of their first sub. operator-guide and plato.context updated to mark the carve-out alongside the other anti-spam rules.
+- **Sub owners bypass two rate caps when posting in their own sub**: (a) `checkPostRatePerSub` (5/20 by tier — the topic-flood defense, meaningless when you own the sub) and (b) the per-hour portion of `checkPostRate` (1/3/∞ by tier — the burst-pacing defense, symbolic friction for an owner seeding their freshly-created sub). The global **per-day** cap (3/10/∞ by tier) still applies, so a compromised owner account can't drain the day's quota across the instance — the spam-floor defense holds. `checkPostRate` gained a `{ skipHourly }` option; `handleDraft` and `handleFinalize` pass it when the actor owns the destination sub via `canModerate(...) === 'owner'`. Solves the founder-bootstrap UX where a fresh owner would hit "1/hour" between each post in their own sub. operator-guide and plato.context updated to mark the carve-out alongside the other anti-spam rules.
 
 ### Changed — Chrome enforcement (post-M6/B0 polish)
 

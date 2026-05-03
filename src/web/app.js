@@ -1238,14 +1238,17 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     const linkBlock = checkLinkCap(db, currentHandle, `${title}\n${postBody}`, Date.now(), linkCapConfig);
     if (linkBlock) return retry(400, linkBlock.message);
 
-    const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig);
+    // Owner of the destination sub bypasses (a) the global per-hour
+    // burst-pacing cap and (b) the per-sub topic-flood cap. The global
+    // per-DAY cap still applies, so the spam-floor defense holds — a
+    // fresh owner can burst their daily 3 posts into their own sub
+    // without waiting an hour between each, but can't drain quota
+    // across the instance. Topic-flooding a sub you own is a
+    // contradiction; the cap was symbolic friction.
+    const isOwnerOfSub = canModerate(db, subName, currentHandle) === 'owner';
+    const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub });
     if (rateBlock) return retry(429, rateBlock.message);
 
-    // Owner exemption from the per-sub topic-flood cap. The global cap
-    // (`checkPostRate` above) still applies, so a compromised owner can't
-    // drain the day's quota across the instance — only the per-sub cap is
-    // lifted, since topic-flooding a sub you own is a contradiction.
-    const isOwnerOfSub = canModerate(db, subName, currentHandle) === 'owner';
     if (!isOwnerOfSub) {
       const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
       if (subBlock) return retry(429, subBlock.message);
@@ -1319,18 +1322,18 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
   // Rate-limit the publish step, not draft creation. New accounts
   // confirming their email shouldn't be silently swallowed by the
   // limiter. The 429 surfaces a clear message + the home link.
-  const rateBlock = checkPostRate(db, handle, Date.now(), rateLimitConfig);
+  // Owner of the destination sub bypasses the per-hour and per-sub
+  // caps; the per-day cap still bites (see handleDraft for the
+  // rationale).
+  const draftRow = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
+  const isOwnerOfSub = draftRow ? canModerate(db, draftRow.sub_name, handle) === 'owner' : false;
+  const rateBlock = checkPostRate(db, handle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub });
   if (rateBlock) {
     return send(res, 429, errorPage(req, { db, auth }, {
       title: 'rate limited', message: rateBlock.message,
     }));
   }
-  // Per-sub topic-flood limit. Look up the draft's target sub before
-  // finalizing so we can reject before the file write. Owners of the
-  // target sub are exempt from this cap (see handleDraft) — global cap
-  // above still applies.
-  const draftRow = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
-  if (draftRow && canModerate(db, draftRow.sub_name, handle) !== 'owner') {
+  if (draftRow && !isOwnerOfSub) {
     const subBlock = checkPostRatePerSub(db, handle, draftRow.sub_name, Date.now(), rateLimitConfig);
     if (subBlock) {
       return send(res, 429, errorPage(req, { db, auth }, {

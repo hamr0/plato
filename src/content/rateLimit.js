@@ -120,13 +120,15 @@ function countSince(db, table, handle, since) {
 // the limit that triggered. Caller renders 429 with the message.
 // `config` defaults to the floor; createApp threads operator overrides
 // through.
-export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG) {
+export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG, { skipHourly = false } = {}) {
   const tier = accountAgeTier(db, handle, now);
   const limits = config.perAccount[tier];
   if (!limits) return null;
-  const hourCount = countSince(db, 'posts', handle, now - HOUR_MS);
-  if (hourCount >= limits.postsPerHour) {
-    return { message: `posts limited to ${limits.postsPerHour}/hour for ${tier} accounts. try again in an hour.` };
+  if (!skipHourly) {
+    const hourCount = countSince(db, 'posts', handle, now - HOUR_MS);
+    if (hourCount >= limits.postsPerHour) {
+      return { message: `posts limited to ${limits.postsPerHour}/hour for ${tier} accounts. try again in an hour.` };
+    }
   }
   const dayCount = countSince(db, 'posts', handle, now - DAY_MS);
   if (dayCount >= limits.postsPerDay) {

@@ -350,7 +350,7 @@ The deferred items aren't blockers for an unannounced public trial; the shipped 
 
 **Why it works**: catches "topic floods" — a single user spamming one community while looking innocuous globally.
 
-**Owner carve-out**: when the poster owns the destination sub, the per-sub cap is skipped. Topic-flooding a sub you own is a contradiction; the defense was meaningless there. The global per-day cap (`checkPostRate`) still applies, so a compromised owner account can't drain the day's quota across the instance — only the per-sub cap is lifted. Solves the founder-bootstrap UX where a fresh owner would otherwise hit `5/day in /sub/yours` on day one. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'`.
+**Owner carve-out**: when the poster owns the destination sub, two caps are lifted — (a) the per-sub topic-flood cap (5/20 by tier) and (b) the global per-hour burst-pacing cap (1/3/established by tier). The global per-day cap (3/10/established by tier) still applies, so the spam-floor defense holds. Topic-flooding a sub you own is a contradiction, and the per-hour burst defense is symbolic friction for an owner seeding their own freshly-created sub. Solves the founder-bootstrap UX: a new owner can burst their daily 3 posts into their own sub immediately instead of waiting an hour between each. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'` plus `checkPostRate(..., { skipHourly: true })`.
 
 **Source**: no external dependency.
 
