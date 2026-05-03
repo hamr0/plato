@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --env-file=.env bin/server.js",
+    "dev": "node --env-file=.env --env-file=.env.dev bin/server.js",
     "migrate": "node --env-file=.env bin/migrate.js",
     "test": "node --test 'test/**/*.test.js'"
   },

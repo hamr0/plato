@@ -7,7 +7,7 @@ export function createAuth(env = process.env, overrides = {}) {
     if (!env[key]) throw new Error(`auth: ${key} is required`);
   }
 
-  return knowless({
+  const cfg = {
     secret: env.KNOWLESS_SECRET,
     baseUrl: env.KNOWLESS_BASE_URL,
     from: env.KNOWLESS_FROM,
@@ -17,6 +17,15 @@ export function createAuth(env = process.env, overrides = {}) {
     openRegistration: true,
     cookieSecure: env.KNOWLESS_COOKIE_SECURE !== 'false',
     devLogMagicLinks: env.KNOWLESS_DEV_LOG_LINKS === 'true',
-    ...overrides,
-  });
+    // Sham/expired/used-token clicks land on home, not /login. Landing
+    // on /login telegraphs "your link was rejected" and partially
+    // defeats the silent-miss design that POST /login worked so hard
+    // to preserve. Home looks identical for logged-out users whether
+    // they just clicked a sham link or arrived for the first time.
+    failureRedirect: '/',
+  };
+  if (env.KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR) {
+    cfg.maxNewHandlesPerIpPerHour = Number(env.KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR);
+  }
+  return knowless({ ...cfg, ...overrides });
 }

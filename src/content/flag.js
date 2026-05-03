@@ -81,9 +81,11 @@ export function submitFlag(db, {
     let autoHidden = false;
     if (pending >= threshold) {
       // Only flip if not already hidden — manual mod collapses and prior
-      // auto-hides shouldn't get their timestamp overwritten.
+      // auto-hides shouldn't get their timestamp overwritten. Snapshot
+      // score_at_collapse so the community can also reverse this via
+      // auto-uncollapse, mirroring the spam/URLhaus paths.
       const result = db
-        .prepare(`UPDATE ${table} SET collapsed_at = ? WHERE id = ? AND collapsed_at IS NULL`)
+        .prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
         .run(now, targetId);
       autoHidden = result.changes > 0;
     }

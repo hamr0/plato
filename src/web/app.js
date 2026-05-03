@@ -318,7 +318,7 @@ function loginStatusFor(db, currentHandle) {
     : html``;
   return html`<div class="status muted">
     <img src="/avatar/${currentHandle}.svg" width="16" height="16" alt="">
-    <a class="memlog-link" href="/memlog"><strong>${pseudonym}</strong></a>${unreadChip} · <a href="/subs">subs</a>${modLogLink} ·
+    <a class="memlog-link" href="/memlog">${pseudonym}</a>${unreadChip} · <a href="/subs">subs</a>${modLogLink} ·
     <form method="POST" action="/logout" class="inline">
       <button class="link">logout</button>
     </form>
@@ -905,7 +905,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const rows = subs.length === 0
     ? html`<p class="muted">no subs yet. <a href="/sub/create">create one</a>.</p>`
     : html`<table class="communities">
-        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>last activity</th><th>owner</th></tr></thead>
+        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>active</th><th>owner</th></tr></thead>
         <tbody>${subs.map((s) => html`<tr>
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
@@ -3143,6 +3143,32 @@ const SUB_POST_COMMENT_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f
 // the email field was missing). The wrappers below reuse plato's check-
 // your-email layout for login, and redirect logout to / so the user
 // lands on a useful page instead of a blank 200.
+function renderLogin(req, res, { db, auth }, searchParams) {
+  // Knowless ships its own bare /login form, but it has no plato chrome —
+  // header, footer, branding, all missing. Land users here whenever they
+  // navigate to /login deliberately or land here from a sham-token
+  // failureRedirect (anti-enumeration: every failure mode redirects to
+  // loginPath). Same form fields as the popover; the `next` param is
+  // forwarded back through return_to so post-login lands the user where
+  // they were trying to go.
+  const next = searchParams?.get('next') ?? '';
+  const handle = auth.handleFromRequest(req);
+  if (handle) {
+    return send(res, 200, pageView({ db, currentHandle: handle, title: 'already logged in' }, html`
+      <p class="muted">you're already signed in. <a href="/">go home</a>.</p>
+    `));
+  }
+  return send(res, 200, pageView({ db, currentHandle: null, title: 'log in' }, html`
+    <p class="muted">enter your email — we'll send a magic link. no password, no PII stored.</p>
+    <form method="POST" action="/login" class="login-form-page">
+      <input name="email" type="email" placeholder="your email" required autofocus>
+      <input type="hidden" name="return_to" value="${next}">
+      <button>send link</button>
+    </form>
+    <p class="muted">same email always becomes the same pseudonym + avatar on this instance — that's how identity works here.</p>
+  `));
+}
+
 async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains }) {
   const body = await readBody(req);
   const form = parseForm(body);
@@ -3266,7 +3292,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
 
       if (await applyStaticRoute(req, res)) return;
 
-      if (path === '/login' && method === 'GET') return auth.loginForm(req, res);
+      if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
       if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);
       if (path === '/verify') return auth.verify(req, res);
