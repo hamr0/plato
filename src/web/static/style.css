@@ -605,7 +605,7 @@ button:hover { filter: brightness(1.1); }
 .vote .arrow.muted { cursor: default; }
 .vote form.inline { display: inline; margin: 0; }
 
-.post .body h2 { margin: 0; font-size: 0.9rem; font-weight: 600; flex: 1; }
+.post .body h2 { margin: 0; font-size: 1.2rem; font-weight: 700; line-height: 1.25; flex: 1; }
 .post .body h2 a { color: var(--text); }
 .post .body h2 a:hover { color: var(--accent); }
 .post-title-line { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.1rem; }
