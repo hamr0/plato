@@ -67,7 +67,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=13">
+<link rel="stylesheet" href="/static/style.css?v=14">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=2" defer></script>
@@ -875,7 +875,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>last activity</th><th>owner</th></tr></thead>
         <tbody>${subs.map((s) => html`<tr>
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
-          <td class="muted">${s.description || ''}</td>
+          <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" title="subscriber count lights up in M6">—</td>
           <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>

@@ -960,10 +960,12 @@ a.reply-count:hover { text-decoration: underline; }
 .ext-host::before { content: "↗ "; opacity: 0.7; }
 
 /* UX-D: /communities directory page */
-table.communities { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.9rem; }
+table.communities { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.9rem; table-layout: auto; }
 table.communities th, table.communities td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 table.communities th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
 table.communities td.num { font-variant-numeric: tabular-nums; text-align: right; }
+table.communities td:first-child { white-space: nowrap; }
+table.communities td.desc-cell { white-space: normal; overflow-wrap: anywhere; }
 table.communities tr:hover td { background: var(--bg-soft); }
 #community-filter {
   background: var(--bg-soft); border: 1px solid var(--border); color: var(--text);
