@@ -91,7 +91,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=17">
+<link rel="stylesheet" href="/static/style.css?v=18">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -2244,10 +2244,10 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
     return html`<a class="${cls}" href="${memlogHref({ ...filters, show: val })}">${label}</a>`;
   };
-  const markAllForm = html`<form method="POST" action="/memlog/mark-read" class="modlog-revoke">
+  const markAllForm = html`<form method="POST" action="/memlog/mark-read" class="filter-form">
     <input type="hidden" name="kind" value="${filters.kindSlug}">
     <input type="hidden" name="return_to" value="${memlogHref(filters)}">
-    <button class="action-link" title="mark all visible as read">mark all read</button>
+    <button class="filter-btn" title="mark all visible as read">mark all read</button>
   </form>`;
   const filterBar = html`<p class="modlog-filters muted">
     show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}

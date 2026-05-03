@@ -370,6 +370,14 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
   border-color: var(--accent-warm);
   font-weight: 600;
 }
+button.filter-btn {
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+.filter-form { display: inline; margin: 0; }
 .modlog-filters .filter-sep { color: var(--text-dim); padding: 0 0.2rem; }
 .modlog-summary { margin: 0.4rem 0; }
 .event-count {
