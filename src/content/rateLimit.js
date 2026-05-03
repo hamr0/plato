@@ -157,13 +157,17 @@ export function checkPostRatePerSub(db, handle, subName, now = Date.now(), confi
   return null;
 }
 
-export function checkCommentRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG) {
+export function checkCommentRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG, { doubledForOwner = false } = {}) {
   const tier = accountAgeTier(db, handle, now);
   const limits = config.perAccount[tier];
   if (!limits) return null;
+  // Owner of the destination sub gets 2× the daily comment cap. Mirrors
+  // the post carve-out — owners get more rope in their own sub for
+  // engagement/discussion-leading without lifting the ceiling entirely.
+  const cap = doubledForOwner ? limits.commentsPerDay * 2 : limits.commentsPerDay;
   const dayCount = countSince(db, 'comments', handle, now - DAY_MS);
-  if (dayCount >= limits.commentsPerDay) {
-    return { message: `comments limited to ${limits.commentsPerDay}/day for ${tier} accounts. try again tomorrow.` };
+  if (dayCount >= cap) {
+    return { message: `comments limited to ${cap}/day for ${tier} accounts. try again tomorrow.` };
   }
   return null;
 }

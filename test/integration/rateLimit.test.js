@@ -117,6 +117,23 @@ test('checkCommentRate blocks new accounts at 10 comments/day', () => {
   assert.match(block.message, /10\/day/);
 });
 
+test('checkCommentRate doubledForOwner: new owner gets 20/day instead of 10', () => {
+  const now = Date.now();
+  const db = freshDb(now);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES ('p_anchor00000000', 'lobby', ?, 't', 'posts/anchor.md', ?)`).run(OWNER, now);
+  for (let i = 0; i < 10; i++) seedComment(db, NEW, now - i * 60 * 1000, `i${i}`);
+  // Without owner flag: blocked at 10
+  assert.ok(checkCommentRate(db, NEW, now));
+  // With owner flag: still under doubled cap (20)
+  assert.equal(checkCommentRate(db, NEW, now, undefined, { doubledForOwner: true }), null);
+  // Push to 20: doubled cap also bites
+  for (let i = 10; i < 20; i++) seedComment(db, NEW, now - i * 60 * 1000, `i${i}`);
+  const block = checkCommentRate(db, NEW, now, undefined, { doubledForOwner: true });
+  assert.ok(block);
+  assert.match(block.message, /20\/day/);
+});
+
 test('checkCommentRate counts only the calling handle', () => {
   const now = Date.now();
   const db = freshDb(now);

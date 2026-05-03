@@ -1651,7 +1651,11 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
       title: 'empty', message: 'comment body required.',
     }));
   }
-  const rateBlock = checkCommentRate(db, handle, Date.now(), rateLimitConfig);
+  // Owner of this sub gets 2× the daily comment cap — engagement carve-out
+  // mirroring the post-side. Global ceiling still applies (just doubled);
+  // a compromised owner can't drop unlimited comments.
+  const isOwnerOfSub = canModerate(db, subName, handle) === 'owner';
+  const rateBlock = checkCommentRate(db, handle, Date.now(), rateLimitConfig, { doubledForOwner: isOwnerOfSub });
   if (rateBlock) {
     if (wantsJson(req)) return sendJson(res, 429, { error: rateBlock.message });
     return send(res, 429, errorPage(req, { db, auth }, {

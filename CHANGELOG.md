@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — Owner comment cap doubled in own sub
+
+- **Sub owners get 2× the daily comment cap when commenting in their own sub** — engagement carve-out for leading discussion. New owner: 10/day → 20/day. Recent: 30/day → 60/day. Established: still uncapped. The cap is *doubled, not lifted* — a compromised owner can't drop unlimited comments. `checkCommentRate` gained a `{ doubledForOwner }` option; `handleAddComment` passes it when `canModerate(...) === 'owner'`. One new test in `rateLimit.test.js` verifies the doubling and that the doubled cap also bites at 20.
+
 ### Fixed — Self-ban footgun
 
 - **Mods can no longer ban themselves out of their own sub.** UI: the ban form is hidden (not dimmed) on a mod's own posts/comments — dimming would suggest "could become available." Server: `recordAction` rejects any handle-targeted action (`ban`/`unban`/`promote_mod`/`demote_mod`/`transfer_owner`) where `targetId === modHandle` with a clear error. Belt-and-suspenders for any future caller that bypasses the UI. Collapse/remove on your own content stay visible — mod-removing your own old post is the only path after the 24h author edit window. Two new tests in `mod.test.js` verify both the ban and unban guard.
