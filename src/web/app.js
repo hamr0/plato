@@ -1241,8 +1241,15 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig);
     if (rateBlock) return retry(429, rateBlock.message);
 
-    const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
-    if (subBlock) return retry(429, subBlock.message);
+    // Owner exemption from the per-sub topic-flood cap. The global cap
+    // (`checkPostRate` above) still applies, so a compromised owner can't
+    // drain the day's quota across the instance — only the per-sub cap is
+    // lifted, since topic-flooding a sub you own is a contradiction.
+    const isOwnerOfSub = canModerate(db, subName, currentHandle) === 'owner';
+    if (!isOwnerOfSub) {
+      const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
+      if (subBlock) return retry(429, subBlock.message);
+    }
 
     try {
       const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug, sensitive });
@@ -1319,9 +1326,11 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
     }));
   }
   // Per-sub topic-flood limit. Look up the draft's target sub before
-  // finalizing so we can reject before the file write.
+  // finalizing so we can reject before the file write. Owners of the
+  // target sub are exempt from this cap (see handleDraft) — global cap
+  // above still applies.
   const draftRow = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
-  if (draftRow) {
+  if (draftRow && canModerate(db, draftRow.sub_name, handle) !== 'owner') {
     const subBlock = checkPostRatePerSub(db, handle, draftRow.sub_name, Date.now(), rateLimitConfig);
     if (subBlock) {
       return send(res, 429, errorPage(req, { db, auth }, {

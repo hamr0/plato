@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — Owner exemption from per-sub topic-flood cap
+
+- **Sub owners now bypass `checkPostRatePerSub` when posting in their own sub.** The per-sub-day cap (5/20 by tier) is the topic-flood defense — meaningless when you own the sub. The global per-day cap (`checkPostRate`, 10/50/100 by tier) still applies, so a compromised owner account can't drain the day's quota across the instance. Wired in `handleDraft` and `handleFinalize` via a `canModerate(...) === 'owner'` check. Solves the founder-bootstrap UX pothole where new operators hit `5/day in /sub/yours` on day one of their first sub. operator-guide and plato.context updated to mark the carve-out alongside the other anti-spam rules.
+
 ### Changed — Chrome enforcement (post-M6/B0 polish)
 
 - **Every page now goes through `pageView`** — single canonical chrome helper. Renderers no longer compose their own header; passing `title` to `pageView` doubles as the document title *and* the wordmark replacement in `siteHeader`. ~30 bare `layout(...)` error blurbs migrated to a `quickPage(req, ctx, title, body)` sugar that wraps `pageView` so short responses stay readable. Three handlers (`handleLogin`, `handleLogout`, `redirectLegacyPost`) picked up `db` in their context so chrome reaches auth + legacy-redirect pages too. Convention is now codified in code: `layout()` and `siteHeader()` are internal to the helpers; renderers must use `pageView` or `quickPage`.

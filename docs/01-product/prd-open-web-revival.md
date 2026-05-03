@@ -350,6 +350,8 @@ The deferred items aren't blockers for an unannounced public trial; the shipped 
 
 **Why it works**: catches "topic floods" — a single user spamming one community while looking innocuous globally.
 
+**Owner carve-out**: when the poster owns the destination sub, the per-sub cap is skipped. Topic-flooding a sub you own is a contradiction; the defense was meaningless there. The global per-day cap (`checkPostRate`) still applies, so a compromised owner account can't drain the day's quota across the instance — only the per-sub cap is lifted. Solves the founder-bootstrap UX where a fresh owner would otherwise hit `5/day in /sub/yours` on day one. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'`.
+
 **Source**: no external dependency.
 
 ### 4. Disposable email domain blocking
