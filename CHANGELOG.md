@@ -27,6 +27,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 - **Unified home feed (per-sub diversity cap removed)** — default home no longer routes through `listRecentPostsCappedPerSub` (cap of 2 newest posts per sub). One feed shape now: `listPostsAcrossSubs` with `sort=new`/`old`/`top`/`hot` × `date=24h`/`week`/`all`. The cap was a small algorithmic intervention that conflicts with "no algorithm decides what you see"; the chips give the reader the levers, and (M6) subscriptions will turn the home into "your subs". Helper deleted from `src/content/post.js`. Test updated: `M2: home page caps recent posts to 2 per sub` → `M5/B9 polish: home page is one unified feed (no per-sub cap)`.
 - **Cache busting** — `style.css?v=8`, `flair.js?v=1`.
 
+### Changed — Locked decision: body typeface
+
+- Added "Operator-configurable typeface" to PRD §Permanently out: the body font (`'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace` at `style.css:62`) is locked. Mono-by-default is part of plato's voice; an open-ended `fontStack` string invites a typography decision operators didn't ask to make. Same precedent as HN, lobste.rs, old.reddit. Mirrored in operator-guide §What's locked in.
+
 ### Added — M5/B10 Flairs (per-sub)
 
 - **Migration 009** — `subs.flairs` JSON column (default `'[]'`), `subs.flairs_required INTEGER NOT NULL DEFAULT 0`, nullable `posts.flair_slug` and `drafts.flair_slug`.

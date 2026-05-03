@@ -190,6 +190,7 @@ The product decisions below are load-bearing. Each one is a deliberate choice th
 - **Two-tier moderation with public modlog.** The combination of (a) reversible-by-default soft removal, (b) reason-required hard removal, and (c) every action logged publicly is what makes plato moderation defensible. Removing the modlog would break the trust model. Removing the soft tier would over-escalate every disagreement.
 - **`general` sub is archive-only.** The catch-all from the migration era. New posts must land in a real sub with a real owner-mod. Reddit's `r/all` problem shouldn't be re-imported.
 - **No feed personalization, no ranking algorithm.** Hot is a closed-form formula. New is chronological. Top is sum of votes over a window. Old is reverse chronological. That's it.
+- **Body typeface (mono).** Locked at `'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace` (`style.css:62`). The mono voice is part of the product's identity — terminal-honest, scannable, line-aligned. Operator config covers colors, name, tagline, host handle; it does not cover the typeface. Same precedent as HN, lobste.rs, old.reddit (locked). If you want a different font, fork the one CSS line.
 
 If you want any of the above different, plato is the wrong starting point — fork it or pick another project.
 
