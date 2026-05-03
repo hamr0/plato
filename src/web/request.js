@@ -28,12 +28,13 @@ export function parseCookie(header) {
 export function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store',
     ...headers,
   });
   res.end(body);
 }
 
 export function redirect(res, location, status = 302) {
-  res.writeHead(status, { Location: location });
+  res.writeHead(status, { Location: location, 'Cache-Control': 'no-store' });
   res.end();
 }

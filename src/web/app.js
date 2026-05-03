@@ -45,7 +45,8 @@ import {
 } from '../content/mod.js';
 import {
   submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle,
-  pendingFlagsAcrossSubs, flagBreakdownsForTargets, resolveFlagsForTarget,
+  pendingFlagsAcrossSubs, countPendingTargetsAcrossSubs,
+  flagBreakdownsForTargets, resolveFlagsForTarget,
   FLAG_THRESHOLD_FLOOR,
 } from '../content/flag.js';
 import { renderMarkdown, setUrlDisplayMax } from '../content/markdown.js';
@@ -91,7 +92,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=18">
+<link rel="stylesheet" href="/static/style.css?v=20">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -302,8 +303,12 @@ function loginStatusFor(db, currentHandle) {
   // routes to /modlog (cross-sub) so a mod-of-many subs has one place to
   // review their actions; the per-sub /sub/<name>/modlog stays public.
   const modSubs = listSubsModeratedBy(db, currentHandle);
+  const openCount = modSubs.length > 0 ? countPendingTargetsAcrossSubs(db, modSubs) : 0;
+  const openChip = openCount > 0
+    ? html` <a class="memlog-chip" href="/modlog?mode=open" title="${openCount} open for review">(${openCount})</a>`
+    : html``;
   const modLogLink = modSubs.length > 0
-    ? html` · <a href="/modlog">modlog</a>`
+    ? html` · <a href="/modlog">modlog</a>${openChip}`
     : html``;
   // Pseudonym is the entry point to /memlog (personal notification log).
   // Unread count chip uses .reply-count colors so non-zero pops accent.
@@ -2253,13 +2258,13 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     <input type="hidden" name="return_to" value="${memlogHref(filters)}">
     <button class="filter-btn" title="mark all visible as read">mark all read</button>
   </form>`;
-  const filterBar = html`<p class="modlog-filters muted">
+  const filterBar = html`<div class="modlog-filters muted">
     show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
     <span class="filter-sep">·</span>
     kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
     <span class="filter-sep">·</span>
     ${markAllForm}
-  </p>`;
+  </div>`;
   const body = rows.length === 0
     ? html`<p class="muted">${filters.show === 'unread' ? 'no unread notifications.' : 'nothing in your memlog yet.'}</p>`
     : html`<table class="modlog">

@@ -224,6 +224,7 @@ header h1 .logo-mark {
 .sub-thresholds > p { margin: 0.5rem 0 0; font-size: 0.82rem; }
 
 /* Login affordance for anonymous users — same nav corner as logout. */
+.login-trigger { position: relative; }
 .login-trigger > summary {
   cursor: pointer;
   list-style: none;
@@ -235,7 +236,14 @@ header h1 .logo-mark {
   display: flex;
   gap: 0.4rem;
   align-items: center;
-  margin-top: 0.4rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.3rem);
+  z-index: 20;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 0.5rem;
+  white-space: nowrap;
 }
 .login-form input[type="email"] {
   flex: 1;
@@ -513,7 +521,7 @@ header.site .brand { min-width: 0; }
 }
 .status strong {
   color: var(--text);
-  font-weight: 600;
+  font-weight: inherit;
 }
 .status form.inline {
   display: inline;

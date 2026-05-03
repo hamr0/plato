@@ -7,3 +7,5 @@ node_modules/
 posts/
 .claude/
 .barebrowse/
+data/
+test-suspicious-content.txt

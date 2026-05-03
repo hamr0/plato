@@ -208,6 +208,28 @@ export function pendingFlagsAcrossSubs(db, subNames) {
     .all(...subNames);
 }
 
+// Count of distinct (target_type, target_id) pairs with pending flags
+// across the calling mod's subs. Drives the open-items counter chip
+// next to the `modlog` link in the header.
+export function countPendingTargetsAcrossSubs(db, subNames) {
+  if (!subNames || subNames.length === 0) return 0;
+  const placeholders = subNames.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM (
+         SELECT 1
+         FROM flags f
+         LEFT JOIN posts    p  ON f.target_type = 'post'    AND f.target_id = p.id
+         LEFT JOIN comments c  ON f.target_type = 'comment' AND f.target_id = c.id
+         LEFT JOIN posts    cp ON f.target_type = 'comment' AND c.post_id    = cp.id
+         WHERE f.resolution = 'pending'
+           AND COALESCE(p.sub_name, cp.sub_name) IN (${placeholders})
+         GROUP BY f.target_type, f.target_id
+       )`
+    )
+    .get(...subNames).n;
+}
+
 // Per-target breakdown for the row-expansion view: flagger handles +
 // categories, in submission order. Batched across all visible targets
 // in one query — a busy /modlog page might render 50 pending targets,
