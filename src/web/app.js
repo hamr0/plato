@@ -599,6 +599,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
               subName, targetType: 'post', targetId: post.id,
               collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo: perPostReturn,
               authorHandle: post.handle, authorBanned: bannedAuthors?.has(post.handle) ?? false,
+              currentHandle,
             }) : html``}
           </div>
         </div>
@@ -1510,6 +1511,7 @@ function commentNodeView(node, ctx, depth) {
           subName: ctx.subName, targetType: 'comment', targetId: node.id,
           collapsedAt: node.collapsed_at, removedAt: node.removed_at, returnTo: ctx.returnTo,
           authorHandle: node.handle, authorBanned: ctx.bannedAuthors?.has(node.handle) ?? false,
+          currentHandle: ctx.currentHandle,
         }) : html``}
       </div>
     </div>
@@ -1607,6 +1609,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
                 subName, targetType: 'post', targetId: postId,
                 collapsedAt: post.collapsed_at, removedAt: post.removed_at, returnTo,
                 authorHandle: post.handle, authorBanned: bannedAuthors.has(post.handle),
+                currentHandle,
               }) : html``}
             </div>
           </div>
@@ -1931,7 +1934,7 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
 
 function modControls({
   subName, targetType, targetId, collapsedAt, removedAt, returnTo,
-  authorHandle, authorBanned,
+  authorHandle, authorBanned, currentHandle,
 }) {
   const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
   const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
@@ -1948,7 +1951,12 @@ function modControls({
   // When the author is currently banned in this sub, render the unban
   // form with a "warn" class so the banned-state is visible at a glance.
   // Plain "ban" on a non-banned author is the usual neutral mod-btn.
-  const banForm = authorHandle
+  // Self-ban is a footgun — banning yourself out of a sub you mod has
+  // no legitimate use. Hide (not dim) the ban control when the author
+  // is the current mod. Collapse/remove stay visible because mod-acting
+  // on your own old content is a legitimate cleanup path (no
+  // author-delete after the edit window).
+  const banForm = authorHandle && authorHandle !== currentHandle
     ? modActionForm({
         subName,
         action: authorBanned ? 'unban' : 'ban',

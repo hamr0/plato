@@ -129,6 +129,14 @@ export function recordAction(db, {
   if ((BAN_ACTIONS.has(action) || OWNER_ONLY.has(action)) && targetType !== 'handle') {
     throw new Error(`recordAction: ${action} requires targetType handle`);
   }
+  // Self-ban / self-unban is a footgun (locks the mod out of their own
+  // sub) with no legitimate use. Reject defensively even if the UI hides
+  // the affordance. Other handle-targeted actions (promote/demote/transfer)
+  // are owner-only and already gated below; rejecting self there too
+  // since transferring ownership to yourself is a no-op.
+  if (targetType === 'handle' && targetId === modHandle) {
+    throw new Error(`recordAction: ${action} cannot target the acting mod`);
+  }
 
   const role = canModerate(db, subName, modHandle);
   if (!role) throw new Error(`recordAction: ${modHandle} is not a mod of ${subName}`);

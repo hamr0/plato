@@ -178,3 +178,30 @@ test('recordAction: transfer_owner to a nonexistent handle throws cleanly', () =
   const sub = db.prepare(`SELECT owner_handle FROM subs WHERE name = 'lobby'`).get();
   assert.equal(sub.owner_handle, OWNER);
 });
+
+test('recordAction: ban targeting the acting mod is rejected (self-ban guard)', () => {
+  const db = freshDb();
+  assert.throws(
+    () => recordAction(db, {
+      subName: 'lobby', modHandle: OWNER, action: 'ban',
+      targetType: 'handle', targetId: OWNER, reason: 'self-ban attempt',
+    }),
+    /cannot target the acting mod/,
+  );
+  assert.equal(isBanned(db, 'lobby', OWNER), false);
+});
+
+test('recordAction: unban targeting the acting mod is rejected (self-unban guard)', () => {
+  const db = freshDb();
+  // Pre-seed a ban row so isBanned has something to find — direct insert
+  // to bypass the guard we're verifying.
+  db.prepare(`INSERT INTO bans (sub_name, handle, banned_by, reason, created_at)
+              VALUES ('lobby', ?, ?, 'orphan ban', ?)`).run(OWNER, OWNER, Date.now());
+  assert.throws(
+    () => recordAction(db, {
+      subName: 'lobby', modHandle: OWNER, action: 'unban',
+      targetType: 'handle', targetId: OWNER,
+    }),
+    /cannot target the acting mod/,
+  );
+});
