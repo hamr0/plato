@@ -178,6 +178,79 @@ The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch 
 
 ---
 
+## All the numbers (rate limits, length caps, thresholds, windows)
+
+Every threshold that gates behavior. Floors are PRD-locked safe minimums; you tighten via `config.json` but cannot loosen — overrides above the floor reject at boot. Per-sub thresholds are set at `/sub/create` and can only be raised by the owner. See `docs/02-features/plato.context.md` §Numeric reference for the full developer-facing table including source files.
+
+### Rate limits — posts and comments
+
+| Tier | posts/hour | posts/day | comments/day | per-sub posts/day |
+|---|---|---|---|---|
+| new (<24h)        | 1 | 3  | 10 | 5 |
+| recent (1d–7d)    | 3 | 10 | 30 | 5 (still <30d) |
+| trusted (≥30d)    | — | —  | —  | 20 |
+| established (>7d) | uncapped | uncapped | uncapped | (per-sub still applies until 30d) |
+
+**Owner carve-outs (in own sub only)**: per-hour cap skipped on posts, per-sub topic-flood cap skipped on posts, comment cap doubled (10→20 new, 30→60 recent). Per-day **post** cap is never lifted — the spam-floor stays.
+
+### Outbound link cap per post
+
+| Tier | links per post |
+|---|---|
+| new | 1 |
+| recent | 3 |
+| established | 5 |
+
+### Per-sub thresholds (operator-tunable per sub by owner)
+
+| Knob | Floor | Default at sub creation | Where edited |
+|---|---|---|---|
+| Auto-uncollapse posts (net upvotes) | 50 | 50 | `/sub/create`, `/sub/<name>/edit` |
+| Auto-uncollapse comments | 20 | 20 | same |
+| Flag threshold (distinct flaggers to auto-hide) | 3 | 3 | same |
+
+### Length limits
+
+| Field | Max chars |
+|---|---|
+| Post title | 300 |
+| Post body | 40 000 |
+| Comment body | 10 000 |
+| Flag note | 280 |
+| Sub name | 3–30 (lowercase, hyphens, no leading/trailing) |
+| Sub description | 200 |
+| Flair label | 24 |
+| Flairs per sub | 12 |
+| Notification snippet | 160 (auto-truncated with …) |
+| Bare-URL display text | 30 (operator `urlDisplayMax`, range 10–200) |
+
+### Time windows
+
+| Window | Duration |
+|---|---|
+| Post / comment edit window | 24h after creation |
+| New-account voting window (half weight, no comment voting, posts <24h only) | 7d |
+| Trusted account threshold (per-sub day cap raises 5→20) | 30d |
+| Memlog notification retention (lazy prune on `/memlog` GET) | 90d |
+| Magic-link draft TTL | 15 min |
+
+### Display + structure
+
+| Knob | Default | Override |
+|---|---|---|
+| Feed page size | 50 | operator `feedPageSize`, range 10–200 |
+| Comment-tree max render depth | 4 | hardcoded |
+
+### Vote rules
+
+| Rule | Value |
+|---|---|
+| Vote weight, new account (<7d) | 0.5× |
+| Comment voting, new account (<7d) | disabled |
+| Vote target age, new account (<7d) | posts only, post <24h |
+
+---
+
 ## What's locked in (changing means forking)
 
 The product decisions below are load-bearing. Each one is a deliberate choice the project makes about what plato *is*. You can change them in a fork — the license allows it — but understand that you're then maintaining a fork.

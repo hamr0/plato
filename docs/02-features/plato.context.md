@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.3.2 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events; chrome enforcement: every page goes through `pageView` / `quickPage`, hash-jump auto-opens collapsed details; owner carve-out from per-sub topic-flood cap, global cap still applies) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.3.3 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events; chrome enforcement: every page goes through `pageView` / `quickPage`, hash-jump auto-opens collapsed details; owner carve-outs from rate caps when posting/commenting in own sub — global per-day floors preserved; self-ban guard) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -276,6 +276,87 @@ Auto-uncollapse thresholds: the operator can raise either but never below the fl
 | Re-vote same direction | toggles off |
 | Re-vote opposite direction | switches |
 | Edit window | 24h from creation (`EDIT_WINDOW_MS`); applies to posts and comments; migration 008 added `edited_at` column |
+
+## Numeric reference (every threshold in one place)
+
+Every number in plato that gates behavior. Floors are PRD-locked safe minimums; operators tighten via `config.json` but cannot loosen. Source files in parens.
+
+### Posting + commenting (`src/content/rateLimit.js`)
+
+| Tier (`accountAgeTier`) | posts/hour | posts/day | comments/day | per-sub posts/day |
+|---|---|---|---|---|
+| **new** (<24h)        | 1 | 3  | 10 | 5 |
+| **recent** (1d–7d)    | 3 | 10 | 30 | 5  (still <30d) |
+| **trusted** (≥30d)    | — | —  | —  | 20 |
+| **established** (>7d) | — | —  | —  | (per-sub still applies until 30d) |
+
+**Owner-in-own-sub carve-outs** (`canModerate(...) === 'owner'`):
+- per-hour cap → **skipped** for posts (`checkPostRate(..., { skipHourly: true })`)
+- per-sub topic-flood cap → **skipped** for posts
+- per-day comment cap → **doubled** (10→20 new, 30→60 recent) (`checkCommentRate(..., { doubledForOwner: true })`)
+- per-day **post** cap is **not** lifted — the spam-floor never disappears
+
+### Outbound link cap per post (`src/content/linkCap.js` — `LINK_CAP_FLOOR`)
+
+| Tier | links per post |
+|---|---|
+| new | 1 |
+| recent | 3 |
+| established | 5 |
+
+### Per-sub thresholds (set at `/sub/create`, raise-only via `/sub/<name>/edit`)
+
+| Knob | Floor | Default | Source |
+|---|---|---|---|
+| Auto-uncollapse posts (net upvotes to lift soft-removal) | 50 | 50 | `AUTO_UNCOLLAPSE_POST_FLOOR` (`sub.js`) |
+| Auto-uncollapse comments | 20 | 20 | `AUTO_UNCOLLAPSE_COMMENT_FLOOR` (`sub.js`) |
+| Flag threshold (distinct flaggers to auto-hide for review) | 3 | 3 | `FLAG_THRESHOLD_FLOOR` (`flag.js`) |
+
+### Length limits (server-side; forms also carry `maxlength`)
+
+| Field | Max chars | Source |
+|---|---|---|
+| Post title | 300 | `TITLE_MAX` (`post.js`) |
+| Post body | 40 000 | `BODY_MAX` (`post.js`) |
+| Comment body | 10 000 | `COMMENT_BODY_MAX` (`comment.js`) |
+| Flag note | 280 | `NOTE_MAX` (`flag.js`) |
+| Sub name | 3–30 | `validateSubName` (`sub.js`); regex `[a-z0-9-]`, no leading/trailing hyphen |
+| Sub description | 200 | `SUB_DESCRIPTION_MAX` (`sub.js`) |
+| Flair label | 24 | `FLAIR_LABEL_MAX` (`flair.js`) |
+| Flairs per sub | 12 | `MAX_FLAIRS_PER_SUB` (`flair.js`) |
+| Notification snippet | 160 | `SNIPPET_MAX` (`notification.js`) — auto-truncated with `…` |
+| Bare-URL display (visible text only) | 30 | `URL_DISPLAY_MAX` operator-tunable 10–200 (`markdown.js`) |
+| Comment fold preview | 280 | `COMMENT_PREVIEW_CHARS` (`app.js`) |
+
+### Time windows
+
+| Window | Duration | Source |
+|---|---|---|
+| Post edit window | 24h | `EDIT_WINDOW_MS` (`post.js`) |
+| Comment edit window | 24h | `EDIT_WINDOW_MS` (`comment.js`) |
+| New-account voting window (half weight, no comment voting, posts <24h only) | 7d | `NEW_ACCOUNT_WINDOW_MS` (`vote.js`) |
+| Young-post window (new accounts can only vote on posts younger than this) | 24h | `YOUNG_POST_WINDOW_MS` (`vote.js`) |
+| Trusted account threshold (per-sub day cap raises 5→20) | 30d | `TRUSTED_AGE_MS` (`rateLimit.js`) |
+| Memlog notification retention (lazy prune on every `/memlog` GET) | 90d | `NOTIFICATION_RETENTION_MS` (`notification.js`) |
+| Magic-link draft TTL | 15 min | knowless default |
+| Memlog draft stash (localStorage, guest comment) | 24h | `PENDING_TTL_MS` (`comment.js`) |
+
+### Display + structure
+
+| Knob | Default | Source / override |
+|---|---|---|
+| Feed page size (`?page=N`) | 50 | operator config `feedPageSize`, range 10–200 (`app.js`) |
+| Comment-tree max render depth (further nesting folds behind "+ N more replies") | 4 | `MAX_DEPTH` (`app.js`) |
+| Avatar size (header / row / comment) | 16 / 18 / 20 px | `app.js` inline |
+
+### Vote rules (`src/content/vote.js`)
+
+| Rule | Value |
+|---|---|
+| Vote weight, new account (<7d) | 0.5× |
+| Comment voting, new account (<7d) | disabled |
+| Vote target age, new account (<7d) | posts only, post younger than 24h |
+| Vote weight, ≥7d | 1× |
 
 ## Patterns, not features
 

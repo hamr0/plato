@@ -342,6 +342,12 @@ The deferred items aren't blockers for an unannounced public trial; the shipped 
 
 **Why it works**: most spam comes from accounts created within hours of posting. Treating new accounts with extra scrutiny without blocking them outright catches the volume problem without alienating real new users.
 
+**Owner carve-outs (in own sub only)**:
+- **Posts**: per-hour burst-pacing cap is skipped (`checkPostRate(..., { skipHourly: true })`); per-day cap still applies — a fresh owner can burst their daily 3 posts into their own freshly-created sub instead of waiting an hour between each.
+- **Comments**: daily cap is **doubled** (10→20 new, 30→60 recent); established stays uncapped — engagement-leading carve-out, not a lift. `checkCommentRate(..., { doubledForOwner: true })`.
+
+Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the destination sub. The global per-day floors (post + comment) are intentionally preserved so a compromised owner account can't drain the day's quota across the instance. See §3 for the matching per-sub topic-flood carve-out.
+
 **Source**: no external dependency. Account-age timestamps are stored at signup.
 
 ### 3. Per-sub rate limits
