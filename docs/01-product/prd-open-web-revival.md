@@ -305,6 +305,10 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | B9: branding colors override + vote recolor + edit window + action-pill unification | shipped (M5/B9) | `resolveBrandingColors`; 24h edit window (`EDIT_WINDOW_MS`); `BRAND_ICONS` removed |
 | B10: per-sub flairs | shipped (M5/B10) | max 12, owner-curated, optional `flairs_required` |
 | B11: per-sub sensitive flag | shipped (M5/B11) | amber banner, not NSFW labeling |
+| B11.1: per-post sensitive flag | shipped (M5/B9 polish, migration 012) | author-set; stacks with per-sub flag |
+| B9.1: flair editor simplified | shipped (M5/B9 polish) | label + color only; slug auto-derived; native picker + 8-color palette; auto-contrast text |
+| B9.2: post-form prefill on rejection | shipped (M5/B9 polish) | typed content survives link-cap / rate-limit / ban / flair-mismatch; status codes preserved |
+| B9.3: bare-URL truncation | shipped (M5/B9 polish) | visual-only; `urlDisplayMax` operator config (default 30) |
 | B12: per-sub flag-threshold | shipped (M5/B12) | raise-only, floor 3 |
 | B13: inline revoke in /modlog | shipped (M5/B13) | actor-only, sub-keys excluded |
 

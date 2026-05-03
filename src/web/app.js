@@ -49,7 +49,7 @@ import {
   pendingFlagsAcrossSubs, flagBreakdownsForTargets, resolveFlagsForTarget,
   FLAG_THRESHOLD_FLOOR,
 } from '../content/flag.js';
-import { renderMarkdown } from '../content/markdown.js';
+import { renderMarkdown, setUrlDisplayMax } from '../content/markdown.js';
 import { isDisposableEmail } from '../content/disposable-domain.js';
 import { checkPostRate, checkPostRatePerSub, checkCommentRate, resolveRateLimitConfig } from '../content/rateLimit.js';
 import { loadSpamPatterns, matchSpamPatterns, applySpamMatches, SYSTEM_HANDLE } from '../content/spamPatterns.js';
@@ -68,10 +68,11 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=6">
+<link rel="stylesheet" href="/static/style.css?v=7">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=1" defer></script>
+<script src="/static/flair.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -172,10 +173,30 @@ function relativeTime(ms) {
   return `${Math.floor(d / 86400)}d ago`;
 }
 
+// Pick black or white text for a given hex/named flair color so labels stay
+// readable across operator-chosen palettes. Falls back to white when we can't
+// parse the color (named/rgb()/etc) — same default as the legacy --flair-text.
+function contrastTextFor(color) {
+  if (typeof color !== 'string') return '#ffffff';
+  const m = color.trim().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return '#ffffff';
+  let hex = m[1];
+  if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? '#111111' : '#ffffff';
+}
+
+function flairPillStyle(flair) {
+  return `background:${flair.color};color:${contrastTextFor(flair.color)}`;
+}
+
 function authorMeta(post, pseudonym, { showComments = false, flair = null } = {}) {
   const count = post.comment_count ?? 0;
   const flairPill = flair
-    ? html`<a class="flair-pill" href="/sub/${post.sub_name}?flair=${flair.slug}" style="background:${flair.color}" title="filter by ${flair.label}">${flair.label}</a>`
+    ? html`<a class="flair-pill" href="/sub/${post.sub_name}?flair=${flair.slug}" style="${flairPillStyle(flair)}" title="filter by ${flair.label}">${flair.label}</a>`
     : html``;
   return html`<div class="meta">
     <img src="/avatar/${post.handle}.svg" width="18" height="18" alt="">
@@ -297,14 +318,33 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
 }
 
 const FLAIR_EDITOR_ROWS = 6;
+const FLAIR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
+const FLAIR_DEFAULT_COLOR = '#3b82f6';
+
+// Derive a URL-safe slug from a label. Operators only ever fill in the
+// label + color — the slug is an internal id. Keep <=20 chars to match
+// the legacy column width and to keep filter URLs compact.
+function slugifyFlairLabel(label) {
+  return label.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 20)
+    .replace(/-+$/g, '');
+}
+
 function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
   const rows = [];
   for (let i = 0; i < FLAIR_EDITOR_ROWS; i++) {
     const f = flairs[i];
+    const color = f?.color && /^#?[0-9a-f]{3,6}$/i.test(f.color.trim())
+      ? (f.color.startsWith('#') ? f.color : `#${f.color}`)
+      : FLAIR_DEFAULT_COLOR;
     rows.push(html`<div class="flair-row">
-      <input name="flair_slug_${i}"  placeholder="slug"  value="${f?.slug  ?? ''}" maxlength="20" pattern="[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?">
-      <input name="flair_label_${i}" placeholder="label" value="${f?.label ?? ''}" maxlength="24">
-      <input name="flair_color_${i}" placeholder="color (#hex / named / rgb())" value="${f?.color ?? ''}" maxlength="32">
+      <input class="flair-row-label" name="flair_label_${i}" placeholder="label (e.g. Discussion)" value="${f?.label ?? ''}" maxlength="24">
+      <input class="flair-row-color" type="color" name="flair_color_${i}" value="${color}" title="pill background">
+      <div class="flair-palette" data-flair-target="flair_color_${i}">
+        ${FLAIR_PALETTE.map((c) => html`<button type="button" class="flair-swatch" data-color="${c}" style="background:${c}" title="${c}" aria-label="set color to ${c}"></button>`)}
+      </div>
     </div>`);
   }
   return html`<fieldset class="flair-editor">
@@ -314,23 +354,31 @@ function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
       <input type="checkbox" name="flairs_required" value="1" ${flairsRequired ? 'checked' : ''}>
       <span>require a flair on every new post</span>
     </label>
-    <p class="muted">slug is the URL-safe id (a-z, 0-9, hyphen). label is what readers see. color sets the pill background — same syntax as <code>config.json:branding.colors</code>. clear a row to remove that flair.</p>
+    <p class="muted">label is what readers see; the URL slug is derived automatically. click a swatch for a preset, or use the color box for any hex (need ideas? <a href="https://htmlcolorcodes.com/color-picker/" target="_blank" rel="noopener">color picker</a>). clear a label to remove that flair.</p>
   </fieldset>`;
 }
 
 function parseFlairFormFields(form) {
   const out = [];
+  const seen = new Set();
   for (let i = 0; i < FLAIR_EDITOR_ROWS; i++) {
-    const slug  = (form[`flair_slug_${i}`]  ?? '').trim();
     const label = (form[`flair_label_${i}`] ?? '').trim();
     const color = (form[`flair_color_${i}`] ?? '').trim();
-    if (!slug && !label && !color) continue;
-    out.push({ slug, label, color });
+    if (!label) continue;
+    let slug = slugifyFlairLabel(label);
+    if (!slug) continue;
+    if (seen.has(slug)) {
+      let n = 2;
+      while (seen.has(`${slug}-${n}`) && n < 99) n++;
+      slug = `${slug}-${n}`.slice(0, 20);
+    }
+    seen.add(slug);
+    out.push({ slug, label, color: color || FLAIR_DEFAULT_COLOR });
   }
   return out;
 }
 
-function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false }) {
+function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false, defaults = {} }) {
   // No default catch-all sub — every post must pick a sub with a real owner.
   // When a sub is contextually fixed (the sub page itself), the picker is
   // hidden and pinned. Otherwise both anon and logged-in users see a real
@@ -344,35 +392,79 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     </p>`;
   }
 
+  const dTitle = defaults.title ?? '';
+  const dBody = defaults.body ?? '';
+  const dFlair = defaults.flairSlug ?? '';
+  const dSensitive = !!defaults.sensitive;
+
   let subField;
   if (defaultSub) {
     subField = html`<input type="hidden" name="sub_name" value="${defaultSub}">`;
   } else {
     subField = html`<select name="sub_name" required>
-      ${postableSubs.map((s) => html`<option value="${s.name}">//${s.name}</option>`)}
+      ${postableSubs.map((s) => html`<option value="${s.name}" ${defaults.subName === s.name ? 'selected' : ''}>//${s.name}</option>`)}
     </select>`;
   }
 
   // Flair picker only renders when the form is pinned to a single sub.
   // Cross-sub forms (home page) skip it; if the picked sub requires a flair,
   // finalizeDraft rejects the post and the user is steered to the sub page.
-  const flairField = (defaultSub && subFlairs.length > 0)
-    ? html`<select name="flair_slug" ${flairsRequired ? 'required' : ''}>
-        ${flairsRequired ? html`` : html`<option value="">(no flair)</option>`}
-        ${subFlairs.map((f) => html`<option value="${f.slug}">${f.label}</option>`)}
-      </select>`
-    : html``;
+  // data-flair-colors carries the slug→color map so flair-form.js can paint
+  // the preview pill without a server round-trip.
+  let flairField = html``;
+  if (defaultSub && subFlairs.length > 0) {
+    const colorMap = subFlairs.reduce((acc, f) => { acc[f.slug] = f.color; return acc; }, {});
+    flairField = html`<div class="flair-form-row" data-flair-colors='${JSON.stringify(colorMap)}'>
+      <select name="flair_slug" class="flair-form-select" ${flairsRequired ? 'required' : ''}>
+        ${flairsRequired ? html`` : html`<option value="" ${dFlair === '' ? 'selected' : ''}>(no flair)</option>`}
+        ${subFlairs.map((f) => html`<option value="${f.slug}" ${dFlair === f.slug ? 'selected' : ''}>${f.label}</option>`)}
+      </select>
+      <span class="flair-form-preview" aria-hidden="true"></span>
+    </div>`;
+  }
 
   return html`<form method="POST" action="/draft">
     ${currentHandle
       ? html``
       : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
     ${subField}
-    <input name="title" placeholder="post title" required>
+    <input name="title" placeholder="post title" value="${dTitle}" required>
     ${flairField}
-    <textarea name="body" placeholder="markdown body" required></textarea>
+    <textarea name="body" placeholder="markdown body" required>${dBody}</textarea>
+    <label class="post-form-row sensitive-row">
+      <input type="checkbox" name="sensitive" value="1" ${dSensitive ? 'checked' : ''}>
+      <span class="muted">mark as sensitive (advisory banner; not for porn — see rules)</span>
+    </label>
     <button>post</button>
   </form>`;
+}
+
+// Re-render the post form with the user's typed values preserved, plus an
+// inline error banner. Used when a logged-in user's submission is rejected
+// post-validation (link cap, rate limit, banned, flair mismatch). Avoids the
+// "click back and lose your post" trap.
+function postRetryView({ db, currentHandle, subName, errorMessage, defaults }) {
+  const sub = subName ? getSubByName(db, subName) : null;
+  const subFlairs = sub ? parseFlairs(sub.flairs) : [];
+  const flairsRequired = !!sub?.flairs_required;
+  const backLink = subName
+    ? html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`
+    : html`<p><a href="/">← back home</a></p>`;
+  return html`
+    ${siteHeader({ db, currentHandle })}
+    ${backLink}
+    <h2 class="section">// post not accepted</h2>
+    <div class="post-error-banner">${errorMessage}</div>
+    <p class="muted">your text is preserved below — fix the issue and resubmit.</p>
+    ${postFormFor({
+      currentHandle,
+      defaultSub: subName ?? null,
+      postableSubs: [],
+      subFlairs,
+      flairsRequired,
+      defaults,
+    })}
+  `;
 }
 
 function permalinkFor(post) {
@@ -445,7 +537,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
       })}
       <div class="body">
         <div class="post-title-line">
-          <h2><a href="${link}">${post.title}</a></h2>
+          <h2><a href="${link}">${post.title}</a>${post.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
           <div class="post-actions">
             ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
               ? flagButton({
@@ -801,12 +893,12 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
         <summary>+ new post</summary>
         ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [], subFlairs, flairsRequired: !!sub.flairs_required })}
       </details>
-      ${subFlairs.length > 0 ? html`<div class="flair-filter">
-        <a class="flair-pill flair-pill-all${activeFilter ? '' : ' flair-pill-active'}" href="/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}">all</a>
-        ${subFlairs.map((f) => html`<a class="flair-pill${activeFilter === f.slug ? ' flair-pill-active' : ''}" style="background:${f.color}" href="/sub/${subName}?${activeSort === 'new' ? '' : `sort=${activeSort}&`}flair=${f.slug}">${f.label}</a>`)}
-      </div>` : html``}
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
+      ${subFlairs.length > 0 ? html`<div class="flair-filter">
+        <a class="flair-pill flair-pill-all${activeFilter ? '' : ' flair-pill-active'}" href="/sub/${subName}${activeSort === 'new' ? '' : `?sort=${activeSort}`}">all</a>
+        ${subFlairs.map((f) => html`<a class="flair-pill${activeFilter === f.slug ? ' flair-pill-active' : ''}" style="${flairPillStyle(f)}" href="/sub/${subName}?${activeSort === 'new' ? '' : `sort=${activeSort}&`}flair=${f.slug}">${f.label}</a>`)}
+      </div>` : html``}
       ${postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
     `)
   );
@@ -1004,6 +1096,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
   const flairSlug = (form.flair_slug ?? '').trim() || null;
+  const sensitive = form.sensitive === '1';
   const currentHandle = auth.handleFromRequest(req);
 
   if (!title || !postBody || !subName || (!currentHandle && !email)) {
@@ -1041,29 +1134,22 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   }
 
   if (currentHandle) {
+    const formDefaults = { title, body: postBody, subName, flairSlug, sensitive };
+    const retry = (status, message) => send(res, status, layout('post not accepted', postRetryView({
+      db, currentHandle, subName, errorMessage: message, defaults: formDefaults,
+    })));
+
     const linkBlock = checkLinkCap(db, currentHandle, `${title}\n${postBody}`, Date.now(), linkCapConfig);
-    if (linkBlock) {
-      return send(res, 400, errorPage(req, { db, auth }, {
-        title: 'too many links', message: linkBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
-      }));
-    }
+    if (linkBlock) return retry(400, linkBlock.message);
+
     const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig);
-    if (rateBlock) {
-      return send(res, 429, errorPage(req, { db, auth }, {
-        title: 'rate limited', message: rateBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
-      }));
-    }
+    if (rateBlock) return retry(429, rateBlock.message);
+
     const subBlock = checkPostRatePerSub(db, currentHandle, subName, Date.now(), rateLimitConfig);
-    if (subBlock) {
-      return send(res, 429, errorPage(req, { db, auth }, {
-        title: 'rate limited', message: subBlock.message,
-        links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
-      }));
-    }
+    if (subBlock) return retry(429, subBlock.message);
+
     try {
-      const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug });
+      const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug, sensitive });
       const { subName: published, postId } = finalizeDraft(db, { draftId, handle: currentHandle, postsDir });
       // Spam regex check post-publish: match against title + body and,
       // if any pattern hits, auto-collapse + flag for mod review. The
@@ -1079,12 +1165,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
       }
       return redirect(res, `/sub/${published}`);
     } catch (err) {
-      const banMatch = /banned from ([a-z0-9-]+)/.exec(err.message);
-      const target = banMatch ? banMatch[1] : subName;
-      return send(res, 400, errorPage(req, { db, auth }, {
-        title: 'post failed', message: err.message,
-        links: html`<p><a href="/sub/${target}">← back to //${target}</a></p>`,
-      }));
+      return retry(400, err.message);
     }
   }
 
@@ -1099,7 +1180,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     );
   }
 
-  const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug });
+  const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug, sensitive });
 
   await auth.startLogin({
     email,
@@ -1427,11 +1508,12 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
           </div>
           ${authorMeta(post, pseudonyms.get(post.handle), { flair: postFlair })}
           ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
+          ${post.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
         </div>
       </div>
 
-      <h3 class="section" id="comments">// comments (${comments.length}) · sort:</h3>
+      <h3 class="section" id="comments">// comments · sort:</h3>
       ${commentSortNav}
 
       ${tree.length === 0
@@ -1544,6 +1626,10 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
       <label>body (markdown)</label>
       <textarea name="body" required>${body}</textarea>
+      <label class="post-form-row sensitive-row">
+        <input type="checkbox" name="sensitive" value="1" ${post.sensitive ? 'checked' : ''}>
+        <span class="muted">mark as sensitive (advisory banner; not for porn — see rules)</span>
+      </label>
       <div class="form-actions">
         <button>save</button>
         <a href="${permalink}">cancel</a>
@@ -1557,8 +1643,9 @@ async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId)
   if (!handle) return send(res, 401, layout('login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
   const body = form.body ?? '';
+  const sensitive = form.sensitive === '1';
   try {
-    editPost(db, { postId, handle, body, postsDir });
+    editPost(db, { postId, handle, body, sensitive, postsDir });
   } catch (err) {
     const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
     return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
@@ -2781,7 +2868,22 @@ async function handleLogout(req, res, { auth }) {
 }
 
 
-export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {} }) {
+// Display-only knob (no security floor). Bare auto-linked URLs longer than
+// this many characters render with a `…` ellipsis. Operators set it via
+// config.json:urlDisplayMax. Bounds keep the value sane: too small breaks
+// even short URLs; too large defeats the purpose.
+function resolveUrlDisplayMax(override) {
+  if (override === undefined || override === null) return 30;
+  if (!Number.isInteger(override)) {
+    throw new Error('urlDisplayMax must be an integer');
+  }
+  if (override < 10 || override > 200) {
+    throw new Error('urlDisplayMax must be between 10 and 200');
+  }
+  return override;
+}
+
+export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -2794,6 +2896,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
   branding.tagline   = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
   branding.hostedBy  = (brandingOverrides.hostedBy  ?? '').trim() || null;
   branding.colors    = resolveBrandingColors(brandingOverrides.colors ?? {});
+  setUrlDisplayMax(resolveUrlDisplayMax(urlDisplayMax));
   // Resolve operator overrides against the floor at boot. Bad config
   // throws here, so the operator sees the error before serving any
   // request rather than at the moment a user happens to trip a check.

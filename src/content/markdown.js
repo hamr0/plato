@@ -21,6 +21,15 @@ import { Marked } from 'marked';
 
 const SAFE_URL_SCHEME = /^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i;
 const DANGEROUS_URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+// Cap visible length for bare auto-linked URLs. The href is preserved; only
+// the rendered text is truncated. 30 keeps host + a peek at the path; longer
+// URLs blow out line wrapping without adding readable info. Operators can
+// retune via config.json:urlDisplayMax — see resolveUrlDisplayMax in app.js.
+let URL_DISPLAY_MAX = 30;
+
+export function setUrlDisplayMax(n) {
+  URL_DISPLAY_MAX = n;
+}
 
 function escapeHtml(s) {
   return String(s ?? '')
@@ -77,8 +86,22 @@ md.use({
     // hrefs render as a plain anchor with no badge.
     link(token) {
       const href = token.href ?? '';
-      const inner = (token.tokens ?? []).map((t) => this.parser.parseInline([t])).join('') || escapeHtml(token.text ?? '');
-      const titleAttr = token.title ? ` title="${escapeHtml(token.title)}"` : '';
+      const text = token.text ?? '';
+      // Visual-only truncation for bare/auto-linked URLs: when the user
+      // pasted a raw URL, marked renders text == href. Long URLs blow out
+      // line wrapping and add no information past the host + first path
+      // segment. Truncate the visible text but keep href intact (full
+      // navigation still works) and surface the full URL on hover via
+      // title so screen readers / cautious clickers can preview it.
+      const isBareUrl = href && text === href;
+      let inner;
+      if (isBareUrl && href.length > URL_DISPLAY_MAX) {
+        inner = `${escapeHtml(href.slice(0, URL_DISPLAY_MAX - 3))}...`;
+      } else {
+        inner = (token.tokens ?? []).map((t) => this.parser.parseInline([t])).join('') || escapeHtml(text);
+      }
+      const hoverTitle = token.title ?? (isBareUrl && href.length > URL_DISPLAY_MAX ? href : null);
+      const titleAttr = hoverTitle ? ` title="${escapeHtml(hoverTitle)}"` : '';
       if (!href) return `<a${titleAttr}>${inner}</a>`;
       const anchor = `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`;
       const host = outboundHost(href);

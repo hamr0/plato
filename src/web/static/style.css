@@ -181,8 +181,12 @@ header h1 .logo-mark {
   padding: 0.15rem 0.5rem;
   font-size: 0.78rem;
   font-weight: normal;
+  line-height: 1.2;
   border-radius: 3px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  font-family: inherit;
 }
 .mod-controls .mod-btn:hover {
   color: var(--accent-warm);
@@ -292,7 +296,8 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
   padding: 0.15rem 0.5rem;
   border-radius: 3px;
   color: var(--text-dim);
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   line-height: 1.2;
 }
 .flag-trigger::-webkit-details-marker { display: none; }
@@ -894,16 +899,20 @@ article ul, article ol { padding-left: 1.5rem; }
 .meta { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
 .meta .sep { color: var(--text-dim); margin: 0 0.05rem; }
 .meta .when { color: var(--text-dim); }
-.reply-count {
+/* `.meta a` has higher specificity than `.reply-count`, so qualify the
+ * selector with the tag to win the cascade and let the active-conv blue
+ * actually paint. */
+a.reply-count {
   display: inline-flex; align-items: center; gap: 0.25rem;
   color: var(--accent);
   text-decoration: none;
+  font-weight: 600;
 }
-.reply-count .reply-icon { vertical-align: -2px; opacity: 0.85; }
-.reply-count-n { font-variant-numeric: tabular-nums; }
-.reply-count-zero { color: var(--text-dim); }
-.reply-count-zero .reply-icon { opacity: 0.55; }
-.reply-count:hover { text-decoration: underline; }
+a.reply-count .reply-icon { vertical-align: -2px; opacity: 0.85; }
+a.reply-count .reply-count-n { font-variant-numeric: tabular-nums; }
+a.reply-count.reply-count-zero { color: var(--text-dim); font-weight: normal; }
+a.reply-count.reply-count-zero .reply-icon { opacity: 0.55; }
+a.reply-count:hover { text-decoration: underline; }
 
 /* UX-C: sub color accent on feed. 8-color palette indexed by hash of
  * sub_name (see subColorIndex in app.js). Forks override here. */
@@ -965,7 +974,8 @@ table.communities tr:hover td { background: var(--bg-soft); }
   border: 1px solid var(--border);
   padding: 0.15rem 0.5rem;
   border-radius: 3px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   line-height: 1.2;
 }
 .action-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
@@ -997,8 +1007,45 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .flair-filter { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
 
 .flair-editor { border: 1px solid var(--border); padding: 0.5rem 0.7rem; margin: 0.6rem 0; }
-.flair-editor .flair-row { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 0.4rem; margin: 0.25rem 0; }
-.flair-editor .flair-row input { font-size: 0.85rem; padding: 0.2rem 0.4rem; }
+.flair-editor .flair-row {
+  display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0; flex-wrap: wrap;
+}
+.flair-editor .flair-row-label { flex: 1 1 12rem; font-size: 0.85rem; padding: 0.2rem 0.4rem; }
+.flair-editor .flair-row-color {
+  flex: 0 0 2rem; width: 2rem; height: 1.7rem; padding: 0; border: 1px solid var(--border);
+  border-radius: 3px; background: transparent; cursor: pointer;
+}
+.flair-palette { display: inline-flex; gap: 0.2rem; align-items: center; flex-wrap: wrap; }
+.flair-swatch {
+  width: 1.1rem; height: 1.1rem; border-radius: 3px; border: 1px solid var(--border);
+  padding: 0; cursor: pointer; opacity: 0.85;
+}
+.flair-swatch:hover { opacity: 1; outline: 1px solid var(--text); outline-offset: 1px; }
+
+/* Flair preview pill shown next to the post-form flair select via JS. */
+.flair-form-row { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0; }
+.flair-form-preview {
+  display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.4rem;
+  font-size: 0.78rem;
+}
+.flair-form-preview .flair-pill { margin-left: 0; }
+
+/* Sensitive checkbox sits under the body textarea on the post form. */
+.post-form-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0; }
+.post-form-row input[type="checkbox"] { margin: 0; }
+
+/* Inline rejection banner on the prefilled retry form. Loud enough to
+   be obvious, restrained enough to not look like a system error page. */
+.post-error-banner {
+  border: 1px solid var(--accent-warm);
+  color: var(--accent-warm);
+  background: var(--bg-soft);
+  padding: 0.5rem 0.7rem;
+  margin: 0.4rem 0;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9rem;
+}
 
 /* Sensitive content advisory — generic, not NSFW. The default rules ban
    porn (see operator-guide), so calling this "NSFW" would invite content

@@ -55,7 +55,7 @@ export const TITLE_MAX = 300;
 export const BODY_MAX = 40000;
 export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export function submitDraft(db, { title, body, subName = 'general', flairSlug = null }) {
+export function submitDraft(db, { title, body, subName = 'general', flairSlug = null, sensitive = false }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
     throw new Error('submitDraft: title is required');
   }
@@ -71,8 +71,8 @@ export function submitDraft(db, { title, body, subName = 'general', flairSlug = 
 
   const draftId = newId();
   db.prepare(
-    'INSERT INTO drafts (id, sub_name, title, body, flair_slug, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(draftId, subName, title, body, flairSlug, Date.now());
+    'INSERT INTO drafts (id, sub_name, title, body, flair_slug, sensitive, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(draftId, subName, title, body, flairSlug, sensitive ? 1 : 0, Date.now());
 
   return { draftId };
 }
@@ -138,9 +138,9 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   db.exec('BEGIN');
   try {
     db.prepare(
-      `INSERT INTO posts (id, sub_name, handle, title, file_path, flair_slug, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(postId, draft.sub_name, handle, draft.title, filePath, draft.flair_slug ?? null, createdAt);
+      `INSERT INTO posts (id, sub_name, handle, title, file_path, flair_slug, sensitive, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(postId, draft.sub_name, handle, draft.title, filePath, draft.flair_slug ?? null, draft.sensitive ? 1 : 0, createdAt);
     db.prepare('UPDATE drafts SET finalized_post_id = ? WHERE id = ?').run(postId, draftId);
     renameSync(tmpPath, absPath);
     db.exec('COMMIT');
@@ -165,7 +165,7 @@ export function getPost(db, postId, postsDir) {
   return { post, body, bodyHtml };
 }
 
-export function editPost(db, { postId, handle, body, postsDir, now = Date.now() }) {
+export function editPost(db, { postId, handle, body, sensitive, postsDir, now = Date.now() }) {
   if (!postId) throw new Error('editPost: postId is required');
   if (!handle) throw new Error('editPost: handle is required');
   if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editPost: body is required');
@@ -184,7 +184,12 @@ export function editPost(db, { postId, handle, body, postsDir, now = Date.now() 
   const header = raw.slice(0, 4 + closeIdx + 5);
   writeFileSync(absPath, `${header}\n${body.trim()}\n`);
 
-  db.prepare('UPDATE posts SET edited_at = ? WHERE id = ?').run(now, postId);
+  if (sensitive === undefined) {
+    db.prepare('UPDATE posts SET edited_at = ? WHERE id = ?').run(now, postId);
+  } else {
+    db.prepare('UPDATE posts SET edited_at = ?, sensitive = ? WHERE id = ?')
+      .run(now, sensitive ? 1 : 0, postId);
+  }
 }
 
 // Body preview for list views (home, sub pages). Reads the file, takes the

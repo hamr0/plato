@@ -126,7 +126,8 @@ Set at `/sub/create` (all knobs) or via owner-only `/sub/<name>/edit` (everythin
 - **Auto-uncollapse threshold for comments.** Floor 20, default 20. Same, lower bar because comments accumulate fewer votes. Locked at creation.
 - **Flag auto-hide threshold (`flagThreshold`).** Floor 3, default 3. Distinct flaggers required before a target auto-hides for mod review. Operators can raise (more permissive — useful for niche subs where a small audience would otherwise auto-hide normal content) but never lower. Editable.
 - **Flairs.** Closed list, max 12 per sub, slug + label + raw CSS color. Owner-curated. Optional unless `flairsRequired = true`. Each flair renders as a colored pill in the post-meta line; users filter with `?flair=<slug>`. Editable. Removing a flair from the list does not invalidate posts that already use it (the post just renders without a pill until the flair is re-added).
-- **Sensitive content flag.** Generic content advisory. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Editable.
+- **Sensitive content flag (per sub).** Generic community-wide advisory. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Editable.
+- **Sensitive content flag (per post).** Author-set per-post checkbox at create time and within the 24h edit window. Stacks with the per-sub flag — either source triggers the advisory. Renders the same banner above the post body and a `[!]` mark next to the post title in feeds. Migration `012_post_sensitive.sql` adds `posts.sensitive` and `drafts.sensitive` (default 0). The two-layer model handles both broad-advisory subs (e.g. a community whose entire scope is sensitive) and one-off shocking posts inside otherwise-normal subs.
 
 Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file. The per-sub `flagThreshold` is the one exception — it's a moderation lever (when does mod review trigger), not a spam-defense permissiveness control, and the floor prevents abuse.
 
@@ -162,6 +163,12 @@ The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/d
 The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch (or wait for the next deploy). Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
 
 **System events in the modlog.** Spam-regex and URLhaus auto-collapses also write a `mod_actions` row attributed to the `system` pseudonym. They appear in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog` so anyone can see when and why the system intervened. Use `/modlog?mod=system` to view only auto-actions; the `reason` column carries the pattern source or blocked host.
+
+**Display knob: `urlDisplayMax`.** Top-level integer in `config.json` (default 30, valid range 10–200). Bare auto-linked URLs longer than this are visually truncated to `prefix...` in rendered post bodies and comments; `href` is preserved (clicks still work) and the full URL surfaces via the `title` hover. `[label](url)` markdown with explicit labels is left untouched. No security floor — purely cosmetic. Bad value throws at boot.
+
+```jsonc
+{ "urlDisplayMax": 30 }
+```
 
 ---
 

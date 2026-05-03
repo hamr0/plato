@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.3 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13 UI polish, per-sub flairs, sensitive flag, flag-threshold, inline revoke shipped) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.4 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -160,10 +160,10 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | `handles` | HMAC-derived id + pseudonym + first_seen_at |
 | `subs` | name PK, owner_handle FK, default_sort, auto_uncollapse_post, auto_uncollapse_comment, flairs JSON, flairs_required, sensitive, flag_threshold |
 | `sub_mods` | (sub_name, handle) composite PK + role enum |
-| `posts` | id PK, sub_name FK, handle FK, title, file_path, score, collapsed_at, removed_at, score_at_collapse, edited_at TEXT, flair_slug TEXT |
+| `posts` | id PK, sub_name FK, handle FK, title, file_path, score, collapsed_at, removed_at, score_at_collapse, edited_at TEXT, flair_slug TEXT, sensitive INTEGER (per-post, migration 012) |
 | `comments` | id PK, post_id FK, parent_comment_id self-ref FK (nullable), score, soft-state columns, edited_at TEXT |
 | `votes` | (target_type, target_id, handle) composite PK, value REAL CHECK |
-| `drafts` | pending posts awaiting magic-link confirmation; flair_slug TEXT |
+| `drafts` | pending posts awaiting magic-link confirmation; flair_slug TEXT, sensitive INTEGER |
 | `mod_actions` | audit log; mod_handle nullable for system actors |
 | `flags` | (target_type, target_id, flagger_handle) composite PK, category enum |
 | `bans` | (sub_name, handle) composite PK |
@@ -213,9 +213,12 @@ Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wher
   },
   "linkCaps":         { "new": 1, "recent": 3, "established": 5 },
   "spamPatternsFile": "spam-patterns.txt",
-  "urlhausCacheFile": "data/urlhaus.txt"
+  "urlhausCacheFile": "data/urlhaus.txt",
+  "urlDisplayMax":    30
 }
 ```
+
+`urlDisplayMax` (default 30, integer 10–200) is a display-only knob: bare auto-linked URLs longer than this render with a `…` ellipsis on the visible text while keeping `href` and a `title`-attribute hover-preview intact. `[label](url)` markdown with explicit labels is untouched. No security floor; bad value still throws at boot.
 
 Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds, flairs, sensitive flag) and one moderation lever (`flag_threshold`, floor 3 — operators can raise but not lower).
 
@@ -251,7 +254,7 @@ System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` r
 | `flagThreshold` | **3** | 3 | Distinct flaggers required to auto-hide a target. Raise to make niche subs more permissive; cannot lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
 | `flairs` | max 12 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?` (no leading/trailing hyphen, 1–20 chars), label ≤ 24 chars, color is any CSS string. Owner-curated. |
 | `flairsRequired` | requires ≥ 1 flair | `false` | When set, every new post in the sub must carry a flair. |
-| `sensitive` | — | `false` | Generic content-advisory flag. Renders an amber `[!] sensitive content — use discretion` banner on the sub page and a small `[!]` mark in the home active-subs strip and `/subs` directory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
+| `sensitive` | — | `false` | Generic content-advisory flag. Two layers: per-sub (this row, owner-set) renders the amber banner across the whole sub + `[!]` in directories; per-post (author-set on create or within edit window, migration 012) renders the same banner above the individual post body and `[!]` next to the title in feeds. Either source triggers the advisory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
 
 Auto-uncollapse thresholds: the operator can raise either but never below the floor — defends against a small brigade overturning a soft-removal.
 

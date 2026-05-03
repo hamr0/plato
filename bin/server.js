@@ -41,6 +41,7 @@ const handler = createApp({
   linkCaps: operatorConfig.linkCaps ?? {},
   urlhausCacheFile: operatorConfig.urlhausCacheFile ?? URLHAUS_CACHE_PATH,
   branding: operatorConfig.branding ?? {},
+  urlDisplayMax: operatorConfig.urlDisplayMax,
 });
 
 const server = http.createServer(handler);

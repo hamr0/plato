@@ -601,7 +601,7 @@ test('M3: GET /sub/<name>/post/<id> renders post + comment form when logged in',
   const body = await res.text();
   assert.match(body, /about plato/, 'title rendered');
   assert.match(body, /a forum/, 'body rendered');
-  assert.match(body, /comments \(0\)/, 'empty comment header');
+  assert.match(body, /\/\/ comments/, 'comment header rendered');
   assert.match(body, /name="body"/, 'comment form exists');
 });
 
@@ -636,7 +636,7 @@ test('M3: POST /sub/<name>/post/<id>/comment adds a comment, redirects back', as
 
   res = await jarFetch(jar, baseUrl + permalink);
   const body = await res.text();
-  assert.match(body, /comments \(1\)/);
+  assert.match(body, /\/\/ comments/);
   assert.match(body, /<strong>markdown<\/strong>/);
 });
 
