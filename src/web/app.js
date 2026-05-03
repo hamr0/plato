@@ -1567,7 +1567,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
               }) : html``}
             </div>
           </div>
-          ${authorMeta(post, pseudonyms.get(post.handle), { flair: postFlair })}
+          ${authorMeta({ ...post, comment_count: comments.length }, pseudonyms.get(post.handle), { showComments: true, flair: postFlair })}
           ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
           ${post.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
