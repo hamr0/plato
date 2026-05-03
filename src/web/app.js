@@ -68,7 +68,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=7">
+<link rel="stylesheet" href="/static/style.css?v=8">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=1" defer></script>
@@ -710,6 +710,48 @@ function homeNav(filters) {
   </nav>`;
 }
 
+// Pages — every feed (home posts, home comments, sub) renders FEED_PAGE_SIZE
+// items then a "next" link. No infinite scroll: a clean end-of-page beat lets
+// the reader pause, and the URL stays shareable / back-button-honest.
+// Operator-tunable via config.json:feedPageSize; resolved at boot in createApp.
+let FEED_PAGE_SIZE = 50;
+
+function parsePage(searchParams) {
+  const raw = Number.parseInt(searchParams?.get('page') ?? '1', 10);
+  const page = Number.isFinite(raw) && raw >= 1 ? Math.min(raw, 10000) : 1;
+  return { page, offset: (page - 1) * FEED_PAGE_SIZE, limit: FEED_PAGE_SIZE };
+}
+
+// Over-fetch by one to detect "more" without a COUNT(*). If the query
+// returns 51 rows, slice to 50 and remember there's a next page.
+function sliceForPage(rows, limit) {
+  if (rows.length > limit) return { items: rows.slice(0, limit), hasNext: true };
+  return { items: rows, hasNext: false };
+}
+
+function buildPageUrl(basePath, searchParams, page) {
+  const next = new URLSearchParams(searchParams ?? '');
+  if (page <= 1) next.delete('page');
+  else next.set('page', String(page));
+  const q = next.toString();
+  return q ? `${basePath}?${q}` : basePath;
+}
+
+function paginationFooter({ page, hasNext, basePath, searchParams }) {
+  if (page <= 1 && !hasNext) return html``;
+  const prev = page > 1
+    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page - 1)}" rel="prev">← prev</a>`
+    : html`<span class="page-link page-link-disabled">← prev</span>`;
+  const next = hasNext
+    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page + 1)}" rel="next">next ${FEED_PAGE_SIZE} →</a>`
+    : html`<span class="page-link page-link-disabled">end</span>`;
+  return html`<nav class="page-nav muted" aria-label="pagination">
+    ${prev}
+    <span class="page-indicator">page ${page}</span>
+    ${next}
+  </nav>`;
+}
+
 function commentRowsView({ comments, pseudonyms, currentHandle }) {
   if (comments.length === 0) {
     return html`<p class="muted">no comments match.</p>`;
@@ -740,22 +782,32 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
 
+  const { page, offset, limit } = parsePage(searchParams);
+  const overFetch = limit + 1;
   let feedView;
+  let hasNext = false;
   if (filters.tab === 'comments') {
-    const comments = listRecentCommentsAcrossSubs(db, {
+    const raw = listRecentCommentsAcrossSubs(db, {
       sort: filters.sort === 'hot' ? 'top' : filters.sort,
       sinceMs: sinceMs ?? undefined,
-      limit: 50,
+      limit: overFetch,
+      offset,
     });
+    const sliced = sliceForPage(raw, limit);
+    hasNext = sliced.hasNext;
+    const comments = sliced.items;
     const pseudonyms = pseudonymsByHandle(db, [...new Set(comments.map((c) => c.handle))]);
     feedView = commentRowsView({ comments, pseudonyms, currentHandle });
   } else {
     // Posts: default (no filter) keeps the per-sub-cap recency feed; any
     // active filter switches to global cross-sub ordering.
     const isFiltered = filters.sort !== 'new' || filters.date !== 'all';
-    const posts = isFiltered
-      ? listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: 50 })
-      : listRecentPostsCappedPerSub(db, { limit: 50, perSub: 2 });
+    const raw = isFiltered
+      ? listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: overFetch, offset })
+      : listRecentPostsCappedPerSub(db, { limit: overFetch, offset, perSub: 2 });
+    const sliced = sliceForPage(raw, limit);
+    hasNext = sliced.hasNext;
+    const posts = sliced.items;
     const pseudonyms = pseudonymsByHandle(db, [...new Set(posts.map((p) => p.handle))]);
     const previews = buildPreviews(posts, postsDir, 280);
     const linksMap = buildLinkBadges(posts, postsDir);
@@ -766,6 +818,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       : new Set();
     feedView = postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo: '/', flaggedSet });
   }
+  const pager = paginationFooter({ page, hasNext, basePath: '/', searchParams });
 
   send(
     res,
@@ -780,6 +833,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       </details>
       ${homeNav(filters)}
       ${feedView}
+      ${pager}
     `)
   );
 }
@@ -847,7 +901,11 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
   const subFlairs = parseFlairs(sub.flairs);
   const filterFlairSlug = searchParams?.get('flair') ?? null;
   const activeFilter = filterFlairSlug && subFlairs.find((f) => f.slug === filterFlairSlug) ? filterFlairSlug : null;
-  const posts = listPostsInSub(db, subName, { limit: 50, sort: activeSort, flairSlug: activeFilter });
+  const { page, offset, limit } = parsePage(searchParams);
+  const rawPosts = listPostsInSub(db, subName, { limit: limit + 1, offset, sort: activeSort, flairSlug: activeFilter });
+  const sliced = sliceForPage(rawPosts, limit);
+  const hasNext = sliced.hasNext;
+  const posts = sliced.items;
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const currentHandle = auth.handleFromRequest(req);
@@ -900,6 +958,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
         ${subFlairs.map((f) => html`<a class="flair-pill${activeFilter === f.slug ? ' flair-pill-active' : ''}" style="${flairPillStyle(f)}" href="/sub/${subName}?${activeSort === 'new' ? '' : `sort=${activeSort}&`}flair=${f.slug}">${f.label}</a>`)}
       </div>` : html``}
       ${postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteState, currentHandle, returnTo, modRole, subName, flaggedSet, bannedAuthors })}
+      ${paginationFooter({ page, hasNext, basePath: `/sub/${subName}`, searchParams })}
     `)
   );
 }
@@ -2883,7 +2942,21 @@ function resolveUrlDisplayMax(override) {
   return override;
 }
 
-export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined }) {
+// Operator-tunable feed page size. Default 50; bounded [10, 200]. Smaller
+// pages = more "pause" beats but more click friction; larger pages strain
+// previews + buildLinkBadges per render. Throws at boot on bad input.
+function resolveFeedPageSize(override) {
+  if (override === undefined || override === null) return 50;
+  if (!Number.isInteger(override)) {
+    throw new Error('feedPageSize must be an integer');
+  }
+  if (override < 10 || override > 200) {
+    throw new Error('feedPageSize must be between 10 and 200');
+  }
+  return override;
+}
+
+export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -2897,6 +2970,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
   branding.hostedBy  = (brandingOverrides.hostedBy  ?? '').trim() || null;
   branding.colors    = resolveBrandingColors(brandingOverrides.colors ?? {});
   setUrlDisplayMax(resolveUrlDisplayMax(urlDisplayMax));
+  FEED_PAGE_SIZE = resolveFeedPageSize(feedPageSize);
   // Resolve operator overrides against the floor at boot. Bad config
   // throws here, so the operator sees the error before serving any
   // request rather than at the moment a user happens to trip a check.

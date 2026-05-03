@@ -236,7 +236,7 @@ export function listRecentPosts(db, { limit = 50, offset = 0 } = {}) {
 // by sub_name so each sub contributes at most `perSub` of its newest posts.
 // comment_count joined via correlated subquery — at M2/M3 scale this is fast
 // and avoids an N+1 walk in the route layer.
-export function listRecentPostsCappedPerSub(db, { limit = 50, perSub = 2 } = {}) {
+export function listRecentPostsCappedPerSub(db, { limit = 50, offset = 0, perSub = 2 } = {}) {
   return db.prepare(
     `WITH ranked AS (
        SELECT *, ROW_NUMBER() OVER (PARTITION BY sub_name ORDER BY created_at DESC) AS rn
@@ -247,15 +247,15 @@ export function listRecentPostsCappedPerSub(db, { limit = 50, perSub = 2 } = {})
      FROM ranked
      WHERE rn <= ?
      ORDER BY created_at DESC
-     LIMIT ?`
-  ).all(perSub, limit);
+     LIMIT ? OFFSET ?`
+  ).all(perSub, limit, offset);
 }
 
 // Cross-sub home feed with sort + date filters. Used by the home page's
 // top-nav (UX-E): no per-sub cap, just a global ordering with optional
 // recency window. `sort` is one of 'new' | 'top' | 'hot'; `sinceMs` is
 // the lower bound on created_at (or undefined for all-time).
-export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, now = Date.now() } = {}) {
+export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0, now = Date.now() } = {}) {
   const where = sinceMs != null ? 'WHERE created_at >= ?' : '';
   const params = sinceMs != null ? [sinceMs] : [];
   const baseSelect = `SELECT *,
@@ -263,15 +263,15 @@ export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, now
     FROM posts ${where}`;
   if (sort === 'hot') {
     return db.prepare(
-      `${baseSelect} ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC LIMIT ?`
-    ).all(...params, now, limit);
+      `${baseSelect} ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC LIMIT ? OFFSET ?`
+    ).all(...params, now, limit, offset);
   }
   const order = sort === 'top'
     ? 'ORDER BY score DESC, created_at DESC'
     : sort === 'old'
       ? 'ORDER BY created_at ASC'
       : 'ORDER BY created_at DESC';
-  return db.prepare(`${baseSelect} ${order} LIMIT ?`).all(...params, limit);
+  return db.prepare(`${baseSelect} ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset);
 }
 
 // Sub-page post listing with PRD §sort modes: new / old / top / hot.

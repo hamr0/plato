@@ -170,6 +170,12 @@ The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch 
 { "urlDisplayMax": 30 }
 ```
 
+**Display knob: `feedPageSize`.** Top-level integer in `config.json` (default 50, valid range 10–200). Controls how many items render per page on the home feed (posts + comments tabs) and on each sub page before the `← prev | page N | next 50 →` footer offers the next page. No infinite scroll — pages give a clean pause beat and keep `?page=N` URLs shareable / back-button-honest. Smaller value = more pause beats, more click friction; larger value = heavier per-render work (previews, link-badge build). Bad value throws at boot.
+
+```jsonc
+{ "feedPageSize": 50 }
+```
+
 ---
 
 ## What's locked in (changing means forking)

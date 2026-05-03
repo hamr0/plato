@@ -100,7 +100,7 @@ export function listCommentsForPost(db, postId, { sort = 'best' } = {}) {
 // comment plus the parent post's id, title, and sub_name so the renderer
 // can show "<comment body excerpt> · /sub/<x> · <post title>". Filters
 // out removed comments. `sort` is 'new' | 'top'; date filter via sinceMs.
-export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50 } = {}) {
+export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0 } = {}) {
   const where = sinceMs != null ? 'AND c.created_at >= ?' : '';
   const params = sinceMs != null ? [sinceMs] : [];
   const order = sort === 'top'
@@ -116,8 +116,8 @@ export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit 
      JOIN posts p ON p.id = c.post_id
      WHERE c.removed_at IS NULL ${where}
      ${order}
-     LIMIT ?`
-  ).all(...params, limit);
+     LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
 }
 
 export function buildCommentTree(comments) {

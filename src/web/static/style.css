@@ -1034,6 +1034,34 @@ table.communities tr:hover td { background: var(--bg-soft); }
 .post-form-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.3rem 0; }
 .post-form-row input[type="checkbox"] { margin: 0; }
 
+/* End-of-page pagination footer. Renders below the feed list on home and
+   sub pages once a feed grows past 50 items. Terminal-honest pause point —
+   no infinite scroll. Both prev/next stay in DOM (disabled when unavailable)
+   so the eye lands on a stable shape regardless of position. */
+.page-nav {
+  display: flex; align-items: center; justify-content: center;
+  gap: 1rem; margin: 1.4rem 0 0.6rem; padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.page-nav .page-link {
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+}
+.page-nav .page-link:hover { border-color: var(--accent); }
+.page-nav .page-link-disabled {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  opacity: 0.5;
+  cursor: default;
+}
+.page-nav .page-indicator { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
 /* Inline rejection banner on the prefilled retry form. Loud enough to
    be obvious, restrained enough to not look like a system error page. */
 .post-error-banner {

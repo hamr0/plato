@@ -309,6 +309,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | B9.1: flair editor simplified | shipped (M5/B9 polish) | label + color only; slug auto-derived; native picker + 8-color palette; auto-contrast text |
 | B9.2: post-form prefill on rejection | shipped (M5/B9 polish) | typed content survives link-cap / rate-limit / ban / flair-mismatch; status codes preserved |
 | B9.3: bare-URL truncation | shipped (M5/B9 polish) | visual-only; `urlDisplayMax` operator config (default 30) |
+| B9.4: feed pagination | shipped (M5/B9 polish) | server-side pages, no infinite scroll; `feedPageSize` operator config (default 50); `?page=N` shareable |
 | B12: per-sub flag-threshold | shipped (M5/B12) | raise-only, floor 3 |
 | B13: inline revoke in /modlog | shipped (M5/B13) | actor-only, sub-keys excluded |
 

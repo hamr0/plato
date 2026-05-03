@@ -1,7 +1,7 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.2.4 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.2.5 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -214,11 +214,14 @@ Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wher
   "linkCaps":         { "new": 1, "recent": 3, "established": 5 },
   "spamPatternsFile": "spam-patterns.txt",
   "urlhausCacheFile": "data/urlhaus.txt",
-  "urlDisplayMax":    30
+  "urlDisplayMax":    30,
+  "feedPageSize":     50
 }
 ```
 
 `urlDisplayMax` (default 30, integer 10–200) is a display-only knob: bare auto-linked URLs longer than this render with a `…` ellipsis on the visible text while keeping `href` and a `title`-attribute hover-preview intact. `[label](url)` markdown with explicit labels is untouched. No security floor; bad value still throws at boot.
+
+`feedPageSize` (default 50, integer 10–200) controls how many items render per page on home (posts + comments tabs) and sub feeds before the `← prev | page N | next →` footer. No infinite scroll — server-side pages, `?page=N` is shareable. Smaller = more pause beats / more clicks; larger = heavier render. Bad value throws at boot.
 
 Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds, flairs, sensitive flag) and one moderation lever (`flag_threshold`, floor 3 — operators can raise but not lower).
 
