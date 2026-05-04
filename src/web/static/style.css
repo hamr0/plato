@@ -1075,6 +1075,7 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .rssvp-copy code { color: inherit; background: none; padding: 0; }
 .rssvp-copy:hover code { text-decoration: underline dotted; }
 .rssvp-copy.rssvp-copied code { color: var(--up); text-decoration: none; }
+.rssvp-desc { color: var(--text); font-weight: 600; }
 
 /* Edit window affordances */
 .edited-note { margin: 0.2rem 0; font-size: 0.8rem; }
