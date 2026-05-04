@@ -857,14 +857,13 @@ function buildPageUrl(basePath, searchParams, page) {
 function paginationFooter({ page, hasNext, basePath, searchParams }) {
   if (page <= 1 && !hasNext) return html``;
   const prev = page > 1
-    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page - 1)}" rel="prev">← prev</a>`
-    : html`<span class="page-link page-link-disabled">← prev</span>`;
+    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page - 1)}" rel="prev">← previous</a>`
+    : html`<span class="page-link page-link-disabled">← previous</span>`;
   const next = hasNext
-    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page + 1)}" rel="next">next ${FEED_PAGE_SIZE} →</a>`
+    ? html`<a class="page-link" href="${buildPageUrl(basePath, searchParams, page + 1)}" rel="next">more →</a>`
     : html`<span class="page-link page-link-disabled">end</span>`;
   return html`<nav class="page-nav muted" aria-label="pagination">
     ${prev}
-    <span class="page-indicator">page ${page}</span>
     ${next}
   </nav>`;
 }
@@ -2906,9 +2905,8 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
   const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
   const pager = totalPages > 1
     ? html`<nav class="pager muted">
-        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
-        <span>page ${filters.page} / ${totalPages} · ${total} actions</span>
-        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← previous</a>` : html`<span class="pager-disabled">← previous</span>`}
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">more →</a>` : html`<span class="pager-disabled">end</span>`}
       </nav>`
     : html`<p class="muted">${total} action${total === 1 ? '' : 's'}.</p>`;
 
@@ -3069,9 +3067,8 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
   const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
   const pager = totalPages > 1
     ? html`<nav class="pager muted">
-        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
-        <span>page ${filters.page} / ${totalPages} · ${total} pending</span>
-        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← previous</a>` : html`<span class="pager-disabled">← previous</span>`}
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">more →</a>` : html`<span class="pager-disabled">end</span>`}
       </nav>`
     : html`<p class="muted">${total} pending.</p>`;
 
@@ -3206,9 +3203,8 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
   const pageHref = (n) => modlogHref({ ...filters, page: n > 1 ? n : null });
   const pager = totalPages > 1
     ? html`<nav class="pager muted">
-        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← prev</a>` : html`<span class="pager-disabled">← prev</span>`}
-        <span>page ${filters.page} / ${totalPages} · ${total} target${total === 1 ? '' : 's'}</span>
-        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">next →</a>` : html`<span class="pager-disabled">next →</span>`}
+        ${filters.page > 1 ? html`<a href="${pageHref(filters.page - 1)}">← previous</a>` : html`<span class="pager-disabled">← previous</span>`}
+        ${filters.page < totalPages ? html`<a href="${pageHref(filters.page + 1)}">more →</a>` : html`<span class="pager-disabled">end</span>`}
       </nav>`
     : html`<p class="muted">${total} target${total === 1 ? '' : 's'}.</p>`;
 
