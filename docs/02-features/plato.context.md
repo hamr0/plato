@@ -30,7 +30,7 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Add or remove disposable-email domains | `disposable-domains.txt` |
 | Re-skin the forum (colors, logo color) | `:root` block in `src/web/static/style.css` |
 | Replace the favicon / logo mark | `src/web/static/favicon.svg` and `logoMark()` in `src/web/app.js` |
-| Change the forum name + tagline + "hosted by" line | `config.json` `branding` block (`forumName`, `tagline`, `hostedBy`). Logo + footer quote are locked. |
+| Change the forum name + tagline + "hosted by" line | `config.json` `branding` block (`forumName`, `tagline`, `hostedBy`). `forumName` reflects in top + footer wordmark, every page `<title>`, magic-link header, `og:site_name`, `/about` opening, and the default meta description; `tagline` reflects on the home subtitle and default meta description; `hostedBy` reflects in the footer line and `/about` opening (falls back to `@<forumName>` on `/about` when unset). Logo + footer quote are locked. See [operator-guide § Config surface map](operator-guide.md#what-you-can-change-easily) for the full table. |
 | Reserve more sub-name namespaces | `RESERVED_SUB_NAMES` in `src/content/sub.js` |
 | Change new-account window or weight | `NEW_ACCOUNT_WINDOW_MS` / weight literal in `src/content/vote.js` |
 | Change young-post window for new-account voting | `YOUNG_POST_WINDOW_MS` in `src/content/vote.js` |
@@ -45,7 +45,7 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Daily full-state backup | install `scripts/cron-backup-db.sh` daily — tarballs `forum.db` + `knowless.db` + `posts/`, 7-day retention with auto-prune. See [`cron-jobs.md`](cron-jobs.md) |
 | Weekly stats digest by email | install `bin/stats.js` (daily snapshot) + `bin/stats-weekly.js` (Mon 06:00 UTC digest). 4-week WoW table delivered to `operator.email`. See [`cron-jobs.md`](cron-jobs.md) |
 | Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
-| Set the feedback contact link in the global footer | `config.json` `branding.feedbackEmail` (`mailto:` link, ASCII, valid email shape, ≤120 chars) |
+| Set the feedback contact link | `config.json` `branding.feedbackEmail`. Reflects in **two** places: the global footer (`feedback · about · modlog`) and the opening sentence of `/about` ("questions or feedback" mailto link). Address sits behind link text in both. ASCII, valid email shape, ≤120 chars. |
 | Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, printable ASCII, no URI schemes / bare domains — phishing-vector defence on email footer) |
 | Override the search-engine snippet for the homepage | `config.json` `branding.metaDescription` (ASCII, ≤200 chars). Defaults to a privacy-posture-forward line so fresh forks self-document. Per-page descriptions auto-derived; see [`docs/04-process/privacy-seo.md`](../04-process/privacy-seo.md). |
 | Crawl + index policy | `/robots.txt` (Allow: /, Disallow auth + POST + per-user routes); `/sitemap.xml` (homepage, sub indices, post pages, /about, /modlog, /subs). Both routes are dynamic, derive from current DB content. |

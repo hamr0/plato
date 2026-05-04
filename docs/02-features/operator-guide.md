@@ -76,6 +76,24 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
+**Config surface map.** Quick reference: every `config.json` knob and where it shows up. Discursive paragraphs and validation rules below.
+
+| `config.json` key | Required? | Reflects in |
+|---|---|---|
+| `branding.forumName` | yes (default `"plato"`) | top wordmark, footer wordmark, every page `<title>`, the magic-link "check your email" header, `og:site_name` meta, `/about` opening sentence, the default `metaDescription` template |
+| `branding.tagline` | optional | home-page subtitle, the default `metaDescription` template |
+| `branding.hostedBy` | optional | global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when unset), `/about` opening sentence (falls back to `@<forumName>` when unset) |
+| `branding.feedbackEmail` | optional | global footer link (`feedback · about · modlog`), `/about` "questions or feedback" link — both `mailto:`, address hidden behind link text |
+| `branding.rules` | optional, ≤4 lines | `/about` rules section, footer of every magic-link email (single source of truth — knowless mail-footer cap, no URL schemes, no bare domains) |
+| `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables — vote arrows, score color, "you voted here" memory shade |
+| `branding.metaDescription` | optional | `<meta name="description">` and `og:description` for `/`, link-unfurls (Slack/Signal/iMessage/Mastodon). Per-page descriptions for `/about`, `/modlog`, `/subs`, `/sub/<name>`, `/sub/<name>/post/<id>` are auto-derived and not operator-tunable |
+| `urlDisplayMax` | optional, default 30 | bare-URL truncation ceiling in rendered post + comment bodies (`href` always preserved; full URL on hover) |
+| `feedPageSize` | optional, default 50 | items per page on the home feed and on each sub feed before the `← prev | page N | next →` footer |
+| `operator.email` | optional | recipient for cron-job reports: daily DB backup failures, weekly stats digest, quarterly disposable-domain refresh, hourly URLhaus refresh failures (see [`cron-jobs.md`](cron-jobs.md)). When unset, scripts print to stderr (cron's mailer or `journalctl` surfaces it) |
+| `operator.service` | optional, default `"plato"` | systemd unit cron jobs restart when `disposable-domains.txt` snapshot changes |
+
+The forum process never reads the `operator.*` block — it exists purely for the cron scripts. Pages that are *not* operator-configurable (deliberately uniform across forks): the data-handling paragraph and fork-escape paragraph on `/about`, the project footer quote, and the 3-blue-dot logo. To change those, fork.
+
 **Branding (operator-replaceable, `config.json`).** Five knobs:
 
 ```json
@@ -91,7 +109,7 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 - `forumName` shows in the top wordmark, footer wordmark, page title, and the "check your email" header.
 - `tagline` shows as the subtitle on the home page.
-- `hostedBy` (optional) renders as a footer line: `a <forumName> instance hosted by <hostedBy>`. Hidden when empty.
+- `hostedBy` (optional) renders in **two** places: the global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when empty), and the opening sentence of `/about` (`this is a <forumName> instance, hosted by <hostedBy>`). When unset on `/about`, falls back to `@<forumName>`.
 - `colors.up` (optional) overrides `--up` — positive score color and the voted-up arrow's "you voted here" memory shade.
 - `colors.down` (optional) overrides `--down` — negative score color and the voted-down arrow's "you voted here" memory shade.
 
@@ -120,7 +138,7 @@ If `email` is missing, cron jobs print to stderr (cron's default mailer or `jour
 
 **Weekly stats digest.** `bin/stats.js` (daily snapshot → `data/stats.log`) + `bin/stats-weekly.js` (Mon 06:00 UTC digest → operator email). Counters: users (`knowless.db.handles` row count — anyone who's ever requested a magic link), subs, posts, comments (the latter two excluding `removed_at`). Digest is a fixed-width 4-week table with WoW deltas; `--dry-run` prints to stdout for local testing. See [`cron-jobs.md`](cron-jobs.md).
 
-**Feedback email (`branding.feedbackEmail`).** Optional. When set, the footer of every page shows `feedback · about · modlog`; when unset, just `about · modlog`. Renders as a `mailto:` link. Boot-time validation: ASCII, valid email shape, ≤120 chars, no quotes/CRLF.
+**Feedback email (`branding.feedbackEmail`).** Optional. Surfaces in **two** places: the global footer (`feedback · about · modlog` when set; just `about · modlog` when unset), and the opening sentence of `/about` (a "questions or feedback." link appended after the hosted-by line; absent when unset). Both are `mailto:` links — the address sits behind the link text rather than being printed in plain. Boot-time validation: ASCII, valid email shape, ≤120 chars, no quotes/CRLF.
 
 ```jsonc
 { "branding": { "feedbackEmail": "you@example.com" } }
