@@ -38,6 +38,23 @@ export function isNewAccount(db, handle, now = Date.now()) {
   return now - row.first_seen_at < NEW_ACCOUNT_WINDOW_MS;
 }
 
+// Batch variant for surfaces that render many handles and need to mark
+// new accounts in-line (e.g. the mod queue's flagger and target-author
+// cells). Returns a Set of handles whose tenure is < NEW_ACCOUNT_WINDOW_MS.
+// Unknown handles are silently dropped — the modlog renders rows whose
+// authors may have been wiped, so erroring would break the page.
+export function newAccountHandles(db, handles, now = Date.now()) {
+  const out = new Set();
+  if (handles.length === 0) return out;
+  const placeholders = handles.map(() => '?').join(',');
+  const cutoff = now - NEW_ACCOUNT_WINDOW_MS;
+  const rows = db.prepare(
+    `SELECT handle FROM handles WHERE handle IN (${placeholders}) AND first_seen_at > ?`
+  ).all(...handles, cutoff);
+  for (const r of rows) out.add(r.handle);
+  return out;
+}
+
 export function getVote(db, { targetType, targetId, voterHandle }) {
   const row = db.prepare(
     'SELECT value FROM votes WHERE target_type = ? AND target_id = ? AND handle = ?'

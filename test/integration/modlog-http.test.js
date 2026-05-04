@@ -250,6 +250,52 @@ test('GET /modlog?mode=inbox: deduped per target', async (t) => {
   assert.ok(matches.length <= 3, 'inbox should not render duplicate target rows');
 });
 
+test('GET /modlog?mode=open: marks fresh-account author and flagger with [new]', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar, ownerHandle } = await bootstrapMod(ctx);
+
+  // Two authors: one fresh (1 day old), one old (60 days). Two flaggers
+  // on the fresh-author's post: one fresh (2 days), one old (40 days).
+  // The owner is also old (aged via bootstrapMod → ageHandles).
+  const freshAuthor   = 'a1'.repeat(32);
+  const oldAuthor     = 'a2'.repeat(32);
+  const freshFlagger  = 'f1'.repeat(32);
+  const oldFlagger    = 'f2'.repeat(32);
+  const DAY = 24 * 60 * 60 * 1000;
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(freshAuthor, 'fresh-au', Date.now() - 1 * DAY);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(oldAuthor, 'old-au', Date.now() - 60 * DAY);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(freshFlagger, 'fresh-fl', Date.now() - 2 * DAY);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(oldFlagger, 'old-fl', Date.now() - 40 * DAY);
+
+  seedPost(db, { id: 'p_fresh', sub: 'lobby', handle: freshAuthor, title: 'fresh-post' });
+  seedPost(db, { id: 'p_old',   sub: 'lobby', handle: oldAuthor,   title: 'old-post' });
+  // Fresh + old flagger on the fresh-author's post → forces both into
+  // the breakdown line. Owner flags the old-author's post so the row
+  // exists but no fresh handles touch it.
+  seedFlag(db, { id: 'f_a', targetType: 'post', targetId: 'p_fresh', flagger: freshFlagger });
+  seedFlag(db, { id: 'f_b', targetType: 'post', targetId: 'p_fresh', flagger: oldFlagger });
+  seedFlag(db, { id: 'f_c', targetType: 'post', targetId: 'p_old',   flagger: ownerHandle });
+
+  const res = await jfetch(jar, baseUrl + '/modlog?mode=open');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+
+  // Both pseudonyms render; only fresh ones carry the [new] mark.
+  assert.match(body, /fresh-au[\s\S]*?\[new\]/, 'fresh author should be marked');
+  assert.match(body, /fresh-fl[\s\S]*?\[new\]/, 'fresh flagger should be marked');
+  // The old author/flagger appear without a [new] sibling. Approximate
+  // "no [new] within ~120 chars after the pseudonym" — tight enough to
+  // catch a regression that marks everyone, loose enough to allow the
+  // markup between pseudonym and the next cell.
+  assert.doesNotMatch(body.slice(body.indexOf('old-au'), body.indexOf('old-au') + 120), /\[new\]/);
+  assert.doesNotMatch(body.slice(body.indexOf('old-fl'), body.indexOf('old-fl') + 120), /\[new\]/);
+});
+
 test('GET /modlog?mod=system: filters to system-attributed events', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;

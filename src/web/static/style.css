@@ -1177,6 +1177,7 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   font-family: monospace;
 }
 .sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
+.new-account-mark { color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
 /* My-modlog inline revoke button. Renders only on rows where the
    current handle is the actor and the action's effect is still in

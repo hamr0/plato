@@ -36,7 +36,7 @@ import {
   COMMENT_SORTS,
   EDIT_WINDOW_MS as COMMENT_EDIT_WINDOW_MS,
 } from '../content/comment.js';
-import { castVote, getVote } from '../content/vote.js';
+import { castVote, getVote, newAccountHandles } from '../content/vote.js';
 import {
   canModerate, recordAction, listModActions, MOD_ACTIONS,
   listSubsModeratedBy, listModActionsAcrossSubs, countModActionsAcrossSubs,
@@ -3178,6 +3178,15 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
   ];
   if (filters.user) userHandles.push(filters.user);
   const pseudonyms = pseudonymsByHandle(db, userHandles);
+  // Mark accounts inside the 7-day new-account window (same window
+  // vote.js uses to halve weight + block comment voting). High-signal
+  // for mods triaging the queue: a fresh account flagging or being
+  // flagged is more likely sockpuppet brigading than an established
+  // user. PRD §Spam 12 ban-evasion correlation uses the same shape.
+  const newAccounts = newAccountHandles(db, userHandles);
+  const newMark = (handle) => newAccounts.has(handle)
+    ? html` <span class="new-account-mark" title="account &lt; 7 days old">[new]</span>`
+    : html``;
 
   // Batch-load target bodies so the expansion can show the post or
   // comment in-line — no navigate-away. Posts: re-use getPostPreview
@@ -3226,7 +3235,7 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
   const userCell = (p) => {
     if (!p.author_handle) return html`<span class="muted">—</span>`;
     const label = pseudonyms.get(p.author_handle) ?? p.author_handle.slice(0, 8);
-    return filterToggle('user', p.author_handle, label, filters.user);
+    return html`${filterToggle('user', p.author_handle, label, filters.user)}${newMark(p.author_handle)}`;
   };
   const targetLink = (p) => {
     if (p.target_type === 'post') {
@@ -3252,9 +3261,12 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
       .sort((a, b) => b[1] - a[1])
       .map(([cat, n]) => `${cat} (${n})`)
       .join(', ');
-    const flaggers = [...new Set(flags.map((f) => f.flagger_handle))]
-      .map((h) => pseudonyms.get(h) ?? h.slice(0, 8))
-      .join(', ');
+    const flaggerHandles = [...new Set(flags.map((f) => f.flagger_handle))];
+    const flaggers = flaggerHandles.map((h, i) => {
+      const label = pseudonyms.get(h) ?? h.slice(0, 8);
+      const sep = i > 0 ? html`, ` : html``;
+      return html`${sep}${label}${newMark(h)}`;
+    });
     return html`<span class="muted">flagged for: ${cats} · by ${flaggers}</span>`;
   };
 

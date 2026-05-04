@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
-import { castVote, getVote, isNewAccount } from '../../src/content/vote.js';
+import { castVote, getVote, isNewAccount, newAccountHandles } from '../../src/content/vote.js';
 import { recordAction } from '../../src/content/mod.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -135,6 +135,28 @@ test('isNewAccount: true within 7 days, false after', () => {
 
   const db2 = fixture({ voterFirstSeenAt: Date.now() - 30 * DAY_MS });
   assert.equal(isNewAccount(db2, VOTER), false);
+});
+
+test('newAccountHandles: returns set of handles inside the 7-day window', () => {
+  const db = fixture({ voterFirstSeenAt: Date.now() - 2 * DAY_MS });
+  // VOTER is 2 days old (new), AUTHOR is 30 days old (not new).
+  const result = newAccountHandles(db, [VOTER, AUTHOR]);
+  assert.ok(result.has(VOTER), 'VOTER should be flagged new');
+  assert.ok(!result.has(AUTHOR), 'AUTHOR should not be flagged new');
+});
+
+test('newAccountHandles: empty input returns empty set without query', () => {
+  const db = fixture();
+  const result = newAccountHandles(db, []);
+  assert.equal(result.size, 0);
+});
+
+test('newAccountHandles: unknown handles are silently dropped (no throw)', () => {
+  const db = fixture({ voterFirstSeenAt: Date.now() - 1 * DAY_MS });
+  const ghost = 'z'.repeat(64);
+  const result = newAccountHandles(db, [VOTER, ghost]);
+  assert.ok(result.has(VOTER));
+  assert.ok(!result.has(ghost));
 });
 
 // --- M4 ban check ---
