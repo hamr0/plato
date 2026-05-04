@@ -268,18 +268,25 @@ Sub subscribe/unsubscribe, my-subs page, three-tier RSS (per-sub public, all-sub
 
 **Home-feed Subscribed/All toggle — SHIPPED M6/B3.** Replaces the placeholder chip pair on the home top-nav. `?feed=subscribed` filters both the posts and comments tabs to authored content from subs the user follows; chip rendered for logged-in users only; anonymous + `?feed=subscribed` is normalized to `all` so chip URLs don't carry sticky filters anonymous can't see. Logged-in user with zero subs sees an empty-state pointing at `/subs`. `listPostsAcrossSubs` and `listRecentCommentsAcrossSubs` accept a `subNames` option (null = no restriction; [] = no rows, query short-circuited).
 
-**Outbound-mail signature + default rules.** Every plato → user email (now: only the magic-link auth flow, since digest is cut) appends a footer block carrying the instance's default community rules. Default ruleset shipped with plato:
+**Outbound-mail signature + default rules — SHIPPED.** Every plato → user email (now: only the magic-link auth flow, since digest is cut) appends a footer block carrying the instance's community rules. Same source of truth surfaces on `/about`. New `DEFAULT_BRANDING_RULES` (4 lines, lowercase ASCII, ≤240 chars joined) ships baked-in so a fresh instance has rules visible day one; operators override via `config.json: branding.rules`, or suppress entirely with `branding.rules: []`/`null`. Validator already in place (`resolveBrandingRules` in `src/web/app.js`): ≤4 lines, ASCII-only, no URL schemes, no bare domains — phishing-vector defence on the email signature. Default ruleset shipped with plato:
 
 ```
-Basic Rules
-- No bigotry — including racism, sexism, ableism, homophobia, transphobia, or xenophobia.
-- Be respectful, especially when disagreeing. Everyone should feel welcome here.
-- No porn.
-- No ads / spamming.
-- No illegal content.
+be civil, especially when disagreeing. no racism, sexism, ableism, homophobia, or transphobia.
+no porn, no illegal content.
+no ads, spam, scams, or doxxing.
+mods are accountable; the modlog is public, and votes can reverse soft removes.
 ```
 
-Operator-overridable in `config.json` (`mailFooter` field). Rationale: every email is a touchpoint, and surfacing the rules in the medium where users actually read text (vs the forum chrome they skim past) makes them remembered. Same footer rendered as plato's default `/about` content so a fresh instance has the rules visible from day one.
+Lowercase + ASCII to fit plato voice and the validator (which rejects non-ASCII as an anti-phishing measure on the email body). Field name in `config.json` is `branding.rules` (not `mailFooter` — earlier doc draft used the wrong key name; the field has been `branding.rules` since M5 era). Rationale: every email is a touchpoint, and surfacing the rules in the medium where users actually read text (vs the forum chrome they skim past) makes them remembered. Same footer rendered as plato's default `/about` content so a fresh instance has the rules visible from day one.
+
+**M6 closeout polish (small):**
+
+- Sub-page action row was wrapping `subscribe` to a new line on narrow widths. Cause: `<form>` inside `<p>` is forbidden by HTML5 (form is flow, not phrasing) so the parser auto-closed the `<p>` at the form boundary. Fix: changed the action row to `<div class="sub-action-row">` with `margin: 1em 0` to match the default paragraph rhythm. `← home · public //modlog · rssvp · subscribe · edit sub` now stays on one line.
+- Subscribe / unsubscribe was full POST → 302 → reload, which caused a visible below-the-fold flicker. New `src/web/static/subscribe.js` (~50 LOC, defer-loaded alongside `vote.js` / `comment.js` / `flair.js`) intercepts the submit, fetches the POST in place, flips the button label + hidden action input. No JS path still works (form submit → 302 → reload, same as before).
+- `/subs` directory: `subscribers` column renamed `mem` (saves horizontal real estate); `active` and `owner` columns get `white-space: nowrap` so relative-time strings ("3 days ago") and two-word pseudonyms ("lonely-opossum") stay single-line.
+- Sub-page action row reordered: `subscribe` now sits immediately after `rssvp` (and before `edit sub` for owners) — the rssvp + subscribe pairing reads as the "follow this sub" cluster, and pushing subscribe up shortens the row when `edit sub` is present.
+
+**M6 functionally complete.** Next: M7 (identity + export/import, archive signing, OpenTimestamps, fork flow).
 
 ### M7: Identity + export/import
 Per-sub export (folder of markdown + JSON, archive.sig, server-pubkey.pem, archive.ots). Per-user export. Import flow on a fresh instance. Archive signing (one Ed25519 keypair instance-wide). OpenTimestamps daily anchor.

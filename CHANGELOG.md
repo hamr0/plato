@@ -6,6 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M6 closeout: default community rules ship baked-in
+
+`DEFAULT_BRANDING_RULES` exported from `src/web/app.js`. A fresh instance with no `branding.rules` configured surfaces the canonical four-line default on `/about` and at the foot of every magic-link email:
+
+```
+be civil, especially when disagreeing. no racism, sexism, ableism, homophobia, or transphobia.
+no porn, no illegal content.
+no ads, spam, scams, or doxxing.
+mods are accountable; the modlog is public, and votes can reverse soft removes.
+```
+
+Lowercase + ASCII to fit plato voice and the validator (anti-phishing on the email body). 236 chars joined, under the 240-char knowless cap. Operators override via `config.json: branding.rules`; operators who want **no** rules surface anywhere set `branding.rules: []` (or `null`) explicitly — the empty/null case is the documented opt-out. Bad shape (too many entries, non-ASCII, contains a URL, joined length over 240) still throws at boot.
+
+This closes the original M6 "outbound-mail signature + default rules" item: the validator and config wiring shipped in M5, only the baked-in defaults were missing.
+
+### Changed — Subscribe in-place via fetch (kills below-the-fold flicker)
+
+Subscribe / unsubscribe was a full POST → 302 → reload cycle, which caused a visible flicker as below-the-fold content reflowed and scroll reset to the top. New `src/web/static/subscribe.js` (~50 LOC, defer-loaded alongside `vote.js` / `comment.js` / `flair.js`) intercepts the form submit, fetches the POST in place, flips the button label + hidden action input. No full reload, no scroll reset, no flicker. Pure progressive enhancement: without JS the form still POSTs the standard way and the server's 302 still lands the user correctly. 401 (session expired) and network errors fall back to a normal `form.submit()` so the user always gets through.
+
+### Fixed — Sub-page action row no longer wraps subscribe to a new line
+
+The action row (`← home · public //modlog · rssvp · subscribe · edit sub`) was wrapping the subscribe form to a new line because `<form>` is flow content, not phrasing content — HTML5 forbids it inside `<p>`, and the parser was auto-closing the `<p>` at the form boundary. Changed the row to `<div class="sub-action-row">` with `margin: 1em 0` matching the default paragraph rhythm. Subscribe now stays on the same line as `rssvp`.
+
+### Changed — Sub-page action row reorder + `/subs` column polish
+
+- **Sub-page action row**: `subscribe` moved to sit immediately after `rssvp` (before `edit sub` for owners). Reads as the "follow this sub" cluster, and shortens the row when `edit sub` is present.
+- **`/subs` directory**: `subscribers` column header renamed `mem` (frees ~6 chars of horizontal real estate so wider columns breathe); `active` and `owner` columns get `white-space: nowrap` so relative-time strings ("3 days ago") and two-word pseudonyms ("lonely-opossum") stay single-line.
+
+### Changed — `/about` opening: "plato instance" not "<forumName> instance"
+
+The opening line on `/about` previously read `this is a <forumName> instance, hosted by <handle>` — redundant ("this is a terribic instance, hosted by @terribic"). Now reads `this is a plato instance, hosted by <handle>`: project name on the left tells visitors what software is running; handle on the right tells them who runs it. Cleaner branding, no operator surface lost (the forumName still appears in the page wordmark, footer, and `<title>`).
+
 ### Added — M6/B6: token-gated personal RSS feeds at `/u/<token>/...`
 
 Two new pull-only feed URLs tied to the logged-in user, sharing a single per-user token:

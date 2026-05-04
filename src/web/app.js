@@ -1144,7 +1144,7 @@ function renderAbout(req, res, { db, auth }) {
     canonical: `${siteMeta.baseUrl}/about`,
   }, html`
     <article class="about">
-      <p>this is a <strong>${branding.forumName}</strong> instance, hosted by ${handle}.${feedback}</p>
+      <p>this is a <strong>plato</strong> instance, hosted by ${handle}.${feedback}</p>
       ${rules}
       ${dataHandling}
       ${fork}
