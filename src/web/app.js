@@ -1071,7 +1071,7 @@ function renderAbout(req, res, { db, auth }) {
   </section>`;
   const fork = html`<section class="about-section">
     <h3>if you don't trust this operator</h3>
-    <p>that's fine — the forum is shaped so you don't have to. the code is <a href="https://github.com/hamr0/plato">Apache 2.0</a>; copy <code>forum.db</code> + <code>posts/</code> and run your own instance. handles re-derive per instance, so a fork is a fresh start, not a sticky identity transplant.</p>
+    <p>that's fine — the forum is shaped so you don't have to. plato is the open-source codebase running this instance: <a href="https://github.com/hamr0/plato"><strong>github.com/hamr0/plato</strong></a> (Apache 2.0). clone the repo, copy <code>forum.db</code> + <code>posts/</code>, set a fresh <code>KNOWLESS_SECRET</code>, and run your own. handles re-derive per instance — same email yields different pseudonyms across forks — so leaving is a fresh start, not a sticky identity transplant.</p>
   </section>`;
   send(res, 200, pageView({
     db, currentHandle,
