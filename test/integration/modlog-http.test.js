@@ -628,10 +628,10 @@ test('GET /?tab=comments: renders the comments feed', async (t) => {
   assert.match(body, /a witty reply/, 'comment body excerpt rendered');
 });
 
-test('GET /modlog: ≤20 subs renders chip strip (sub-toggle links)', async (t) => {
+test('GET /modlog: ≤MODLOG_SUB_CHIP_LIMIT subs renders chip strip (sub-toggle links)', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 10; i++) {
     db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`sub${i}`, Date.now());
   }
   const res = await fetch(baseUrl + '/modlog');
@@ -640,10 +640,10 @@ test('GET /modlog: ≤20 subs renders chip strip (sub-toggle links)', async (t) 
   assert.doesNotMatch(body, /<select name="sub"/);
 });
 
-test('GET /modlog: >20 subs renders <select> (default "all" selected)', async (t) => {
+test('GET /modlog: >MODLOG_SUB_CHIP_LIMIT subs renders <select> (default "all" selected)', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 20; i++) {
     db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`s${i}`, Date.now());
   }
   const res = await fetch(baseUrl + '/modlog');

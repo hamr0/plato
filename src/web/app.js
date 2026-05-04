@@ -3242,7 +3242,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
 //    (value="") drops the ?sub= param. Hidden inputs preserve the other
 //    active filters when the form GETs back to /modlog. JS-on path
 //    auto-submits on change; JS-off path uses the explicit filter button.
-const MODLOG_SUB_CHIP_LIMIT = 20;
+const MODLOG_SUB_CHIP_LIMIT = 15;
 
 function subFilterControl(modSubs, filters) {
   if (modSubs.length === 0) return { inline: null, strip: null };
