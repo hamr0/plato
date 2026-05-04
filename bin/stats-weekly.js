@@ -32,7 +32,10 @@ function readConfig() {
   catch { return {}; }
 }
 
-// ISO week (YYYY-Www). Standard Thursday-of-the-week algorithm.
+// ISO 8601 week-date (YYYY-Www). The "Thursday of the week" rule —
+// see https://en.wikipedia.org/wiki/ISO_week_date#Algorithms. The week
+// number's calendar year follows the Thursday, which is why a Dec 30
+// Monday can land in next-year W01 and a Jan 1 Friday in last-year W53.
 function isoWeek(iso) {
   const d = new Date(iso);
   const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -54,6 +57,10 @@ function loadWeeks() {
     if (!row.snapshot_at) continue;
     const week = isoWeek(row.snapshot_at);
     const prev = byWeek.get(week);
+    // String compare on snapshot_at: load-bearing assumption that
+    // bin/stats.js always writes ISO 8601 with a trailing 'Z'. Lex
+    // order matches chrono order under that constraint. If a future
+    // change emits +00:00 or local-TZ offsets, switch to Date.parse.
     if (!prev || row.snapshot_at > prev.snapshot_at) {
       byWeek.set(week, { ...row, week });
     }

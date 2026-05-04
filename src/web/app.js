@@ -146,8 +146,10 @@ export function resolveBrandingFeedbackEmail(val) {
   if (!/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(trimmed)) {
     throw new Error('branding.feedbackEmail must be a valid email address');
   }
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f-￿]/.test(trimmed)) {
+  // Anything outside printable ASCII (incl. control chars and any byte
+  // above DEL) is rejected — narrow definition, intentional. Same shape
+  // as knowless validateBodyFooter (mailers don't reliably handle 8-bit).
+  if (/[^\x20-\x7e]/.test(trimmed)) {
     throw new Error('branding.feedbackEmail must be ASCII');
   }
   return trimmed;
@@ -171,9 +173,16 @@ export function resolveBrandingRules(val) {
     const t = r.trim();
     if (!t) throw new Error(`branding.rules[${i}] is empty`);
     if (t.includes('\n') || t.includes('\r')) throw new Error(`branding.rules[${i}] must be one line`);
-    // eslint-disable-next-line no-control-regex
-    if (/[\x00-\x1f\x7f-￿]/.test(t)) throw new Error(`branding.rules[${i}] must be ASCII`);
-    if (/https?:\/\//i.test(t)) throw new Error(`branding.rules[${i}] must not contain URLs (footer phishing vector)`);
+    if (/[^\x20-\x7e]/.test(t)) throw new Error(`branding.rules[${i}] must be ASCII`);
+    // Phishing-vector defence on the magic-link mail signature. Block any
+    // URI scheme (http, https, mailto, data, javascript, ftp, tg, …) AND
+    // bare-domain shapes that mail clients auto-link (`example.com/x`,
+    // `example.com`). Operators express rules in prose; if they want to
+    // point at a URL they put it on /about which is the medium for it.
+    if (/[a-z]+:\/\//i.test(t)) throw new Error(`branding.rules[${i}] must not contain a URL scheme (footer phishing vector)`);
+    if (/\b[a-z0-9-]+\.(?:com|net|org|io|co|app|dev|me|info|xyz|biz|us|uk|de|fr|jp|cn|ru|tv|gg|fyi|gov|edu)\b/i.test(t)) {
+      throw new Error(`branding.rules[${i}] must not contain a bare domain (footer phishing vector)`);
+    }
     out.push(t);
   }
   const joined = out.join('\n');
@@ -2722,8 +2731,13 @@ function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
     if (pendingTotal > 0) filters.mode = 'open';
   }
   // ?mod=me → resolve to current handle so a bookmarked link stays stable.
-  // For logged-out viewers it silently becomes no-filter (no actions match
-  // a null handle, which is the correct empty state).
+  // For non-mods (logged-out OR logged-in without any sub), strip the
+  // param entirely — silently rendering an unfiltered audit while the
+  // URL still says ?mod=me would mislead the user. A non-mod has nothing
+  // to filter by.
+  if (filters.mod === 'me' && !isMod) {
+    filters.mod = null;
+  }
   const modHandle = filters.mod === 'me' ? currentHandle : filters.mod;
 
   if (filters.mode === 'open') {

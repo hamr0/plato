@@ -15,21 +15,24 @@
 # you mirror the change back from your laptop. The snapshot is append-mostly
 # data, so drift is harmless until you next deploy.
 
+# Intentional: no -e. We collect errors per step and report via mail —
+# `exit 0` is the contract so cron's default mailer doesn't double-report.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/disposable-domains.txt"
 CONFIG="$ROOT/config.json"
 
-# Pull operator.email + operator.service from config.json. We already require
-# Node to run plato, so no jq dependency. Missing fields → empty string.
+# Pull operator.<field> from config.json. Field name + CONFIG path travel
+# via env so the JS source contains no shell interpolation — defence in
+# depth even though both inputs are derived from script-local sources.
 read_config_field() {
-  node -e "
+  CONFIG="$CONFIG" FIELD="$1" node -e '
     try {
-      const c = JSON.parse(require('fs').readFileSync('$CONFIG', 'utf8'));
-      process.stdout.write(String(((c.operator || {})['$1']) || ''));
+      const c = JSON.parse(require("fs").readFileSync(process.env.CONFIG, "utf8"));
+      process.stdout.write(String(((c.operator || {})[process.env.FIELD]) || ""));
     } catch (_) {}
-  " 2>/dev/null
+  ' 2>/dev/null
 }
 
 NOTIFY="$(read_config_field email)"
@@ -98,6 +101,6 @@ fi
     printf '  git commit -am "chore: refresh disposable-domains snapshot"\n'
     printf '  git push\n'
   fi
-} | /usr/sbin/sendmail -t
+} | /usr/sbin/sendmail -t || printf '[plato] sendmail failed; cron will surface this stderr\n' >&2
 
 exit 0  # never fail the cron — the email IS the failure signal

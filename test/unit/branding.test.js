@@ -112,8 +112,41 @@ test('resolveBrandingRules: non-ASCII throws', () => {
   assert.throws(() => resolveBrandingRules(['café']), /ASCII/);
 });
 
-test('resolveBrandingRules: URL throws (footer phishing vector)', () => {
+test('resolveBrandingRules: http(s) URL throws (footer phishing vector)', () => {
   assert.throws(() => resolveBrandingRules(['see https://evil.example for rules']), /URL/i);
+  assert.throws(() => resolveBrandingRules(['HTTP://evil.example']), /URL/i);
+});
+
+test('resolveBrandingRules: non-http URI scheme throws', () => {
+  assert.throws(() => resolveBrandingRules(['mailto://nope']), /URL/i);
+  assert.throws(() => resolveBrandingRules(['data://blob']), /URL/i);
+  assert.throws(() => resolveBrandingRules(['javascript://x']), /URL/i);
+  assert.throws(() => resolveBrandingRules(['ftp://host']), /URL/i);
+});
+
+test('resolveBrandingRules: bare domain throws (mail clients auto-link)', () => {
+  assert.throws(() => resolveBrandingRules(['contact us at example.com']), /bare domain/i);
+  assert.throws(() => resolveBrandingRules(['evil.io/path']), /bare domain/i);
+  assert.throws(() => resolveBrandingRules(['Visit Mailinator.com today']), /bare domain/i);
+});
+
+test('resolveBrandingRules: prose without domains/schemes accepted', () => {
+  assert.deepEqual(
+    resolveBrandingRules(['be civil', 'no spam', 'no doxxing', 'no porn']),
+    ['be civil', 'no spam', 'no doxxing', 'no porn'],
+  );
+});
+
+test('resolveBrandingRules: trim-then-internal-newline still throws', () => {
+  // Belt-and-braces: a string with internal newlines but no leading /
+  // trailing whitespace tested separately to confirm the .includes()
+  // check fires after .trim() (i.e. only end-strips, internal kept).
+  assert.throws(() => resolveBrandingRules(['valid first', 'second\nrule']), /must be one line/);
+});
+
+test('resolveBrandingRules: DEL (0x7f) and other control chars throw', () => {
+  assert.throws(() => resolveBrandingRules(['hi\x7fthere']), /ASCII/);
+  assert.throws(() => resolveBrandingRules(['hi\x01there']), /ASCII/);
 });
 
 test('resolveBrandingRules: joined > 240 chars throws', () => {
