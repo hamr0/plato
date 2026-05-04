@@ -37,6 +37,7 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Change auto-uncollapse threshold for a sub | per-sub via `/sub/create` form (post ≥ 50, comment ≥ 20) |
 | Change auto-hide flag threshold | per-sub via `/sub/create` form or owner-only `/sub/<name>/edit` (floor 3, raise-only). Floor and global default in `FLAG_THRESHOLD_FLOOR` / `AUTO_HIDE_THRESHOLD` in `src/content/flag.js`. |
 | Add flairs / mark sensitive | per-sub via `/sub/create` form or owner-only `/sub/<name>/edit` |
+| Subscribe / unsubscribe to a sub | inline button in the sub-page header (logged-in only) → POST `/sub/<name>/subscribe` (form `action=subscribe\|unsubscribe`, missing toggles). View subscribed subs at `/subs?filter=mine`. M6/B2. Subscriber identities are private; only aggregate counts surface (in the `/subs` directory column). |
 | Override vote arrow colors | `branding.colors.{up,down}` in `config.json` |
 | Tighten rate limits / link cap | `config.json` at project root — see Operator Config below |
 | Append spam regex patterns | `spam-patterns.txt` at project root, one regex per line |
@@ -85,7 +86,8 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | front page: active subs strip + recent posts (cap 2/sub). Top-nav filters: `?tab=posts\|comments`, `?sort=new\|old\|top\|hot`, `?date=24h\|week\|all`. Default tab = posts, default sort = new, default date = all. |
-| GET | `/subs` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter, subscriber column (placeholder until M6) |
+| GET | `/subs` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter, subscriber column (live counts as of M6/B2). `?filter=mine` scopes to subscribed subs (logged-in only; anonymous falls back to `all`). |
+| POST | `/sub/<name>/subscribe` | toggle subscription. Form: `action=subscribe\|unsubscribe` (missing toggles current state); `return_to=<path>` redirects back. Auth-required (401 anon); 404 when sub missing. Idempotent. Disallowed in `robots.txt`. |
 | GET | `/sub/<name>` | sub feed (sort: new/old/top/hot via `?sort=`) |
 | GET | `/sub/create` | new-sub form (logged-in only) |
 | POST | `/sub/create` | create sub (validates name + thresholds) |
@@ -179,6 +181,8 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | `mod_actions` | audit log; mod_handle nullable for system actors |
 | `flags` | (target_type, target_id, flagger_handle) composite PK, category enum |
 | `bans` | (sub_name, handle) composite PK |
+| `notifications` | per-user memlog; recipient_handle, kind, target ref, read_at (migration 013) |
+| `subscriptions` | (user_handle, sub_name) composite PK + index on `sub_name`; private per-user, never publicly listed (migration 014, M6/B2) |
 | `schema_migrations` | id PRIMARY KEY |
 
 Posts are stored as markdown files on disk at `posts/<date>-<id>.md` with frontmatter. The DB row is the index, regenerable from the file tree (so a backup of `posts/` + `forum.db` is sufficient; losing the DB is recoverable).

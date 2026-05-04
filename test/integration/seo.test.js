@@ -68,7 +68,10 @@ test('GET /robots.txt: standard policy + sitemap reference', async (t) => {
   // Public pages NOT in disallow list — they should be crawlable.
   assert.doesNotMatch(body, /^Disallow: \/about$/m);
   assert.doesNotMatch(body, /^Disallow: \/modlog$/m);
-  assert.doesNotMatch(body, /^Disallow: \/sub\b/m);
+  // Sub reads are crawlable; only the subscribe POST endpoint is blocked.
+  assert.doesNotMatch(body, /^Disallow: \/sub\/?$/m);
+  assert.doesNotMatch(body, /^Disallow: \/sub\/[a-z0-9-]+\/?$/m);
+  assert.match(body, /^Disallow: \/sub\/\*\/subscribe$/m);
 });
 
 test('GET /sitemap.xml: lists static pages + every sub + every non-removed post', async (t) => {

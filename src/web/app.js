@@ -28,6 +28,10 @@ import {
 } from '../content/sub.js';
 import { parseFlairs } from '../content/flair.js';
 import {
+  subscribe, unsubscribe, isSubscribed,
+  listSubscribedSubs, subscriberCounts,
+} from '../content/subscription.js';
+import {
   addComment,
   editComment,
   listCommentsForPost,
@@ -1091,27 +1095,56 @@ function renderAbout(req, res, { db, auth }) {
 function renderCommunities(req, res, { db, auth }, searchParams) {
   const sort = ['name', 'posts', 'active'].includes(searchParams?.get('sort'))
     ? searchParams.get('sort') : 'active';
-  const subs = listAllSubs(db, { sort });
+  const filter = searchParams?.get('filter') === 'mine' ? 'mine' : 'all';
+  const currentHandle = auth.handleFromRequest(req);
+  // Subscribed-only requires a logged-in handle; silently fall back to
+  // 'all' if anonymous (no session = nothing to filter to).
+  const effectiveFilter = filter === 'mine' && currentHandle ? 'mine' : 'all';
+  const subscribed = effectiveFilter === 'mine' ? listSubscribedSubs(db, currentHandle) : null;
+  const allSubs = listAllSubs(db, { sort });
+  const subs = effectiveFilter === 'mine'
+    ? allSubs.filter((s) => subscribed.has(s.name))
+    : allSubs;
   const ownerHandles = [...new Set(subs.map((s) => s.owner_handle).filter(Boolean))];
   const pseudonyms = pseudonymsByHandle(db, ownerHandles);
-  const currentHandle = auth.handleFromRequest(req);
+  const subCounts = subscriberCounts(db, subs.map((s) => s.name));
+  const subQs = (overrides) => {
+    const params = new URLSearchParams();
+    const next = { sort, filter: effectiveFilter, ...overrides };
+    if (next.sort && next.sort !== 'active') params.set('sort', next.sort);
+    if (next.filter && next.filter !== 'all') params.set('filter', next.filter);
+    const qs = params.toString();
+    return qs ? `/subs?${qs}` : '/subs';
+  };
   const sortLink = (val, label) => {
     const cls = sort === val ? 'filter-btn filter-btn-active' : 'filter-btn';
-    return html`<a class="${cls}" href="/subs?sort=${val}">${label}</a>`;
+    return html`<a class="${cls}" href="${subQs({ sort: val })}">${label}</a>`;
   };
+  const filterLink = (val, label) => {
+    const cls = effectiveFilter === val ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${subQs({ filter: val })}">${label}</a>`;
+  };
+  const emptyMsg = effectiveFilter === 'mine'
+    ? html`<p class="muted">you haven't subscribed to any subs yet. <a href="${subQs({ filter: 'all' })}">browse all</a>.</p>`
+    : html`<p class="muted">no subs yet. <a href="/sub/create">create one</a>.</p>`;
   const rows = subs.length === 0
-    ? html`<p class="muted">no subs yet. <a href="/sub/create">create one</a>.</p>`
+    ? emptyMsg
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>active</th><th>owner</th></tr></thead>
         <tbody>${subs.map((s) => html`<tr>
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
-          <td class="num muted" title="subscriber count lights up in M6">—</td>
+          <td class="num muted">${subCounts.get(s.name) ?? 0}</td>
           <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
           <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
         </tr>`)}</tbody>
       </table>`;
+  // The "mine" chip only renders for logged-in users; anonymous would
+  // see a chip that silently no-ops, which is worse than not seeing it.
+  const filterStrip = currentHandle
+    ? html`${filterLink('all', 'all')} ${filterLink('mine', 'mine')}<span class="filter-sep">·</span> `
+    : html``;
   send(res, 200, pageView({
     db, currentHandle,
     title: 'subs',
@@ -1122,7 +1155,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     <h2>// subs</h2>
     <p class="muted">every sub on this instance. click a sub name to read or post.</p>
     <p class="modlog-filters muted">
-      sort: ${sortLink('active', 'most recent')} ${sortLink('posts', 'most posts')} ${sortLink('name', 'a-z')}
+      ${filterStrip}sort: ${sortLink('active', 'most recent')} ${sortLink('posts', 'most posts')} ${sortLink('name', 'a-z')}
       <span class="filter-sep">·</span>
       <input type="search" id="community-filter" placeholder="filter by name…" autocomplete="off">
     </p>
@@ -1144,6 +1177,19 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
       })();
     </script>
   `));
+}
+
+// Inline subscribe / unsubscribe form for the sub-page header. The
+// label flips based on current state (subscribed → "unsubscribe",
+// otherwise "subscribe"). One POST endpoint, one button — no JS.
+function subscribeForm({ subName, currentHandle, db, returnTo }) {
+  const subbed = isSubscribed(db, currentHandle, subName);
+  const action = subbed ? 'unsubscribe' : 'subscribe';
+  return html`<form method="POST" action="/sub/${subName}/subscribe" class="subscribe-form">
+    <input type="hidden" name="action" value="${action}">
+    <input type="hidden" name="return_to" value="${returnTo}">
+    <button class="subscribe-btn" type="submit">${action}</button>
+  </form>`;
 }
 
 function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchParams) {
@@ -1198,7 +1244,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       description: sub.description || `//${subName} on ${branding.forumName}: ${defaultSiteDescription()}`,
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
@@ -2123,6 +2169,7 @@ function renderRobots(res) {
     'Disallow: /auth/',
     'Disallow: /memlog',
     'Disallow: /modlog/resolve',
+    'Disallow: /sub/*/subscribe',
     `Sitemap: ${siteMeta.baseUrl}/sitemap.xml`,
     '',
   ];
@@ -2325,6 +2372,31 @@ async function handleFlag(req, res, { db, auth }) {
     }
   }
   const safeReturn = safeLocalRedirect(returnTo, '/');
+  redirect(res, safeReturn);
+}
+
+// POST /sub/<name>/subscribe — toggle. Form posts `action=subscribe` or
+// `action=unsubscribe`; missing/invalid action treated as toggle. The
+// idempotent INSERT OR IGNORE / DELETE means double-click can't corrupt
+// state. Redirects back to the sub page (or `return_to` if provided).
+async function handleSubscribe(req, res, { db, auth }, subName) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, quickPage(req, { db, auth }, 'login required',
+      html`<p class="muted">log in to subscribe.</p>`));
+  }
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found',
+      html`<p class="muted">no such sub.</p>`));
+  }
+  const form = parseForm(await readBody(req));
+  const action = form.action === 'subscribe' || form.action === 'unsubscribe'
+    ? form.action
+    : (isSubscribed(db, handle, subName) ? 'unsubscribe' : 'subscribe');
+  if (action === 'subscribe') subscribe(db, { handle, subName });
+  else unsubscribe(db, { handle, subName });
+  const safeReturn = safeLocalRedirect(form.return_to, `/sub/${subName}`);
   redirect(res, safeReturn);
 }
 
@@ -3575,6 +3647,7 @@ function modlogActiveSummary(filters, pseudonyms, resolvedModHandle) {
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
+const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
 const SUB_POST_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/edit$/;
@@ -3779,6 +3852,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if ((m = path.match(SUB_MOD_PATH_RE)) && method === 'POST') {
         return handleModAction(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_SUBSCRIBE_PATH_RE)) && method === 'POST') {
+        return handleSubscribe(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
         return renderModLog(req, res, { db, auth }, m[1], url.searchParams);

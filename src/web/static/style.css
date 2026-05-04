@@ -1179,6 +1179,17 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
 .new-account-mark { color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
+/* Inline subscribe / unsubscribe form on /sub/<name>. Sits in the top
+   action row alongside ← home, public //modlog, edit sub. The form is
+   invisible chrome around a single button so the row reads like the
+   adjacent text links. */
+.subscribe-form { display: inline; margin: 0; padding: 0; }
+.subscribe-btn {
+  background: none; border: none; color: var(--accent); cursor: pointer;
+  padding: 0; font: inherit; text-decoration: underline;
+}
+.subscribe-btn:hover { color: var(--text); }
+
 /* My-modlog inline revoke button. Renders only on rows where the
    current handle is the actor and the action's effect is still in
    place. POSTs to /sub/<sub>/mod with the inverse action. */

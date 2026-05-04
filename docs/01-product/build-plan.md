@@ -257,6 +257,8 @@ Rules 7-16 from PRD §Spam & Abuse Defenses. Per-account rate limits with new-ac
 ### M6: Subscriptions + notifications
 Sub subscribe/unsubscribe, my-subs page, email digest mode (reuses knowless's Postfix), ntfy push (one-line POST per notification), per-sub RSS feeds. Subscription list export (folds into M7's export format).
 
+- **Sub subscriptions — SHIPPED M6/B2.** Migration 014 added `subscriptions(user_handle, sub_name, created_at)` with composite PK + `idx_subscriptions_sub`. Inline subscribe/unsubscribe button in the sub-page header (logged-in only); POST `/sub/<name>/subscribe` is idempotent (`action=subscribe|unsubscribe`, missing toggles). `/subs?filter=mine` filters the directory to subscribed subs (anonymous silently falls back to `all`); subscribers column in `/subs` now shows live counts. Subscriber identities are never publicly exposed — only aggregate counts. Disallowed in `robots.txt` (`Disallow: /sub/*/subscribe`). PRD §Front Page → Sub subscription mechanics (private, exportable, no notifications by default).
+
 **Home-feed Subscribed/All toggle.** Deferred from the M5/UX pass that introduced top-of-page Posts/Comments tabs and sort/date filters. Adds an `All | Subscribed` row above the existing tab strip; "Subscribed" reads from the M6 subscriptions table. No-op until M6 lands.
 
 **Outbound-mail signature + default rules.** Every plato → user email (magic link, digest, ntfy fallback) appends a footer block carrying the instance's default community rules. Default ruleset shipped with plato:
