@@ -1212,6 +1212,12 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
    invisible chrome around a single button so the row reads like the
    adjacent text links. */
 .subscribe-form { display: inline; margin: 0; padding: 0; }
+/* Sub-page action row. <p> can't legally contain <form> (form is flow,
+   not phrasing content) — the HTML parser auto-closes the <p> at the
+   <form> boundary, pushing subscribe onto a new line. <div> here keeps
+   the row contiguous; margin mirrors the default <p> spacing so the
+   visual rhythm is unchanged. */
+.sub-action-row { margin: 1em 0; }
 .subscribe-btn {
   background: none; border: none; color: var(--accent); cursor: pointer;
   padding: 0; font: inherit; text-decoration: underline;

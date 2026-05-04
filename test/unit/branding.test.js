@@ -77,11 +77,26 @@ test('resolveBrandingFeedbackEmail: non-string throws', () => {
 
 // --- rules ---
 
-test('resolveBrandingRules: null/empty/undefined returns []', () => {
+test('resolveBrandingRules: null/empty-string/[] suppress (operator opt-out)', () => {
   assert.deepEqual(resolveBrandingRules(null), []);
   assert.deepEqual(resolveBrandingRules(''), []);
-  assert.deepEqual(resolveBrandingRules(undefined), []);
   assert.deepEqual(resolveBrandingRules([]), []);
+});
+
+test('resolveBrandingRules: undefined yields the default rule set', () => {
+  const r = resolveBrandingRules(undefined);
+  assert.equal(r.length, 4);
+  assert.match(r[0], /^be civil/);
+  assert.match(r[1], /^no porn/);
+  assert.match(r[2], /^no ads/);
+  assert.match(r[3], /^mods are accountable/);
+});
+
+test('resolveBrandingRules: defaults are ASCII, ≤4 lines, ≤240 chars joined (knowless cap)', () => {
+  const r = resolveBrandingRules(undefined);
+  assert.ok(r.length <= 4);
+  for (const line of r) assert.doesNotMatch(line, /[^\x20-\x7e]/, 'ascii only');
+  assert.ok(r.join('\n').length <= 240);
 });
 
 test('resolveBrandingRules: valid array accepted, trimmed', () => {

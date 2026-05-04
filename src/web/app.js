@@ -247,14 +247,37 @@ function escapeXml(s) {
     .replace(/'/g, '&apos;');
 }
 
+// Default community rules. Shipped baked-in so a fresh instance has
+// the rules visible from day one — both on /about and as the magic-
+// link email footer (the medium where users actually read text). The
+// list is deliberately tight (4 lines, ASCII, ≤240 chars joined) to
+// fit the knowless bodyFooter cap. Operators who want a different
+// tone override `branding.rules` in config.json; operators who want
+// silence set `branding.rules: []` (or `null`) explicitly.
+export const DEFAULT_BRANDING_RULES = Object.freeze([
+  'be civil, especially when disagreeing. no racism, sexism, ableism, homophobia, or transphobia.',
+  'no porn, no illegal content.',
+  'no ads, spam, scams, or doxxing.',
+  'mods are accountable; the modlog is public, and votes can reverse soft removes.',
+]);
+
 // Site rules: rendered on /about as a list AND injected into the
 // magic-link email signature so users see the rules in the medium they
 // actually read text. Constraints inherit from knowless bodyFooter
 // (AF-8.2): ≤4 lines, ≤240 chars total when joined with \n, ASCII only,
-// no URLs (footer URLs are a phishing vector). Empty array = feature
-// disabled (no rules section on /about, no footer on the email).
+// no URLs (footer URLs are a phishing vector).
+//
+// Defaulting policy:
+//   - undefined (no override at all)        → DEFAULT_BRANDING_RULES
+//   - null / '' / [] (explicit suppression) → [] (no rules surface)
+//   - non-empty array                       → validated and returned
+//
+// This way a fresh `config.json` (or no config.json) ships with the
+// canonical rules, while an operator who explicitly wants silence can
+// opt out without having to know the default exists.
 export function resolveBrandingRules(val) {
-  if (val == null || val === '') return [];
+  if (val === undefined) return [...DEFAULT_BRANDING_RULES];
+  if (val === null || val === '') return [];
   if (!Array.isArray(val)) throw new Error('branding.rules must be an array of strings');
   if (val.length === 0) return [];
   if (val.length > 4) throw new Error('branding.rules: at most 4 rules (knowless mail-footer cap)');
@@ -1299,7 +1322,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
+      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">

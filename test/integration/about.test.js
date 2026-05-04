@@ -50,7 +50,7 @@ async function teardown({ auth, db, postsDir, server }) {
   rmSync(postsDir, { recursive: true, force: true });
 }
 
-test('GET /about: renders boilerplate sections with no operator config', async (t) => {
+test('GET /about: renders boilerplate + default rules with no operator config', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const res = await fetch(ctx.baseUrl + '/about');
   assert.equal(res.status, 200);
@@ -59,7 +59,16 @@ test('GET /about: renders boilerplate sections with no operator config', async (
   assert.match(body, /what data this instance keeps/i);
   assert.match(body, /your email address is never stored/i);
   assert.match(body, /if you don't trust this operator/i);
-  // No rules section when none are configured
+  // Default rules ship out of the box — fresh instance still has tone.
+  assert.match(body, /<h3>rules<\/h3>/i);
+  assert.match(body, />be civil/);
+  assert.match(body, />mods are accountable/);
+});
+
+test('GET /about: explicit branding.rules:[] suppresses the rules section', async (t) => {
+  const ctx = await spinUp({ rules: [] }); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/about');
+  const body = await res.text();
   assert.doesNotMatch(body, /<h3>rules<\/h3>/i);
 });
 
