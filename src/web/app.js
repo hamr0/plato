@@ -74,11 +74,11 @@ const HANDLE_RE = /^[0-9a-f]{64}$/;
 // from a renderer — use page() so the rule that "every page reads the
 // same as home, with the forum name replaced by the page action" holds
 // in code, not in convention.
-function pageView({ db, currentHandle = null, title, subtitle, description = null, canonical = null, ogType = 'website' }, body) {
+function pageView({ db, currentHandle = null, title, subtitle, description = null, canonical = null, ogType = 'website', feed = null }, body) {
   return layout(title, html`
     ${siteHeader({ db, currentHandle, title, subtitle })}
     ${body}
-  `, { description, canonical, ogType });
+  `, { description, canonical, ogType, feed });
 }
 
 // One-line error/notice pages. Kept terse so the call sites stay readable
@@ -96,6 +96,11 @@ function layout(title, body, seo = {}) {
   const description = seo.description || defaultSiteDescription();
   const canonical = seo.canonical || siteMeta.baseUrl;
   const ogType = seo.ogType || 'website';
+  // Per-page Atom autodiscovery — sub pages pass `feed: { href, title }`
+  // so reader extensions can subscribe with one click.
+  const feedTag = seo.feed
+    ? html`<link rel="alternate" type="application/atom+xml" href="${seo.feed.href}" title="${seo.feed.title}">`
+    : html``;
   return render(html`<!doctype html>
 <html lang="en">
 <head>
@@ -114,6 +119,7 @@ function layout(title, body, seo = {}) {
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css?v=25">
+${feedTag}
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -1270,8 +1276,9 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       subtitle: sub.description || null,
       description: sub.description || `//${subName} on ${branding.forumName}: ${defaultSiteDescription()}`,
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
+      feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss">rss</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
@@ -2252,6 +2259,69 @@ function renderSitemap(res, { db }) {
     urls.join('\n') + '\n' +
     '</urlset>\n';
   res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' });
+  res.end(xml);
+}
+
+// /sub/<name>/rss — Atom 1.0 feed of the latest 50 non-removed posts
+// in the sub. Atom rather than RSS 2.0: cleaner escape semantics, every
+// modern reader handles it, conventionally served at the same URL most
+// readers probe. Bridges the forum to external readers per PRD §M6 →
+// per-sub RSS feeds. Cache-Control of 5 min keeps polling cheap without
+// going stale visibly. 404s for unknown subs.
+function renderSubRss(res, { db, postsDir }, subName) {
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('not found');
+  }
+  // listPostsInSub already excludes nothing automatically — apply the
+  // removed_at filter inline. Soft-collapsed posts stay in the feed
+  // (community can vote them back), hard-removed disappear (matches
+  // /sub/<name> view behavior).
+  const allPosts = listPostsInSub(db, subName, { limit: 50, sort: 'new' });
+  const posts = allPosts.filter((p) => p.removed_at == null);
+  const handles = [...new Set(posts.map((p) => p.handle))];
+  const pseudonyms = pseudonymsByHandle(db, handles);
+  const feedUrl = `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/rss`;
+  const subUrl = `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`;
+  const updated = new Date(
+    posts.length > 0 ? Math.max(...posts.map((p) => p.created_at)) : Date.now()
+  ).toISOString();
+  const entries = posts.map((p) => {
+    const url = `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(p.id)}`;
+    const author = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
+    const preview = getPostPreview(p, postsDir, { maxChars: 600 });
+    const stamp = new Date(p.created_at).toISOString();
+    return (
+      `  <entry>\n` +
+      `    <id>${escapeXml(url)}</id>\n` +
+      `    <title>${escapeXml(p.title)}</title>\n` +
+      `    <link href="${escapeXml(url)}"/>\n` +
+      `    <published>${stamp}</published>\n` +
+      `    <updated>${stamp}</updated>\n` +
+      `    <author><name>${escapeXml(author)}</name></author>\n` +
+      `    <content type="html">${escapeXml(preview.html)}</content>\n` +
+      `  </entry>`
+    );
+  }).join('\n');
+  const subtitle = sub.description
+    ? `  <subtitle>${escapeXml(sub.description)}</subtitle>\n`
+    : '';
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<feed xmlns="http://www.w3.org/2005/Atom">\n` +
+    `  <id>${escapeXml(feedUrl)}</id>\n` +
+    `  <title>${escapeXml(`${branding.forumName} //${subName}`)}</title>\n` +
+    subtitle +
+    `  <link rel="self" href="${escapeXml(feedUrl)}"/>\n` +
+    `  <link rel="alternate" type="text/html" href="${escapeXml(subUrl)}"/>\n` +
+    `  <updated>${updated}</updated>\n` +
+    (entries ? entries + '\n' : '') +
+    `</feed>\n`;
+  res.writeHead(200, {
+    'Content-Type': 'application/atom+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
   res.end(xml);
 }
 
@@ -3675,6 +3745,7 @@ const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
+const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
 const SUB_POST_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/edit$/;
@@ -3882,6 +3953,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if ((m = path.match(SUB_SUBSCRIBE_PATH_RE)) && method === 'POST') {
         return handleSubscribe(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_RSS_PATH_RE)) && method === 'GET') {
+        return renderSubRss(res, { db, postsDir }, m[1]);
       }
       if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
         return renderModLog(req, res, { db, auth }, m[1], url.searchParams);

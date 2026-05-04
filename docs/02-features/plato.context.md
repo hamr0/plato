@@ -88,6 +88,7 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | GET | `/` | front page: active subs strip + recent posts (cap 2/sub). Top-nav filters: `?tab=posts\|comments`, `?sort=new\|old\|top\|hot`, `?date=24h\|week\|all`, `?feed=subscribed\|all`. Default tab = posts, default sort = new, default date = all, default feed = all. `feed=subscribed` is logged-in only (anonymous silently degrades to `all`); empty-state when subscribed to nothing. |
 | GET | `/subs` | full directory of subs with sort (`?sort=active\|posts\|name`), client-side prefix filter, subscriber column (live counts as of M6/B2). `?filter=mine` scopes to subscribed subs (logged-in only; anonymous falls back to `all`). |
 | POST | `/sub/<name>/subscribe` | toggle subscription. Form: `action=subscribe\|unsubscribe` (missing toggles current state); `return_to=<path>` redirects back. Auth-required (401 anon); 404 when sub missing. Idempotent. Disallowed in `robots.txt`. |
+| GET | `/sub/<name>/rss` | per-sub Atom feed. Latest 50 non-removed posts, newest-first, title + author pseudonym + ≤600-char body excerpt. `application/atom+xml`, `Cache-Control: public, max-age=300`. The sub HTML page advertises this via `<link rel="alternate" type="application/atom+xml">`. M6/B4. |
 | GET | `/sub/<name>` | sub feed (sort: new/old/top/hot via `?sort=`) |
 | GET | `/sub/create` | new-sub form (logged-in only) |
 | POST | `/sub/create` | create sub (validates name + thresholds) |
