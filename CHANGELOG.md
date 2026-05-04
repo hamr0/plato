@@ -17,6 +17,13 @@ Token is opaque random hex (32 bytes → 64 chars), generated lazily on first `/
 
 Migration 015 adds nullable `handles.rss_token TEXT` with a UNIQUE partial index. New module `src/content/rss-token.js` exposes `getOrCreateRssToken / regenerateRssToken / handleByRssToken`.
 
+UX polish on the same surface:
+
+- **Visible labels rebranded to "rssvp"** — plato voice. The per-sub action-row link is now `rssvp` (was `rss`) and the `/memlog` heading is "personal rssvp feed", both accent-colored. URL paths stay `/sub/<name>/rss` and `/u/<token>/{rss,subs.rss}` so any already-copied feed URL keeps working — only the visible label flips. Substring "rss" is still in "rssvp" so reader users still recognize the feed affordance.
+- **Click-to-copy URL buttons** on `/memlog`. Plain inline text (matches surrounding `<code>` style) with a dotted-underline hover hint; click triggers `navigator.clipboard.writeText` and a transient "copied!" flash in success-green. Falls back to selecting the URL text inside `<code>` on permission/insecure-context denial. Plain text selection still works without JS.
+- **Stay-open after regen.** `POST /memlog/rss-regenerate` redirects to `/memlog?rssvp=open` and the server adds the `open` attribute to the `<details>` so the panel doesn't snap shut on the user. No JS for this part — fits "every form works without JS."
+- **Bold descriptions** on the URL list ("new posts across your subscribed subs", "the above plus your memlog notifications") so they read distinctly against the surrounding muted prose without competing with the accent-colored heading.
+
 ### Changed — M6 scope: email digest and ntfy push both cut, three-tier RSS replaces them
 
 Both push channels are now PRD-locked under §Permanently out, not v1 limitations.
