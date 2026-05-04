@@ -46,7 +46,7 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Weekly stats digest by email | install `bin/stats.js` (daily snapshot) + `bin/stats-weekly.js` (Mon 06:00 UTC digest). 4-week WoW table delivered to `operator.email`. See [`cron-jobs.md`](cron-jobs.md) |
 | Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
 | Set the feedback contact link in the global footer | `config.json` `branding.feedbackEmail` (`mailto:` link, ASCII, valid email shape, ≤120 chars) |
-| Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, ASCII, no URLs) |
+| Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, printable ASCII, no URI schemes / bare domains — phishing-vector defence on email footer) |
 | View public moderation log | `/modlog` — instance-wide audit, no login required. `mode=open`/`mode=inbox` stay mod-only. Sub filter chips collapse to `<select>` inside the filter bar above 15 subs (`MODLOG_SUB_CHIP_LIMIT`). "my decisions" chip disabled for non-mods. |
 | Change score-collapse threshold | `COLLAPSE_THRESHOLD` in `src/web/app.js` (default −3) |
 | Change max comment-tree depth | `MAX_DEPTH` in `src/web/app.js` (default 4) |

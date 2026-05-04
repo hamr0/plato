@@ -126,7 +126,7 @@ If `email` is missing, cron jobs print to stderr (cron's default mailer or `jour
 { "branding": { "feedbackEmail": "you@example.com" } }
 ```
 
-**Site rules (`branding.rules`).** Optional array of up to 4 short strings (joined ≤240 chars, ASCII, no URLs). Rendered as a list on `/about` AND injected into the magic-link email signature so users see the same text in the medium they actually read. Single source of truth — edit one config field, both surfaces stay in sync. URL ban is a phishing-vector defense; the same constraints come from knowless's `validateBodyFooter`.
+**Site rules (`branding.rules`).** Optional array of up to 4 short strings (joined ≤240 chars, printable ASCII only, no URLs and no bare domains). Rendered as a list on `/about` AND injected into the magic-link email signature so users see the same text in the medium they actually read. Single source of truth — edit one config field, both surfaces stay in sync. The URL ban covers any `[a-z]+://` scheme (`http`, `https`, `mailto`, `data`, `ftp`, …) AND bare domain shapes (`example.com`, `host.io/path`) that mail clients auto-link — a phishing-vector defence on the email signature. Constraints inherit from knowless's `validateBodyFooter` (AF-8.2).
 
 ```jsonc
 {

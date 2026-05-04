@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — Hardening pass on cron scripts + branding resolvers
+
+- **Atomic tarball write** in `scripts/cron-backup-db.sh` — writes to `$ARCHIVE.tmp` then `mv` on success, so a tar failure never leaves a half-written file under the canonical name (was the one Important issue from the QA review). Retention can no longer pick a corrupt newest archive.
+- **Tmpfs-safe staging** — SQLite `.backup` snapshots stage inside `BACKUP_DIR` rather than `/tmp`. Small VPS often has tmpfs `/tmp`; multi-GB knowless.db could OOM the staging dir.
+- **`CONFIG` / `FIELD` via env in `node -e`** — both cron scripts now read `config.json` with the JS source containing zero shell interpolation. Defence in depth even though both inputs are derived from the script's own location.
+- **Sendmail-failure escape hatch** in both cron scripts (`} | sendmail -t || printf 'sendmail failed' >&2`). When sendmail itself dies, cron's own MAILTO surfaces the stderr instead of the failure being lost.
+- **Upper bound on `disposable-domains.txt` refresh** (50000 lines). Defends against upstream compromise dumping a list that flags every legitimate provider; the lower bound (1000) was already there.
+- **`branding.rules` URL ban broadened** — was http(s) only, now blocks any `[a-z]+://` scheme (`mailto://`, `data://`, `javascript://`, `ftp://`, …) AND bare-domain shapes (`example.com`, `host.io/path`) that mail clients auto-link. Phishing-vector defence depth on the magic-link email signature.
+- **ASCII regex modernized** — `/[\x00-\x1f\x7f-￿]/` → `/[^\x20-\x7e]/` in both `resolveBrandingFeedbackEmail` and `resolveBrandingRules`. Same behaviour, drops the eslint-disable, far more readable.
+- **Logged-out / non-mod `?mod=me` strips the param at dispatch** rather than silently rendering an unfiltered audit. Was a UX trap (chip looked active in URL but did nothing).
+- **`PRUNE_COUNT` portability** — `printf '%s' "$PRUNED" | grep -c .` handles both empty-input (returns 0) and the leading-whitespace some `wc -l` builds emit. Empty `printf '%s\n'` no longer falsely reports 1.
+- **ISO-week algorithm reference** in `bin/stats-weekly.js` (Wikipedia link to ISO 8601 week-date) + load-bearing `byWeek` string-compare invariant documented (depends on `bin/stats.js` always emitting trailing `Z`).
+
+### Fixed — Footer separator before feedback / about / modlog
+
+The footer-links span sat directly adjacent to the hosted-by span with no delimiter, rendering as `hosted by @x feedback · about · modlog`. Prepend `· ` to the footer-links span so the chain reads `… hosted by @x · feedback · about · modlog`. Works whether `feedbackEmail` is set or not.
+
 ### Fixed — Modlog filter-bar layout + non-mod chip state
 
 - **Sub `<select>` now renders inline with the filter chips** (next to `date · type · my decisions`), not on its own row above the table. `subFilterControl()` returns `{ inline, strip }`; the >20-subs branch hands `inline` to `modlogFilterBar` and skips the strip, the ≤20 branch leaves `inline` null and renders the chip strip as a separate `<p>` below the bar (chips would wrap awkwardly inline).
