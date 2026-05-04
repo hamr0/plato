@@ -267,7 +267,7 @@ test('GET /memlog: logged-in user sees personal feed URLs and a regenerate form'
   const res = await jfetch(jar, ctx.baseUrl + '/memlog');
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.match(body, /personal rssvp/);
+  assert.match(body, /personal rssvp feed/);
   assert.match(body, /\/u\/[0-9a-f]{64}\/subs\.rss/);
   assert.match(body, /\/u\/[0-9a-f]{64}\/rss/);
   assert.match(body, /action="\/memlog\/rss-regenerate"/);

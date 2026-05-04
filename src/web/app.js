@@ -2966,7 +2966,7 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   const rssvpOpen = searchParams?.get('rssvp') === 'open';
   const feedsBlock = html`
     <details class="memlog-feeds"${rssvpOpen ? raw(' open') : raw('')}>
-      <summary><span class="rssvp-mark">personal rssvp</span></summary>
+      <summary><span class="rssvp-mark">personal rssvp feed</span></summary>
       <p class="muted">two pull-only feed URLs tied to your account. drop either into any rssvp reader. token in the URL <em>is</em> the credential — keep these private. regenerating rotates both at once.</p>
       <ul class="rssvp-list">
         <li><button type="button" class="rssvp-copy" data-copy="${subsRssUrl}" title="click to copy"><code>${subsRssUrl}</code></button> — new posts across your subscribed subs</li>
