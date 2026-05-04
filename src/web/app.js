@@ -864,15 +864,20 @@ function parseHomeFilters(searchParams) {
   const sort = HOME_SORTS.includes(rawSort) ? rawSort : 'new';
   const rawDate = searchParams?.get('date');
   const date = rawDate in HOME_DATES ? rawDate : 'all';
-  return { tab, sort, date };
+  const feed = searchParams?.get('feed') === 'subscribed' ? 'subscribed' : 'all';
+  return { tab, sort, date, feed };
 }
 
-function homeNav(filters) {
+function homeNav(filters, { currentHandle } = {}) {
   const href = (overrides) => {
     const params = new URLSearchParams();
     const merged = { ...filters, ...overrides };
     for (const [k, v] of Object.entries(merged)) {
-      if (v == null || v === '' || (k === 'sort' && v === 'new') || (k === 'date' && v === 'all') || (k === 'tab' && v === 'posts')) continue;
+      if (v == null || v === '' ||
+          (k === 'sort' && v === 'new') ||
+          (k === 'date' && v === 'all') ||
+          (k === 'tab' && v === 'posts') ||
+          (k === 'feed' && v === 'all')) continue;
       params.set(k, String(v));
     }
     const qs = params.toString();
@@ -882,6 +887,16 @@ function homeNav(filters) {
     const cls = active ? 'filter-btn filter-btn-active' : 'filter-btn';
     return html`<a class="${cls}" href="${href({ [key]: value })}">${label}</a>`;
   };
+  // Subscribed chip is logged-in only — anonymous has nothing to filter
+  // by, and a no-op chip is worse than no chip. Mirrors the /subs?filter=mine
+  // approach.
+  const feedGroup = currentHandle
+    ? html`<span class="filter-sep">·</span>
+        <span class="filter-group">
+          ${chip('feed', 'subscribed', 'subscribed', filters.feed === 'subscribed')}
+          ${chip('feed', 'all', 'all', filters.feed === 'all')}
+        </span>`
+    : html``;
   return html`<nav class="home-nav muted">
     <span class="filter-group">
       ${chip('tab', 'posts', 'posts', filters.tab === 'posts')}
@@ -902,11 +917,7 @@ function homeNav(filters) {
       ${chip('date', 'week', 'week', filters.date === 'week')}
       ${chip('date', 'all', 'all', filters.date === 'all')}
     </span>
-    <span class="filter-sep">·</span>
-    <span class="filter-group">
-      <span class="filter-btn filter-btn-disabled" title="subscriptions — coming soon">subs</span>
-      <a class="filter-btn filter-btn-active" href="/">all</a>
-    </span>
+    ${feedGroup}
   </nav>`;
 }
 
@@ -981,6 +992,19 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
 
+  // ?feed=subscribed restricts the feed to subs the user follows.
+  // Anonymous users have no subscriptions, so the filter silently
+  // degrades to 'all' here — and we normalize filters.feed too so the
+  // chip strip rendered below carries clean URLs (no sticky
+  // ?feed=subscribed in chip hrefs that anon can't even see). Empty-set
+  // case (logged in, zero subs) flows through as `subNames: []`, which
+  // the queries short-circuit to no rows + an empty-state msg.
+  if (filters.feed === 'subscribed' && !currentHandle) filters.feed = 'all';
+  const subNames = filters.feed === 'subscribed'
+    ? [...listSubscribedSubs(db, currentHandle)]
+    : null;
+  const subscribedEmpty = subNames !== null && subNames.length === 0;
+
   const { page, offset, limit } = parsePage(searchParams);
   const overFetch = limit + 1;
   let feedView;
@@ -991,6 +1015,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       sinceMs: sinceMs ?? undefined,
       limit: overFetch,
       offset,
+      subNames: subNames ?? undefined,
     });
     const sliced = sliceForPage(raw, limit);
     hasNext = sliced.hasNext;
@@ -1003,7 +1028,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
     // into a sub or (M6) by subscription. No algorithmic per-sub cap —
     // "no algorithm decides what you see" is the load-bearing rule, and
     // capping per-sub on the default view is itself a small algorithm.
-    const raw = listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: overFetch, offset });
+    const raw = listPostsAcrossSubs(db, { sort: filters.sort, sinceMs: sinceMs ?? undefined, limit: overFetch, offset, subNames: subNames ?? undefined });
     const sliced = sliceForPage(raw, limit);
     hasNext = sliced.hasNext;
     const posts = sliced.items;
@@ -1034,8 +1059,10 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
         <summary>+ new post</summary>
         ${postFormFor({ currentHandle, postableSubs })}
       </details>
-      ${homeNav(filters)}
-      ${feedView}
+      ${homeNav(filters, { currentHandle })}
+      ${subscribedEmpty
+        ? html`<p class="muted">you haven't subscribed to any subs yet. <a href="/subs">browse the directory</a> and click <em>subscribe</em> on any sub to populate this feed.</p>`
+        : feedView}
       ${pager}
     `)
   );

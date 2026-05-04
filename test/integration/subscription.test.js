@@ -307,3 +307,96 @@ test('GET /sub/<name>: subscribe button absent for anonymous', async (t) => {
   const body = await res.text();
   assert.doesNotMatch(body, /class="subscribe-btn"/);
 });
+
+// --- M6/B3: home-feed Subscribed/All toggle ---
+
+function seedPost(db, { sub, title }) {
+  const id = randomBytes(8).toString('hex');
+  const author = randomBytes(32).toString('hex');
+  db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, author.slice(0, 6), Date.now() - 60 * 24 * 60 * 60 * 1000);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, sub, author, title, `posts/${id}.md`, Date.now());
+  return id;
+}
+
+test('GET /?feed=subscribed: shows only posts from subscribed subs', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db } = ctx;
+  seedPost(db, { sub: 'lobby', title: 'LOBBY-POST-MARK' });
+  seedPost(db, { sub: 'meta',  title: 'META-POST-MARK' });
+  const jar = await loginAs(ctx, 'a@x.test');
+  // Subscribe to lobby only.
+  await jfetch(jar, ctx.baseUrl + '/sub/lobby/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'subscribe' }),
+  });
+  // All-feed: both posts visible.
+  let res = await jfetch(jar, ctx.baseUrl + '/');
+  let body = await res.text();
+  assert.match(body, /LOBBY-POST-MARK/);
+  assert.match(body, /META-POST-MARK/);
+  // Subscribed-feed: lobby only.
+  res = await jfetch(jar, ctx.baseUrl + '/?feed=subscribed');
+  body = await res.text();
+  assert.match(body, /LOBBY-POST-MARK/);
+  assert.doesNotMatch(body, /META-POST-MARK/);
+});
+
+test('GET /?feed=subscribed: chip not rendered for anonymous; param degrades to all', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db } = ctx;
+  seedPost(db, { sub: 'meta', title: 'META-POST-MARK' });
+  const res = await fetch(ctx.baseUrl + '/?feed=subscribed');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  // Chip pair is hidden for anonymous (the existing all/24h/etc chips
+  // still render, but no `feed=subscribed` link should appear).
+  assert.doesNotMatch(body, /href="\/\?feed=subscribed"/);
+  // And the meta post is visible because the filter degraded to all.
+  assert.match(body, /META-POST-MARK/);
+});
+
+test('GET /?feed=subscribed: empty-state message when logged-in user subscribes to nothing', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db } = ctx;
+  seedPost(db, { sub: 'lobby', title: 'LOBBY-POST-MARK' });
+  const jar = await loginAs(ctx, 'a@x.test');
+  // Note: loginAs posts to lobby as part of the magic-link flow, but
+  // posting != subscribing. Confirm zero subscriptions, then ask for
+  // the subscribed feed and assert the empty-state copy renders.
+  const handle = db.prepare('SELECT handle FROM posts ORDER BY created_at DESC LIMIT 1').get().handle;
+  const count = db.prepare('SELECT COUNT(*) AS n FROM subscriptions WHERE user_handle = ?').get(handle).n;
+  assert.equal(count, 0);
+  const res = await jfetch(jar, ctx.baseUrl + '/?feed=subscribed');
+  const body = await res.text();
+  assert.match(body, /haven't subscribed to any subs yet/);
+  assert.doesNotMatch(body, /LOBBY-POST-MARK/);
+});
+
+test('GET /?feed=subscribed&tab=comments: comment feed honors the same filter', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db } = ctx;
+  const lobbyPost = seedPost(db, { sub: 'lobby', title: 'lobby' });
+  const metaPost  = seedPost(db, { sub: 'meta',  title: 'meta' });
+  const author = 'd'.repeat(64);
+  db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now() - 30 * 24 * 60 * 60 * 1000);
+  for (const [postId, body] of [[lobbyPost, 'LOBBY-COMMENT-MARK'], [metaPost, 'META-COMMENT-MARK']]) {
+    db.prepare(`INSERT INTO comments (id, post_id, handle, body, created_at)
+                VALUES (?, ?, ?, ?, ?)`)
+      .run(randomBytes(8).toString('hex'), postId, author, body, Date.now());
+  }
+  const jar = await loginAs(ctx, 'a@x.test');
+  await jfetch(jar, ctx.baseUrl + '/sub/lobby/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'subscribe' }),
+  });
+  const res = await jfetch(jar, ctx.baseUrl + '/?tab=comments&feed=subscribed');
+  const body = await res.text();
+  assert.match(body, /LOBBY-COMMENT-MARK/);
+  assert.doesNotMatch(body, /META-COMMENT-MARK/);
+});

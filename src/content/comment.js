@@ -100,9 +100,16 @@ export function listCommentsForPost(db, postId, { sort = 'best' } = {}) {
 // comment plus the parent post's id, title, and sub_name so the renderer
 // can show "<comment body excerpt> · /sub/<x> · <post title>". Filters
 // out removed comments. `sort` is 'new' | 'top'; date filter via sinceMs.
-export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0 } = {}) {
-  const where = sinceMs != null ? 'AND c.created_at >= ?' : '';
-  const params = sinceMs != null ? [sinceMs] : [];
+export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0, subNames = null } = {}) {
+  // See listPostsAcrossSubs for the subNames contract.
+  if (Array.isArray(subNames) && subNames.length === 0) return [];
+  const extra = [];
+  const params = [];
+  if (sinceMs != null) { extra.push('AND c.created_at >= ?'); params.push(sinceMs); }
+  if (Array.isArray(subNames) && subNames.length > 0) {
+    extra.push(`AND p.sub_name IN (${subNames.map(() => '?').join(',')})`);
+    params.push(...subNames);
+  }
   const order = sort === 'top'
     ? 'ORDER BY c.score DESC, c.created_at DESC'
     : sort === 'old'
@@ -114,7 +121,7 @@ export function listRecentCommentsAcrossSubs(db, { sort = 'new', sinceMs, limit 
        p.title AS post_title, p.sub_name
      FROM comments c
      JOIN posts p ON p.id = c.post_id
-     WHERE c.removed_at IS NULL ${where}
+     WHERE c.removed_at IS NULL ${extra.join(' ')}
      ${order}
      LIMIT ? OFFSET ?`
   ).all(...params, limit, offset);

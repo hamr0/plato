@@ -235,9 +235,19 @@ export function listRecentPosts(db, { limit = 50, offset = 0 } = {}) {
 // top-nav (UX-E): no per-sub cap, just a global ordering with optional
 // recency window. `sort` is one of 'new' | 'top' | 'hot'; `sinceMs` is
 // the lower bound on created_at (or undefined for all-time).
-export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0, now = Date.now() } = {}) {
-  const where = sinceMs != null ? 'WHERE created_at >= ?' : '';
-  const params = sinceMs != null ? [sinceMs] : [];
+export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, offset = 0, now = Date.now(), subNames = null } = {}) {
+  // subNames: null/undefined → no restriction; [] → empty result (the
+  // user is subscribed to nothing — short-circuit instead of running a
+  // `sub_name IN ()` which is a SQL syntax error). Non-empty → IN (?,?).
+  if (Array.isArray(subNames) && subNames.length === 0) return [];
+  const clauses = [];
+  const params = [];
+  if (sinceMs != null) { clauses.push('created_at >= ?'); params.push(sinceMs); }
+  if (Array.isArray(subNames) && subNames.length > 0) {
+    clauses.push(`sub_name IN (${subNames.map(() => '?').join(',')})`);
+    params.push(...subNames);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const baseSelect = `SELECT *,
     (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
     FROM posts ${where}`;
