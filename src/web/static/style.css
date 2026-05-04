@@ -1052,6 +1052,33 @@ table.communities tr:hover td { background: var(--bg-soft); }
 table.modlog tr.memlog-row-read td { opacity: 0.55; }
 table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 
+/* rssvp — plato voice for RSS feeds. Accent-colored to match link
+   affordance; the substring "rss" is preserved so reader users still
+   recognize it. .rssvp-mark = the inline label/heading; .rssvp-link =
+   the action-row link on /sub/<name>; .rssvp-copy = click-to-copy
+   button wrapping the URL on /memlog. */
+.rssvp-mark { color: var(--accent); font-weight: 600; }
+.rssvp-link { color: var(--accent); }
+.memlog-feeds > summary { cursor: pointer; padding: 0.25rem 0; }
+.memlog-feeds > summary:hover .rssvp-mark { text-decoration: underline; }
+.rssvp-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+.rssvp-list li { margin: 0.35rem 0; }
+.rssvp-copy {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.4rem;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.rssvp-copy code { color: inherit; background: none; padding: 0; }
+.rssvp-copy:hover { border-color: var(--accent); }
+.rssvp-copy.rssvp-copied { border-color: var(--up); color: var(--up); }
+
 /* Edit window affordances */
 .edited-note { margin: 0.2rem 0; font-size: 0.8rem; }
 .action-link {

@@ -1299,7 +1299,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss">rss</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
@@ -2961,17 +2961,53 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   const rssToken = getOrCreateRssToken(db, handle);
   const subsRssUrl = `${siteMeta.baseUrl}/u/${rssToken}/subs.rss`;
   const allRssUrl = `${siteMeta.baseUrl}/u/${rssToken}/rss`;
+  // Stay-open hint: regenerate redirects back with ?rssvp=open so the
+  // <details> doesn't snap shut on the user. No JS needed for this part.
+  const rssvpOpen = searchParams?.get('rssvp') === 'open';
   const feedsBlock = html`
-    <details class="memlog-feeds">
-      <summary class="muted">personal RSS feeds</summary>
-      <p class="muted">two pull-only feed URLs tied to your account. drop either into any RSS reader. token in the URL <em>is</em> the credential — keep these private. regenerating rotates both at once.</p>
-      <ul>
-        <li><code>${subsRssUrl}</code> — new posts across your subscribed subs</li>
-        <li><code>${allRssUrl}</code> — the above plus your memlog notifications</li>
+    <details class="memlog-feeds"${rssvpOpen ? raw(' open') : raw('')}>
+      <summary><span class="rssvp-mark">personal rssvp</span></summary>
+      <p class="muted">two pull-only feed URLs tied to your account. drop either into any rssvp reader. token in the URL <em>is</em> the credential — keep these private. regenerating rotates both at once.</p>
+      <ul class="rssvp-list">
+        <li><button type="button" class="rssvp-copy" data-copy="${subsRssUrl}" title="click to copy"><code>${subsRssUrl}</code></button> — new posts across your subscribed subs</li>
+        <li><button type="button" class="rssvp-copy" data-copy="${allRssUrl}" title="click to copy"><code>${allRssUrl}</code></button> — the above plus your memlog notifications</li>
       </ul>
       <form method="POST" action="/memlog/rss-regenerate" class="filter-form">
         <button class="filter-btn" title="invalidates both URLs and issues new ones">regenerate token</button>
       </form>
+      <script>
+        (function () {
+          // Click-to-copy on the rssvp URL buttons. Pure progressive
+          // enhancement — without JS, the URL text is still selectable
+          // and copyable the normal way (it sits inside <code>).
+          for (const btn of document.querySelectorAll('.rssvp-copy')) {
+            btn.addEventListener('click', async () => {
+              const url = btn.dataset.copy;
+              if (!url) return;
+              try {
+                await navigator.clipboard.writeText(url);
+                const prev = btn.dataset.prev ?? btn.querySelector('code').textContent;
+                btn.dataset.prev = prev;
+                btn.classList.add('rssvp-copied');
+                btn.querySelector('code').textContent = 'copied!';
+                setTimeout(() => {
+                  btn.classList.remove('rssvp-copied');
+                  btn.querySelector('code').textContent = prev;
+                }, 1200);
+              } catch (e) {
+                // Clipboard API can be denied (permissions, insecure
+                // context, very old browsers). Fall back: select the
+                // text inside the button so the user can ⌘/Ctrl-C.
+                const range = document.createRange();
+                range.selectNodeContents(btn.querySelector('code'));
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            });
+          }
+        })();
+      </script>
     </details>`;
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <div class="memlog-page">
@@ -2994,7 +3030,7 @@ async function handleMemlogRssRegenerate(req, res, { db, auth }) {
     }));
   }
   regenerateRssToken(db, handle);
-  redirect(res, '/memlog');
+  redirect(res, '/memlog?rssvp=open');
 }
 
 async function handleMemlogMarkRead(req, res, { db, auth }) {

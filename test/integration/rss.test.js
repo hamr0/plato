@@ -142,8 +142,9 @@ test('GET /sub/<name>: HTML page advertises Atom feed via <link rel="alternate">
   assert.equal(res.status, 200);
   const body = await res.text();
   assert.match(body, /<link rel="alternate" type="application\/atom\+xml" href="\/sub\/lobby\/rss"/);
-  // Visible "rss" text link in the action row.
-  assert.match(body, /<a href="\/sub\/lobby\/rss">rss<\/a>/);
+  // Visible "rssvp" text link in the action row (plato voice; the
+  // substring "rss" is still in the label so reader users recognize it).
+  assert.match(body, /<a href="\/sub\/lobby\/rss" class="rssvp-link">rssvp<\/a>/);
 });
 
 test('GET /: home page does NOT advertise an Atom feed (per-sub only for now)', async (t) => {

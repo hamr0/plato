@@ -267,7 +267,7 @@ test('GET /memlog: logged-in user sees personal feed URLs and a regenerate form'
   const res = await jfetch(jar, ctx.baseUrl + '/memlog');
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.match(body, /personal RSS feeds/);
+  assert.match(body, /personal rssvp/);
   assert.match(body, /\/u\/[0-9a-f]{64}\/subs\.rss/);
   assert.match(body, /\/u\/[0-9a-f]{64}\/rss/);
   assert.match(body, /action="\/memlog\/rss-regenerate"/);
@@ -299,7 +299,8 @@ test('POST /memlog/rss-regenerate: rotates the token, redirects to /memlog', asy
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   });
   assert.equal(res.status, 302);
-  assert.equal(res.headers.get('location'), '/memlog');
+  // Redirect carries ?rssvp=open so the <details> stays open after regen.
+  assert.equal(res.headers.get('location'), '/memlog?rssvp=open');
 
   res = await jfetch(jar, ctx.baseUrl + '/memlog');
   const secondBody = await res.text();
