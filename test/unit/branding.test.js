@@ -4,6 +4,7 @@ import {
   resolveBrandingColors,
   resolveBrandingFeedbackEmail,
   resolveBrandingRules,
+  resolveBrandingMetaDescription,
 } from '../../src/web/app.js';
 
 test('resolveBrandingColors: no overrides returns nulls', () => {
@@ -147,6 +148,35 @@ test('resolveBrandingRules: trim-then-internal-newline still throws', () => {
 test('resolveBrandingRules: DEL (0x7f) and other control chars throw', () => {
   assert.throws(() => resolveBrandingRules(['hi\x7fthere']), /ASCII/);
   assert.throws(() => resolveBrandingRules(['hi\x01there']), /ASCII/);
+});
+
+// --- metaDescription ---
+
+test('resolveBrandingMetaDescription: null/empty returns null', () => {
+  assert.equal(resolveBrandingMetaDescription(null), null);
+  assert.equal(resolveBrandingMetaDescription(''), null);
+  assert.equal(resolveBrandingMetaDescription('   '), null);
+  assert.equal(resolveBrandingMetaDescription(undefined), null);
+});
+
+test('resolveBrandingMetaDescription: valid string accepted, trimmed', () => {
+  const r = resolveBrandingMetaDescription('  A short description for the forum.  ');
+  assert.equal(r, 'A short description for the forum.');
+});
+
+test('resolveBrandingMetaDescription: > 200 chars throws', () => {
+  assert.throws(
+    () => resolveBrandingMetaDescription('x'.repeat(201)),
+    /≤ 200 chars/,
+  );
+});
+
+test('resolveBrandingMetaDescription: non-ASCII throws', () => {
+  assert.throws(() => resolveBrandingMetaDescription('café forum'), /ASCII/);
+});
+
+test('resolveBrandingMetaDescription: non-string throws', () => {
+  assert.throws(() => resolveBrandingMetaDescription(42), /must be a string/);
 });
 
 test('resolveBrandingRules: joined > 240 chars throws', () => {

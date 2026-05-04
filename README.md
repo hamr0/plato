@@ -67,6 +67,7 @@ Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.disc
 - **Spam knobs**: tighten via `config.json` (rate limits, link cap, regex patterns, URLhaus). Floors are PRD-locked — operators tighten, never loosen.
 - **Per-sub settings**: owner sets auto-uncollapse thresholds at `/sub/create`. Spam knobs are forum-wide on purpose.
 - **Cron jobs**: hourly URLhaus refresh, daily full-state backup (7-day retention), daily stats snapshot, weekly stats digest by email, quarterly disposable-domains refresh — all autoconfig from `config.json` `operator.{email,service}`. See [cron-jobs.md](docs/02-features/cron-jobs.md).
+- **Privacy-led discoverability**: declarative head tags (description, canonical, OpenGraph, Twitter card), `/robots.txt`, `/sitemap.xml`. No analytics, no tracking pixels, no third-party JS, no cookie banner. The audit checklist for keeping it that way is in [privacy-seo.md](docs/04-process/privacy-seo.md).
 
 ---
 

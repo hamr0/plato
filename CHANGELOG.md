@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — Privacy-led SEO (head meta, OpenGraph, robots.txt, sitemap.xml)
+
+Implements [`docs/04-process/privacy-seo.md`](docs/04-process/privacy-seo.md) for plato. Tier 1 declarative head tags + Tier 2 static-files-at-root, no analytics, no tracking. The privacy posture is what self-selects the right audience in search snippets.
+
+- **`/robots.txt` route** — declarative crawl policy: `Allow: /` plus `Disallow:` on auth callbacks (`/auth/`), POST-only endpoints (`/draft`, `/vote`, `/flag`, `/login`, `/logout`, `/verify`), the per-user `/memlog`, and `/modlog/resolve`. Public reads (homepage, sub feeds, post pages, `/about`, `/modlog`, `/subs`) are crawlable. Sitemap line points at `/sitemap.xml`.
+- **`/sitemap.xml` route** — dynamic. Lists `/`, `/about`, `/modlog`, `/subs`, every sub at `/sub/<name>`, every non-removed post at `/sub/<name>/post/<id>`. `lastmod` from DB timestamps; `changefreq` + `priority` per page type. Removed posts excluded — won't reappear in indexes after a hard removal. Pagination + filter params excluded; canonical pages only.
+- **`<head>` per-page** — every page now emits `<meta name="description">`, `<link rel="canonical">`, `<meta name="theme-color">`, OpenGraph (`og:type`, `og:title`, `og:description`, `og:url`, `og:site_name`), and `<meta name="twitter:card" content="summary">`. Skipped intentionally per the playbook: `og:image` (defer until a design pass), JSON-LD ("skippable on principle"), `humans.txt`, `security.txt`.
+- **`branding.metaDescription`** in `config.json` (optional, ASCII, ≤200 chars). Falls back to `"a {forumName} instance: Reddit-shaped forum, magic-link auth, no tracking, no analytics, public modlog — {tagline}."` so a fresh fork's search snippet surfaces the privacy posture without operator effort. `resolveBrandingMetaDescription` exported for tests.
+- **Per-page customization** — `/about` description: "what {forumName} keeps about its users — and what it doesn't"; `/modlog` description: "every moderation action on {forumName}, public and audited"; `/subs` description: "every sub on {forumName}"; `/sub/<name>` description: from `sub.description` when set, otherwise default; `/sub/<name>/post/<id>` description: first ~155 chars of post body with markdown stripped, `og:type=article`, canonical = post permalink. Removed posts get a minimal fallback description so an indexed snippet never quotes a body the operator already retracted.
+- **`postExcerpt(body, max)` + `escapeXml(s)` helpers** — markdown-stripping for snippets; XML-attribute-safe escaping for sitemap output.
+- **No analytics, no tracking pixels, no third-party JS, no cookie banner** — already true; this commit doesn't change that and the audit checklist is in `privacy-seo.md` for quarterly re-verification.
+
 ### Fixed — Hardening pass on cron scripts + branding resolvers
 
 - **Atomic tarball write** in `scripts/cron-backup-db.sh` — writes to `$ARCHIVE.tmp` then `mv` on success, so a tar failure never leaves a half-written file under the canonical name (was the one Important issue from the QA review). Retention can no longer pick a corrupt newest archive.

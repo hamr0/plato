@@ -145,6 +145,14 @@ When unset: no rules section on `/about`, no signature on the magic-link email. 
 
 **`/about` page.** Auto-generated. Renders the operator-supplied prelude (forum name + hosted-by + optional feedback line + optional rules) followed by project-baked sections that aren't operator-edited: a data-handling paragraph (what plato stores and doesn't), and a fork-escape paragraph. The baked sections are uniform across forks by design — the public-honesty contract isn't operator-tunable. Replaces "privacy policy" / "terms of service" boilerplate with text that's actually true of plato.
 
+**Search engine snippet (`branding.metaDescription`).** Optional. The default lands a privacy-posture-forward sentence in Google snippets and link unfurls (Slack, Signal, Discord, Mastodon, iMessage): *"a {forumName} instance: Reddit-shaped forum, magic-link auth, no tracking, no analytics, public modlog — {tagline}."* Override if you want bespoke copy. ASCII, ≤200 chars, throws at boot on bad shape.
+
+```jsonc
+{ "branding": { "metaDescription": "A bespoke description for your instance." } }
+```
+
+Per-page descriptions are auto-derived: `/about` says what plato keeps and doesn't, `/modlog` describes the public audit, sub pages prefer `sub.description`, post pages excerpt the first ~155 chars of the body. See [`docs/04-process/privacy-seo.md`](../04-process/privacy-seo.md) for the full SEO playbook (head tags, robots.txt, sitemap.xml, what's never added).
+
 **Reserved sub names.** Add to `RESERVED_SUB_NAMES` in `src/content/sub.js` if your fork adds a new top-level URL (e.g., `/shop`) that you don't want a sub to collide with.
 
 ### Tier 2: Hardcoded constant, restart, requires a deliberate decision

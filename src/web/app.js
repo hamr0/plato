@@ -70,11 +70,11 @@ const HANDLE_RE = /^[0-9a-f]{64}$/;
 // from a renderer — use page() so the rule that "every page reads the
 // same as home, with the forum name replaced by the page action" holds
 // in code, not in convention.
-function pageView({ db, currentHandle = null, title, subtitle }, body) {
+function pageView({ db, currentHandle = null, title, subtitle, description = null, canonical = null, ogType = 'website' }, body) {
   return layout(title, html`
     ${siteHeader({ db, currentHandle, title, subtitle })}
     ${body}
-  `);
+  `, { description, canonical, ogType });
 }
 
 // One-line error/notice pages. Kept terse so the call sites stay readable
@@ -83,13 +83,30 @@ function quickPage(req, { db, auth }, title, body) {
   return pageView({ db, currentHandle: auth?.handleFromRequest(req) ?? null, title }, body);
 }
 
-function layout(title, body) {
+// `seo` carries per-page overrides for description / canonical / og:type.
+// Defaults: description ← site default (privacy posture surfaced), canonical
+// ← apex (siteMeta.baseUrl), og:type ← 'website'. Per-page renderers pass
+// the seo opts via pageView when they have richer context (post excerpt,
+// sub description, full canonical URL, etc.) — see privacy-seo.md.
+function layout(title, body, seo = {}) {
+  const description = seo.description || defaultSiteDescription();
+  const canonical = seo.canonical || siteMeta.baseUrl;
+  const ogType = seo.ogType || 'website';
   return render(html`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
+<meta name="description" content="${description}">
+<link rel="canonical" href="${canonical}">
+<meta name="theme-color" content="#0d1117">
+<meta property="og:type" content="${ogType}">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${description}">
+<meta property="og:url" content="${canonical}">
+<meta property="og:site_name" content="${branding.forumName}">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css?v=25">
@@ -117,7 +134,12 @@ const branding = {
   colors: { up: null, down: null },
   feedbackEmail: null,
   rules: [],
+  metaDescription: null,
 };
+
+// Set at boot from createApp. layout() reads `siteMeta.baseUrl` to compose
+// canonical / og:url. Module-scoped (one process per instance).
+const siteMeta = { baseUrl: '' };
 
 // Blocks CSS injection: reject anything containing ; { } < > " '
 // A valid CSS color (hex, rgb(), named) never needs those characters.
@@ -153,6 +175,63 @@ export function resolveBrandingFeedbackEmail(val) {
     throw new Error('branding.feedbackEmail must be ASCII');
   }
   return trimmed;
+}
+
+// Operator-supplied meta description for search snippets + OpenGraph.
+// Falls back to a default that surfaces plato's privacy posture
+// (magic-link, no accounts, no tracking) so a fresh fork's search
+// snippet self-selects the right audience without operator effort.
+// ASCII-only so it round-trips through any link-unfurl preview.
+export function resolveBrandingMetaDescription(val) {
+  if (val == null || val === '') return null;
+  if (typeof val !== 'string') throw new Error('branding.metaDescription must be a string');
+  const t = val.trim();
+  if (!t) return null;
+  if (t.length > 200) throw new Error('branding.metaDescription must be ≤ 200 chars');
+  if (/[^\x20-\x7e]/.test(t)) throw new Error('branding.metaDescription must be ASCII');
+  return t;
+}
+
+// Default site description if branding.metaDescription is unset. Format
+// chosen to land cleanly in a Google snippet (~155 chars) and to mention
+// what plato is and how it behaves toward the user in the same breath.
+function defaultSiteDescription() {
+  if (branding.metaDescription) return branding.metaDescription;
+  const tagline = branding.tagline ? ` — ${branding.tagline}` : '';
+  return `a ${branding.forumName} instance: Reddit-shaped forum, magic-link auth, no tracking, no analytics, public modlog${tagline}.`;
+}
+
+// Strip markdown markers and return a plaintext excerpt suitable for
+// meta-description / og:description on a post page. Best-effort: keeps
+// the first sentence/paragraph intact, trims to `max` chars, appends an
+// ellipsis when truncated. ASCII-only output (mirrors the late.fyi
+// snippet rule — link-unfurl previews don't reliably handle 8-bit).
+function postExcerpt(body, max = 155) {
+  if (typeof body !== 'string' || !body) return '';
+  const stripped = body
+    .replace(/^---[\s\S]*?\n---\n/, '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#*_>~|`]+/g, ' ')
+    .replace(/[^\x20-\x7e\s]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (stripped.length <= max) return stripped;
+  return stripped.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
+}
+
+// XML attribute / text escape for sitemap.xml output. The five XML
+// predefined entities cover both attribute-value and element-text
+// contexts safely.
+function escapeXml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 // Site rules: rendered on /about as a list AND injected into the
@@ -939,7 +1018,12 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   send(
     res,
     200,
-    pageView({ db, currentHandle, title: branding.forumName, subtitle: branding.tagline }, html`
+    pageView({
+      db, currentHandle,
+      title: branding.forumName,
+      subtitle: branding.tagline,
+      canonical: `${siteMeta.baseUrl}/`,
+    }, html`
       ${anonHintFor(currentHandle)}
       ${activeSubsBlock({ subs: subsNav, currentHandle })}
       <details class="new-post-toggle">
@@ -989,7 +1073,12 @@ function renderAbout(req, res, { db, auth }) {
     <h3>if you don't trust this operator</h3>
     <p>that's fine — the forum is shaped so you don't have to. the code is <a href="https://github.com/hamr0/plato">Apache 2.0</a>; copy <code>forum.db</code> + <code>posts/</code> and run your own instance. handles re-derive per instance, so a fork is a fresh start, not a sticky identity transplant.</p>
   </section>`;
-  send(res, 200, pageView({ db, currentHandle, title: html`about` }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: html`about`,
+    description: `what ${branding.forumName} keeps about its users — and what it doesn't.`,
+    canonical: `${siteMeta.baseUrl}/about`,
+  }, html`
     <article class="about">
       <p>this is a <strong>${branding.forumName}</strong> instance, hosted by ${handle}.</p>
       ${feedback}
@@ -1024,7 +1113,12 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
           <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
         </tr>`)}</tbody>
       </table>`;
-  send(res, 200, pageView({ db, currentHandle, title: 'subs' }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: 'subs',
+    description: `every sub on ${branding.forumName}.`,
+    canonical: `${siteMeta.baseUrl}/subs`,
+  }, html`
     <p><a href="/">← home</a></p>
     <h2>// subs</h2>
     <p class="muted">every sub on this instance. click a sub name to read or post.</p>
@@ -1098,7 +1192,13 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
   send(
     res,
     200,
-    pageView({ db, currentHandle, title: html`//${subName}`, subtitle: sub.description || null }, html`
+    pageView({
+      db, currentHandle,
+      title: html`//${subName}`,
+      subtitle: sub.description || null,
+      description: sub.description || `//${subName} on ${branding.forumName}: ${defaultSiteDescription()}`,
+      canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
+    }, html`
       <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
@@ -1657,7 +1757,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     return send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">post not found in this sub.</p>`));
   }
 
-  const { post, bodyHtml } = result;
+  const { post, body: postBody, bodyHtml } = result;
   const currentHandle = auth.handleFromRequest(req);
   const postFlair = post.flair_slug ? parseFlairs(sub.flairs).find((f) => f.slug === post.flair_slug) ?? null : null;
   const activeSort = COMMENT_SORTS.includes(sort) ? sort : 'best';
@@ -1702,7 +1802,17 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
   send(
     res,
     200,
-    pageView({ db, currentHandle, title: post.title }, html`
+    pageView({
+      db, currentHandle,
+      title: post.title,
+      // Removed posts → fall back to a minimal description so an indexed
+      // snippet doesn't quote a body the operator already retracted.
+      description: post.removed_at
+        ? `${post.title} — removed post on ${branding.forumName}.`
+        : (postExcerpt(postBody) || `${post.title} — ${branding.forumName} //${subName}`),
+      canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(post.id)}`,
+      ogType: 'article',
+    }, html`
       <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a></p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
@@ -1995,6 +2105,81 @@ function renderAvatar(res, handle) {
     'Cache-Control': 'public, max-age=86400',
   });
   res.end(avatarSvg(handle));
+}
+
+// /robots.txt — declarative crawl policy. Indexes every public route
+// (homepage, sub feeds, post pages, /about, /modlog, /subs); blocks
+// auth callbacks, POST endpoints, and the per-user /memlog. Sitemap
+// line points crawlers at the dynamic sitemap.xml.
+function renderRobots(res) {
+  const lines = [
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /draft',
+    'Disallow: /vote',
+    'Disallow: /flag',
+    'Disallow: /login',
+    'Disallow: /logout',
+    'Disallow: /verify',
+    'Disallow: /auth/',
+    'Disallow: /memlog',
+    'Disallow: /modlog/resolve',
+    `Sitemap: ${siteMeta.baseUrl}/sitemap.xml`,
+    '',
+  ];
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(lines.join('\n'));
+}
+
+// /sitemap.xml — every public, indexable URL on this instance:
+//   /, /about, /modlog, /subs, /sub/<name>, /sub/<name>/post/<id>
+// Pagination + filter params excluded; canonical pages only.
+// `lastmod` uses the most recent activity timestamp for sub indices,
+// the post's created_at for post pages. Removed posts are excluded.
+function renderSitemap(res, { db }) {
+  const base = siteMeta.baseUrl;
+  const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const today = isoDay(Date.now());
+  const urls = [];
+  const push = (loc, lastmod, priority, changefreq) => {
+    urls.push(
+      `  <url>\n` +
+      `    <loc>${escapeXml(loc)}</loc>\n` +
+      `    <lastmod>${lastmod}</lastmod>\n` +
+      `    <changefreq>${changefreq}</changefreq>\n` +
+      `    <priority>${priority}</priority>\n` +
+      `  </url>`
+    );
+  };
+  push(`${base}/`, today, '1.0', 'hourly');
+  push(`${base}/subs`, today, '0.5', 'daily');
+  push(`${base}/about`, today, '0.5', 'monthly');
+  push(`${base}/modlog`, today, '0.5', 'daily');
+  // Sub index pages — lastmod = most recent post in the sub (or today
+  // for empty subs).
+  const subs = db.prepare(`
+    SELECT s.name, MAX(p.created_at) AS last_post_at
+    FROM subs s LEFT JOIN posts p ON p.sub_name = s.name AND p.removed_at IS NULL
+    GROUP BY s.name
+    ORDER BY s.name
+  `).all();
+  for (const s of subs) {
+    push(`${base}/sub/${encodeURIComponent(s.name)}`, isoDay(s.last_post_at ?? Date.now()), '0.7', 'daily');
+  }
+  // Post pages — exclude removed.
+  const posts = db.prepare(`
+    SELECT id, sub_name, created_at FROM posts WHERE removed_at IS NULL ORDER BY created_at DESC
+  `).all();
+  for (const p of posts) {
+    push(`${base}/sub/${encodeURIComponent(p.sub_name)}/post/${encodeURIComponent(p.id)}`, isoDay(p.created_at), '0.7', 'weekly');
+  }
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    urls.join('\n') + '\n' +
+    '</urlset>\n';
+  res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' });
+  res.end(xml);
 }
 
 // Inline mod controls. Rendered next to a post or comment when the
@@ -2624,7 +2809,12 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
         </tr>`)}</tbody>
       </table>`;
 
-  send(res, 200, pageView({ db, currentHandle, title: `/sub/${subName}/modlog` }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: `/sub/${subName}/modlog`,
+    description: `public moderation log for ${branding.forumName} //${subName}: every soft removal, hard removal, ban, and system auto-action.`,
+    canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/modlog`,
+  }, html`
     <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a> · //modlog</p>
     <h2>// modlog</h2>
     <p class="muted">every moderator action in this sub. public.</p>
@@ -2940,7 +3130,12 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
 
   const subControl = subFilterControl(modSubs, filters);
 
-  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: 'modlog',
+    description: `every moderation action on ${branding.forumName}, public and audited.`,
+    canonical: `${siteMeta.baseUrl}/modlog`,
+  }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3114,7 +3309,12 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
 
   const subControl = subFilterControl(modSubs, filters);
 
-  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: 'modlog',
+    description: `every moderation action on ${branding.forumName}, public and audited.`,
+    canonical: `${siteMeta.baseUrl}/modlog`,
+  }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3226,7 +3426,12 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
 
   const subControl = subFilterControl(modSubs, filters);
 
-  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
+  send(res, 200, pageView({
+    db, currentHandle,
+    title: 'modlog',
+    description: `every moderation action on ${branding.forumName}, public and audited.`,
+    canonical: `${siteMeta.baseUrl}/modlog`,
+  }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3498,8 +3703,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
   branding.tagline       = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
   branding.hostedBy      = (brandingOverrides.hostedBy  ?? '').trim() || null;
   branding.colors        = resolveBrandingColors(brandingOverrides.colors ?? {});
-  branding.feedbackEmail = resolveBrandingFeedbackEmail(brandingOverrides.feedbackEmail);
-  branding.rules         = resolveBrandingRules(brandingOverrides.rules);
+  branding.feedbackEmail   = resolveBrandingFeedbackEmail(brandingOverrides.feedbackEmail);
+  branding.rules           = resolveBrandingRules(brandingOverrides.rules);
+  branding.metaDescription = resolveBrandingMetaDescription(brandingOverrides.metaDescription);
+  // Strip trailing slash so canonical concatenation produces a single
+  // slash between origin and path (`https://x.test` + `/about`).
+  siteMeta.baseUrl = String(baseUrl || '').replace(/\/+$/, '');
   setUrlDisplayMax(resolveUrlDisplayMax(urlDisplayMax));
   FEED_PAGE_SIZE = resolveFeedPageSize(feedPageSize);
   // Resolve operator overrides against the floor at boot. Bad config
@@ -3522,6 +3731,8 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
 
       if (await applyStaticRoute(req, res)) return;
 
+      if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
+      if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
       if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);

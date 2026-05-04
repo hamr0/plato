@@ -47,6 +47,8 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
 | Set the feedback contact link in the global footer | `config.json` `branding.feedbackEmail` (`mailto:` link, ASCII, valid email shape, ≤120 chars) |
 | Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, printable ASCII, no URI schemes / bare domains — phishing-vector defence on email footer) |
+| Override the search-engine snippet for the homepage | `config.json` `branding.metaDescription` (ASCII, ≤200 chars). Defaults to a privacy-posture-forward line so fresh forks self-document. Per-page descriptions auto-derived; see [`docs/04-process/privacy-seo.md`](../04-process/privacy-seo.md). |
+| Crawl + index policy | `/robots.txt` (Allow: /, Disallow auth + POST + per-user routes); `/sitemap.xml` (homepage, sub indices, post pages, /about, /modlog, /subs). Both routes are dynamic, derive from current DB content. |
 | View public moderation log | `/modlog` — instance-wide audit, no login required. `mode=open`/`mode=inbox` stay mod-only. Sub filter chips collapse to `<select>` inside the filter bar above 15 subs (`MODLOG_SUB_CHIP_LIMIT`). "my decisions" chip disabled for non-mods. |
 | Change score-collapse threshold | `COLLAPSE_THRESHOLD` in `src/web/app.js` (default −3) |
 | Change max comment-tree depth | `MAX_DEPTH` in `src/web/app.js` (default 4) |
