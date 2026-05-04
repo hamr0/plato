@@ -2,7 +2,14 @@
   "branding": {
     "forumName": "terribic",
     "tagline": "terrific or terrible",
-    "hostedBy": "@terribic"
+    "hostedBy": "@terribic",
+    "feedbackEmail": "avoidaccess@msn.com",
+    "rules": [
+      "be civil",
+      "no spam, scams, or doxxing",
+      "no porn",
+      "mods can remove; votes can reverse soft removes"
+    ]
   },
   "operator": {
     "email": "avoidaccess@gmail.com",

@@ -136,13 +136,27 @@ function seedAudit(db, { id, sub, mod, action, targetType, targetId, reason = nu
     .run(id, sub, mod, action, targetType, targetId, reason, now);
 }
 
-test('GET /modlog: anonymous returns 401', async (t) => {
+test('GET /modlog: anonymous gets the public audit view (200)', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const res = await fetch(ctx.baseUrl + '/modlog');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /modlog/i);
+});
+
+test('GET /modlog?mode=open: anonymous returns 401 (mod-only mode)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/modlog?mode=open');
   assert.equal(res.status, 401);
 });
 
-test('GET /modlog: non-mod returns 403', async (t) => {
+test('GET /modlog?mode=inbox: anonymous returns 401 (mod-only mode)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/modlog?mode=inbox');
+  assert.equal(res.status, 401);
+});
+
+test('GET /modlog: non-mod gets the public audit view (200)', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, mailer, baseUrl } = ctx;
   db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run('seed', Date.now());
@@ -155,6 +169,22 @@ test('GET /modlog: non-mod returns 403', async (t) => {
   res = await jfetch(jar, magicLinkFrom(mailer.sent.at(-1)));
   res = await jfetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
   res = await jfetch(jar, baseUrl + '/modlog');
+  assert.equal(res.status, 200);
+});
+
+test('GET /modlog?mode=open: non-mod returns 403 (mod-only mode)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, mailer, baseUrl } = ctx;
+  db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run('seed', Date.now());
+  const jar = newJar();
+  let res = await jfetch(jar, baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: 'rando@x.test', sub_name: 'seed', title: 't', body: 'b' }),
+  });
+  res = await jfetch(jar, magicLinkFrom(mailer.sent.at(-1)));
+  res = await jfetch(jar, new URL(res.headers.get('location'), baseUrl).toString());
+  res = await jfetch(jar, baseUrl + '/modlog?mode=open');
   assert.equal(res.status, 403);
 });
 
@@ -596,6 +626,44 @@ test('GET /?tab=comments: renders the comments feed', async (t) => {
   const body = await res.text();
   assert.match(body, /COMMENT-FEED-MARK/, 'parent post title shown as context');
   assert.match(body, /a witty reply/, 'comment body excerpt rendered');
+});
+
+test('GET /modlog: ≤20 subs renders chip strip (sub-toggle links)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  for (let i = 0; i < 15; i++) {
+    db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`sub${i}`, Date.now());
+  }
+  const res = await fetch(baseUrl + '/modlog');
+  const body = await res.text();
+  assert.match(body, /class="sub-toggle"/);
+  assert.doesNotMatch(body, /<select name="sub"/);
+});
+
+test('GET /modlog: >20 subs renders <select> (default "all" selected)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  for (let i = 0; i < 25; i++) {
+    db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`s${i}`, Date.now());
+  }
+  const res = await fetch(baseUrl + '/modlog');
+  const body = await res.text();
+  assert.match(body, /<select name="sub"/);
+  assert.match(body, /<option value="" selected>all \(\d+\)<\/option>/);
+  assert.doesNotMatch(body, /class="sub-toggle"/);
+});
+
+test('GET /modlog?sub=s3 with >20 subs preselects that sub in dropdown', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  for (let i = 0; i < 25; i++) {
+    db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`s${i}`, Date.now());
+  }
+  const res = await fetch(baseUrl + '/modlog?sub=s3');
+  const body = await res.text();
+  assert.match(body, /<option value="s3" selected>s3<\/option>/);
+  // "all" is no longer the selected option when ?sub= is set
+  assert.match(body, /<option value="">all \(\d+\)<\/option>/);
 });
 
 test('GET /?sort=top&date=24h: cross-sub posts feed honors filter', async (t) => {

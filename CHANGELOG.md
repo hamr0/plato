@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — Public modlog, /about page, footer module, operator-supplied rules
+
+- **`/modlog` is now public.** Logged-out and non-mod visitors get the instance-wide audit view (every mod action across every sub, newest-first, paginated, fully filterable). The "public modlog" pitch is now actually visible from the footer of every page rather than gated behind a mod login. `mode=open` and `mode=inbox` stay mod-only (those are the pending-queue + inbox views). When `?sub=` is set in `mode=open`/`inbox`, plato re-clamps to subs the viewer moderates so a mod can't peek at another sub's queue via URL editing.
+- **Top-right "modlog" nav link defaults to `?mod=me`.** A mod's primary entry point lands on "my decisions" — the public footer link points at bare `/modlog` (everyone's actions). One page, two entry points, zero divergence in renderer.
+- **Sub filter collapses to a `<select>` dropdown above 20 subs** (`MODLOG_SUB_CHIP_LIMIT`). Below that the inline chip strip stays — chips read better at a glance for small instances, and the row would wrap into a wall of names at higher counts. Default option is `all (N)`; `?sub=<name>` preselects. JS-on path auto-submits on change; JS-off path uses the `filter` button. Same control rendered in audit / inbox / open views via the new `subFilterControl()` helper.
+- **`/about` page** rendered at `/about`. Operator-authored prelude (forum name + hosted-by) plus an optional rules section, plus project-baked sections that aren't operator-edited: data handling (what plato keeps, doesn't keep — replaces a "privacy policy" without lying about how minimal plato actually is) and the "if you don't trust this operator" fork escape hatch. Project-baked sections are uniform across forks by design — the public-honesty contract isn't operator-tunable.
+- **`branding.feedbackEmail`** in `config.json` (optional). When set, footer renders `feedback · about · modlog`; when unset, footer drops `feedback`. Boot-time validation: ASCII, has-`@`-and-domain shape, ≤120 chars, no quotes/CRLF. `resolveBrandingFeedbackEmail` exported for tests.
+- **`branding.rules`** in `config.json` (optional, ≤4 strings, total ≤240 chars when joined, ASCII, no URLs). Rendered as a list on `/about` AND injected into the magic-link email signature via knowless `bodyFooter`. Single source of truth — operators edit one config field, both surfaces stay in sync. URL ban is a phishing-vector defense (mirrors knowless validateBodyFooter AF-8.2). `resolveBrandingRules` exported for tests.
+- **Footer is one global module.** `siteFooter()` already rendered on every page via `layout()`; now carries `feedback · about · modlog · — quote` plus the locked-mark + hosted-by line. Same DOM on every page, no per-route wiring.
+
 ### Added — Operator cron jobs (autoconfig + email)
 
 - **`config.json operator` block** — top-level `{ email, service }` for cron tooling. The forum process ignores it; cron scripts read it instead of hardcoding paths or notify addresses. `email` falls back to stderr when unset; `service` defaults to `plato`.

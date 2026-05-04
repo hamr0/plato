@@ -45,6 +45,9 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Daily full-state backup | install `scripts/cron-backup-db.sh` daily — tarballs `forum.db` + `knowless.db` + `posts/`, 7-day retention with auto-prune. See [`cron-jobs.md`](cron-jobs.md) |
 | Weekly stats digest by email | install `bin/stats.js` (daily snapshot) + `bin/stats-weekly.js` (Mon 06:00 UTC digest). 4-week WoW table delivered to `operator.email`. See [`cron-jobs.md`](cron-jobs.md) |
 | Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
+| Set the feedback contact link in the global footer | `config.json` `branding.feedbackEmail` (`mailto:` link, ASCII, valid email shape, ≤120 chars) |
+| Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, ASCII, no URLs) |
+| View public moderation log | `/modlog` (instance-wide audit, no login required) |
 | Change score-collapse threshold | `COLLAPSE_THRESHOLD` in `src/web/app.js` (default −3) |
 | Change max comment-tree depth | `MAX_DEPTH` in `src/web/app.js` (default 4) |
 | Change inline comment preview length | `COMMENT_PREVIEW_CHARS` in `src/web/app.js` (default 280) |

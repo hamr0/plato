@@ -341,6 +341,25 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
 }
 .mod-subs .sub-toggle-active:hover { color: var(--accent-warm); text-decoration: line-through; }
 
+/* Above MODLOG_SUB_CHIP_LIMIT (currently 20), the chip strip flips to a
+ * <select>-based form so the row doesn't wrap into a wall of names. */
+.mod-subs-form {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+  flex-wrap: wrap;
+}
+.mod-subs-form label { color: var(--text-dim); }
+.mod-subs-select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.3rem;
+  font: inherit;
+  max-width: 60vw;
+}
+
 /* Generalized click-to-filter toggle for mod and user labels in the
  * /modlog audit table. Same affordance as the subs strip — click again
  * (warm) to drop the filter. */

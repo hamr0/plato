@@ -92,7 +92,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=24">
+<link rel="stylesheet" href="/static/style.css?v=25">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -115,6 +115,8 @@ const branding = {
   tagline: 'a forum that lives at one URL',
   hostedBy: null,
   colors: { up: null, down: null },
+  feedbackEmail: null,
+  rules: [],
 };
 
 // Blocks CSS injection: reject anything containing ; { } < > " '
@@ -131,6 +133,52 @@ export function resolveBrandingColors(overrides) {
     up:   check('up',   overrides.up),
     down: check('down', overrides.down),
   };
+}
+
+// Mailto / footer-link target. Validated at boot — bad shape throws
+// rather than silently rendering a broken link. ASCII-only mirrors the
+// magic-link mail body constraint (knowless validateBodyFooter).
+export function resolveBrandingFeedbackEmail(val) {
+  if (val == null || val === '') return null;
+  if (typeof val !== 'string') throw new Error('branding.feedbackEmail must be a string');
+  const trimmed = val.trim();
+  if (trimmed.length > 120) throw new Error('branding.feedbackEmail must be ≤ 120 chars');
+  if (!/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(trimmed)) {
+    throw new Error('branding.feedbackEmail must be a valid email address');
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f-￿]/.test(trimmed)) {
+    throw new Error('branding.feedbackEmail must be ASCII');
+  }
+  return trimmed;
+}
+
+// Site rules: rendered on /about as a list AND injected into the
+// magic-link email signature so users see the rules in the medium they
+// actually read text. Constraints inherit from knowless bodyFooter
+// (AF-8.2): ≤4 lines, ≤240 chars total when joined with \n, ASCII only,
+// no URLs (footer URLs are a phishing vector). Empty array = feature
+// disabled (no rules section on /about, no footer on the email).
+export function resolveBrandingRules(val) {
+  if (val == null || val === '') return [];
+  if (!Array.isArray(val)) throw new Error('branding.rules must be an array of strings');
+  if (val.length === 0) return [];
+  if (val.length > 4) throw new Error('branding.rules: at most 4 rules (knowless mail-footer cap)');
+  const out = [];
+  for (let i = 0; i < val.length; i++) {
+    const r = val[i];
+    if (typeof r !== 'string') throw new Error(`branding.rules[${i}] must be a string`);
+    const t = r.trim();
+    if (!t) throw new Error(`branding.rules[${i}] is empty`);
+    if (t.includes('\n') || t.includes('\r')) throw new Error(`branding.rules[${i}] must be one line`);
+    // eslint-disable-next-line no-control-regex
+    if (/[\x00-\x1f\x7f-￿]/.test(t)) throw new Error(`branding.rules[${i}] must be ASCII`);
+    if (/https?:\/\//i.test(t)) throw new Error(`branding.rules[${i}] must not contain URLs (footer phishing vector)`);
+    out.push(t);
+  }
+  const joined = out.join('\n');
+  if (joined.length > 240) throw new Error('branding.rules: joined length must be ≤ 240 chars');
+  return out;
 }
 
 // Inline SVG of the mark. `loading` adds the wave animation (the only
@@ -156,9 +204,13 @@ function logoMark({ size = 22, loading = false } = {}) {
 
 function siteFooter() {
   const handle = branding.hostedBy ?? `@${branding.forumName}`;
+  const feedbackLink = branding.feedbackEmail
+    ? html`<a href="mailto:${branding.feedbackEmail}">feedback</a> · `
+    : html``;
   return html`<footer class="site-footer">
     <a href="/" class="logo-home">${logoMark({ size: 22 })}</a>
     <span class="hosted-by muted">a plato instance hosted by ${handle}</span>
+    <span class="footer-links muted">${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a></span>
     <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
@@ -299,16 +351,18 @@ function loginStatusFor(db, currentHandle) {
     </div>`;
   }
   const pseudonym = pseudonymFor(db, currentHandle);
-  // Mods (owner or co) see a unified `modlog` link in the nav. The link
-  // routes to /modlog (cross-sub) so a mod-of-many subs has one place to
-  // review their actions; the per-sub /sub/<name>/modlog stays public.
+  // Mods (owner or co) see a unified `modlog` link in the nav, defaulting
+  // to `?mod=me` so the chip lands on "my decisions" — the public footer
+  // link points at bare /modlog (instance-wide audit). One page, two
+  // entry points: mods see their own actions first; everyone else sees
+  // everything.
   const modSubs = listSubsModeratedBy(db, currentHandle);
   const openCount = modSubs.length > 0 ? countPendingTargetsAcrossSubs(db, modSubs) : 0;
   const openChip = openCount > 0
     ? html` <a class="memlog-chip" href="/modlog?mode=open" title="${openCount} open for review">(${openCount})</a>`
     : html``;
   const modLogLink = modSubs.length > 0
-    ? html` · <a href="/modlog">modlog</a>${openChip}`
+    ? html` · <a href="/modlog?mod=me">modlog</a>${openChip}`
     : html``;
   // Pseudonym is the entry point to /memlog (personal notification log).
   // Unread count chip uses .reply-count colors so non-zero pops accent.
@@ -889,6 +943,53 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       ${pager}
     `)
   );
+}
+
+// /about: a single page that documents who runs this instance, what
+// content rules apply, and what data the forum keeps. The rules section
+// reads from `branding.rules` (operator-supplied, also injected into the
+// magic-link email signature so users see the same text in both
+// surfaces — single source of truth, no drift). The data-handling
+// paragraph is project-baked and not operator-edited: plato's data
+// minimization is uniform across forks, and letting an operator weaken
+// the description here would defeat the public-honesty contract.
+function renderAbout(req, res, { db, auth }) {
+  const currentHandle = auth.handleFromRequest(req);
+  const handle = branding.hostedBy ?? `@${branding.forumName}`;
+  const feedback = branding.feedbackEmail
+    ? html`<p>questions or feedback: <a href="mailto:${branding.feedbackEmail}">${branding.feedbackEmail}</a>.</p>`
+    : html``;
+  const rules = branding.rules.length > 0
+    ? html`<section class="about-section">
+        <h3>rules</h3>
+        <ul>${branding.rules.map((r) => html`<li>${r}</li>`)}</ul>
+        <p class="muted">these rules also appear in the footer of every magic-link email this instance sends.</p>
+      </section>`
+    : html``;
+  const dataHandling = html`<section class="about-section">
+    <h3>what data this instance keeps</h3>
+    <p>plato is built around storing as little about you as possible. specifically:</p>
+    <ul>
+      <li><strong>your email address is never stored.</strong> when you sign in, the forum derives a one-way hash of your email (<a href="https://github.com/hamr0/knowless">knowless</a> identity) and discards the original. the hash is per-instance, so the same email yields different identities across forks.</li>
+      <li><strong>your IP address is held briefly</strong> for rate-limit accounting. it isn't logged to disk beyond the rate-limit window and isn't shared with anyone.</li>
+      <li><strong>no analytics, no tracking pixels, no third parties.</strong> the forum doesn't load JavaScript, fonts, or assets from any host except its own.</li>
+      <li><strong>posts and comments are public by design.</strong> there are no private subs, no DMs, no shadow visibility. what you write is what other people see.</li>
+      <li><strong>moderation is auditable.</strong> every mod action lands in a public <a href="/modlog">modlog</a>. no shadowbans, no quiet removals.</li>
+    </ul>
+  </section>`;
+  const fork = html`<section class="about-section">
+    <h3>if you don't trust this operator</h3>
+    <p>that's fine — the forum is shaped so you don't have to. the code is <a href="https://github.com/hamr0/plato">Apache 2.0</a>; copy <code>forum.db</code> + <code>posts/</code> and run your own instance. handles re-derive per instance, so a fork is a fresh start, not a sticky identity transplant.</p>
+  </section>`;
+  send(res, 200, pageView({ db, currentHandle, title: html`about` }, html`
+    <article class="about">
+      <p>this is a <strong>${branding.forumName}</strong> instance, hosted by ${handle}.</p>
+      ${feedback}
+      ${rules}
+      ${dataHandling}
+      ${fork}
+    </article>
+  `));
 }
 
 function renderCommunities(req, res, { db, auth }, searchParams) {
@@ -2594,40 +2695,62 @@ function modlogHref(overrides) {
 
 function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
   const currentHandle = auth.handleFromRequest(req);
-  if (!currentHandle) {
-    return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to view your mod log.</p>`));
+  const myModSubs = currentHandle ? listSubsModeratedBy(db, currentHandle) : [];
+  const isMod = myModSubs.length > 0;
+  // Audit is instance-wide and public — sub filter chip enumerates every
+  // sub. open/inbox modes stay mod-private and scope to subs the viewer
+  // moderates. parseModlogFilters validates ?sub= against the union so a
+  // mod can deep-link any sub for audit; in open/inbox we re-clamp to
+  // myModSubs below.
+  const allSubNames = listAllSubs(db).map((s) => s.name);
+  const filters = parseModlogFilters(searchParams, allSubNames);
+
+  if (filters.mode === 'open' || filters.mode === 'inbox') {
+    if (!currentHandle) {
+      return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">${filters.mode} is mod-only. <a href="/modlog">view public audit</a>.</p>`));
+    }
+    if (!isMod) {
+      return send(res, 403, quickPage(req, { db, auth }, 'not a mod', html`<p class="muted">${filters.mode} is mod-only. <a href="/modlog">view public audit</a>.</p>`));
+    }
   }
-  const modSubs = listSubsModeratedBy(db, currentHandle);
-  if (modSubs.length === 0) {
-    return send(res, 403, quickPage(req, { db, auth }, 'not a mod', html`<p class="muted">you don't moderate any subs.</p>`));
-  }
-  const filters = parseModlogFilters(searchParams, modSubs);
-  // Default-mode landing: open if anything is pending, else audit. Spec
-  // calls for inbox as the empty-pending fallback, but inbox is also
-  // empty when there are no events at all — audit gives "your prior
-  // actions" which is the more useful empty state. Only applied when
-  // the URL has no explicit ?mode= (so a clicked tab still wins).
-  if (!searchParams?.get('mode')) {
-    const pendingTotal = pendingFlagsAcrossSubs(db, modSubs).length;
+
+  // Default-mode landing for mods: open if anything is pending, else audit.
+  // Non-mods always default to audit. Only applied when the URL has no
+  // explicit ?mode= (so a clicked tab still wins).
+  if (!searchParams?.get('mode') && isMod) {
+    const pendingTotal = pendingFlagsAcrossSubs(db, myModSubs).length;
     if (pendingTotal > 0) filters.mode = 'open';
   }
-  // ?mod=me → resolve to current handle so the URL stays stable across
-  // sessions (the link a mod bookmarks won't break for a different mod).
+  // ?mod=me → resolve to current handle so a bookmarked link stays stable.
+  // For logged-out viewers it silently becomes no-filter (no actions match
+  // a null handle, which is the correct empty state).
   const modHandle = filters.mod === 'me' ? currentHandle : filters.mod;
-  const scopedSubs = filters.sub ? [filters.sub] : modSubs;
 
   if (filters.mode === 'open') {
+    const opSub = filters.sub && myModSubs.includes(filters.sub) ? filters.sub : null;
     return renderModlogOpen(res, {
-      currentHandle, db, postsDir, modSubs, scopedSubs, filters,
+      currentHandle, db, postsDir,
+      modSubs: myModSubs,
+      scopedSubs: opSub ? [opSub] : myModSubs,
+      filters: { ...filters, sub: opSub },
     });
   }
   if (filters.mode === 'inbox') {
+    const opSub = filters.sub && myModSubs.includes(filters.sub) ? filters.sub : null;
     return renderModlogInbox(res, {
-      currentHandle, db, modSubs, scopedSubs, filters, modHandle,
+      currentHandle, db,
+      modSubs: myModSubs,
+      scopedSubs: opSub ? [opSub] : myModSubs,
+      filters: { ...filters, sub: opSub }, modHandle,
     });
   }
+  // Audit: instance-wide. modSubs = allSubNames so the sub filter chip
+  // enumerates every sub. scopedSubs narrows to one when ?sub= is set.
   return renderModlogAudit(res, {
-    currentHandle, db, modSubs, scopedSubs, filters, modHandle,
+    currentHandle, db,
+    modSubs: allSubNames,
+    scopedSubs: filters.sub ? [filters.sub] : allSubNames,
+    filters, modHandle,
   });
 }
 
@@ -2803,20 +2926,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
         </tr>`)}</tbody>
       </table>`;
 
-  // Subs-i-mod strip under the heading. Each name is a filter toggle:
-  // click an unfiltered name to scope to it (?sub=<name>); click the
-  // currently-active one to drop the filter (back to all subs). Active
-  // sub renders in --accent-warm so the filter state is glanceable.
-  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
-    const isActive = filters.sub === s;
-    const href = modlogHref({
-      ...filters,
-      sub: isActive ? null : s,
-      page: null,
-    });
-    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
-    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
-  })}</p>`;
+  const subStrip = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
@@ -2991,12 +3101,7 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
         </details>`;
       })}</div>`;
 
-  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
-    const isActive = filters.sub === s;
-    const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
-    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
-    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
-  })}</p>`;
+  const subStrip = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
@@ -3109,12 +3214,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
         </tr>`)}</tbody>
       </table>`;
 
-  const subStrip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
-    const isActive = filters.sub === s;
-    const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
-    const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
-    return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
-  })}</p>`;
+  const subStrip = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
@@ -3127,6 +3227,40 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     ${rowsView}
     ${pager}
   `));
+}
+
+// Sub filter rendering. ≤ MODLOG_SUB_CHIP_LIMIT subs → inline chip strip
+// (current behavior). Above the limit the chip row would wrap into a wall
+// of names, so flip to a labelled <select> form. Default option "all"
+// (value="") drops the ?sub= param. Hidden inputs preserve the other
+// active filters when the form GETs back to /modlog. JS-on path
+// auto-submits on change; JS-off path uses the explicit filter button.
+const MODLOG_SUB_CHIP_LIMIT = 20;
+
+function subFilterControl(modSubs, filters) {
+  if (modSubs.length === 0) return html``;
+  if (modSubs.length <= MODLOG_SUB_CHIP_LIMIT) {
+    return html`<p class="mod-subs muted">${modSubs.map((s, i) => {
+      const isActive = filters.sub === s;
+      const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
+      const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
+      return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
+    })}</p>`;
+  }
+  const passthroughKeys = ['mode', 'date', 'type', 'mod', 'user'];
+  const hidden = passthroughKeys
+    .filter((k) => filters[k] != null && filters[k] !== '')
+    .map((k) => html`<input type="hidden" name="${k}" value="${filters[k]}">`);
+  return html`<form class="mod-subs-form muted" method="GET" action="/modlog">
+    ${hidden}
+    <label>sub:
+      <select name="sub" class="mod-subs-select" onchange="this.form.submit()">
+        <option value=""${filters.sub ? raw('') : raw(' selected')}>all (${modSubs.length})</option>
+        ${modSubs.map((s) => html`<option value="${s}"${filters.sub === s ? raw(' selected') : raw('')}>${s}</option>`)}
+      </select>
+    </label>
+    <button class="filter-btn" type="submit">filter</button>
+  </form>`;
 }
 
 function modlogModeBar(filters) {
@@ -3333,10 +3467,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
   // mark), the literal "plato" attribution in the footer, and the
   // project quote are LOCKED across forks.
   // See docs/01-product/build-plan.md §Locked.
-  branding.forumName = (brandingOverrides.forumName ?? 'plato').trim() || 'plato';
-  branding.tagline   = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
-  branding.hostedBy  = (brandingOverrides.hostedBy  ?? '').trim() || null;
-  branding.colors    = resolveBrandingColors(brandingOverrides.colors ?? {});
+  branding.forumName     = (brandingOverrides.forumName ?? 'plato').trim() || 'plato';
+  branding.tagline       = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
+  branding.hostedBy      = (brandingOverrides.hostedBy  ?? '').trim() || null;
+  branding.colors        = resolveBrandingColors(brandingOverrides.colors ?? {});
+  branding.feedbackEmail = resolveBrandingFeedbackEmail(brandingOverrides.feedbackEmail);
+  branding.rules         = resolveBrandingRules(brandingOverrides.rules);
   setUrlDisplayMax(resolveUrlDisplayMax(urlDisplayMax));
   FEED_PAGE_SIZE = resolveFeedPageSize(feedPageSize);
   // Resolve operator overrides against the floor at boot. Bad config
@@ -3366,6 +3502,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if (path === '/logout' && method === 'POST') return handleLogout(req, res, { db, auth });
 
       if (path === '/' && method === 'GET') return renderHome(req, res, { db, auth, postsDir }, url.searchParams);
+      if (path === '/about' && method === 'GET') return renderAbout(req, res, { db, auth });
       if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
         return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts });

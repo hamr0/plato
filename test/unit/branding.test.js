@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveBrandingColors } from '../../src/web/app.js';
+import {
+  resolveBrandingColors,
+  resolveBrandingFeedbackEmail,
+  resolveBrandingRules,
+} from '../../src/web/app.js';
 
 test('resolveBrandingColors: no overrides returns nulls', () => {
   const c = resolveBrandingColors({});
@@ -40,4 +44,79 @@ test('resolveBrandingColors: brace injection throws', () => {
 
 test('resolveBrandingColors: non-string throws', () => {
   assert.throws(() => resolveBrandingColors({ up: 123 }), /must be a string/);
+});
+
+// --- feedbackEmail ---
+
+test('resolveBrandingFeedbackEmail: null/empty returns null', () => {
+  assert.equal(resolveBrandingFeedbackEmail(null), null);
+  assert.equal(resolveBrandingFeedbackEmail(''), null);
+  assert.equal(resolveBrandingFeedbackEmail(undefined), null);
+});
+
+test('resolveBrandingFeedbackEmail: valid address accepted', () => {
+  assert.equal(resolveBrandingFeedbackEmail('hi@example.com'), 'hi@example.com');
+  assert.equal(resolveBrandingFeedbackEmail('  hi@x.test  '), 'hi@x.test');
+});
+
+test('resolveBrandingFeedbackEmail: bad shape throws', () => {
+  assert.throws(() => resolveBrandingFeedbackEmail('notanemail'), /valid email/);
+  assert.throws(() => resolveBrandingFeedbackEmail('a@b'), /valid email/);
+  assert.throws(() => resolveBrandingFeedbackEmail('a b@c.d'), /valid email/);
+});
+
+test('resolveBrandingFeedbackEmail: quote / CRLF / >120 chars throws', () => {
+  assert.throws(() => resolveBrandingFeedbackEmail('"quoted"@x.test'), /valid email/);
+  assert.throws(() => resolveBrandingFeedbackEmail(`a@${'x'.repeat(120)}.test`), /≤ 120 chars/);
+});
+
+test('resolveBrandingFeedbackEmail: non-string throws', () => {
+  assert.throws(() => resolveBrandingFeedbackEmail(42), /must be a string/);
+});
+
+// --- rules ---
+
+test('resolveBrandingRules: null/empty/undefined returns []', () => {
+  assert.deepEqual(resolveBrandingRules(null), []);
+  assert.deepEqual(resolveBrandingRules(''), []);
+  assert.deepEqual(resolveBrandingRules(undefined), []);
+  assert.deepEqual(resolveBrandingRules([]), []);
+});
+
+test('resolveBrandingRules: valid array accepted, trimmed', () => {
+  const r = resolveBrandingRules(['be civil', '  no spam  ', 'no doxxing']);
+  assert.deepEqual(r, ['be civil', 'no spam', 'no doxxing']);
+});
+
+test('resolveBrandingRules: more than 4 throws', () => {
+  assert.throws(() => resolveBrandingRules(['a', 'b', 'c', 'd', 'e']), /at most 4/);
+});
+
+test('resolveBrandingRules: non-array throws', () => {
+  assert.throws(() => resolveBrandingRules('a, b'), /must be an array/);
+});
+
+test('resolveBrandingRules: non-string entry throws', () => {
+  assert.throws(() => resolveBrandingRules(['ok', 5]), /must be a string/);
+});
+
+test('resolveBrandingRules: empty entry throws', () => {
+  assert.throws(() => resolveBrandingRules(['ok', '   ']), /is empty/);
+});
+
+test('resolveBrandingRules: newline in entry throws', () => {
+  assert.throws(() => resolveBrandingRules(['line one\nline two']), /must be one line/);
+});
+
+test('resolveBrandingRules: non-ASCII throws', () => {
+  assert.throws(() => resolveBrandingRules(['café']), /ASCII/);
+});
+
+test('resolveBrandingRules: URL throws (footer phishing vector)', () => {
+  assert.throws(() => resolveBrandingRules(['see https://evil.example for rules']), /URL/i);
+});
+
+test('resolveBrandingRules: joined > 240 chars throws', () => {
+  const r = ['x'.repeat(60), 'x'.repeat(60), 'x'.repeat(60), 'x'.repeat(60)];
+  assert.throws(() => resolveBrandingRules(r), /≤ 240/);
 });

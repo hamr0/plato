@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db/index.js';
 import { createAuth } from '../src/auth/index.js';
 import { loadDisposableDomains } from '../src/content/disposable-domain.js';
-import { createApp } from '../src/web/app.js';
+import { createApp, resolveBrandingRules } from '../src/web/app.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -28,8 +28,16 @@ const operatorConfig = existsSync(CONFIG_PATH)
   : {};
 
 const db = openDb(DB_PATH);
+
+// Resolve site rules once at boot so the same text feeds two surfaces:
+// (a) the /about page + footer-of-every-page links via createApp, and
+// (b) the magic-link email body footer via knowless. Single source of
+// truth — operators edit one config field, both surfaces stay in sync.
+const brandingRules = resolveBrandingRules(operatorConfig.branding?.rules);
+
 const auth = createAuth(process.env, {
   dbPath: process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db'),
+  bodyFooter: brandingRules.length > 0 ? brandingRules.join('\n') : undefined,
 });
 const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
 

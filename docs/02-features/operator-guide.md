@@ -120,6 +120,31 @@ If `email` is missing, cron jobs print to stderr (cron's default mailer or `jour
 
 **Weekly stats digest.** `bin/stats.js` (daily snapshot → `data/stats.log`) + `bin/stats-weekly.js` (Mon 06:00 UTC digest → operator email). Counters: users (`knowless.db.handles` row count — anyone who's ever requested a magic link), subs, posts, comments (the latter two excluding `removed_at`). Digest is a fixed-width 4-week table with WoW deltas; `--dry-run` prints to stdout for local testing. See [`cron-jobs.md`](cron-jobs.md).
 
+**Feedback email (`branding.feedbackEmail`).** Optional. When set, the footer of every page shows `feedback · about · modlog`; when unset, just `about · modlog`. Renders as a `mailto:` link. Boot-time validation: ASCII, valid email shape, ≤120 chars, no quotes/CRLF.
+
+```jsonc
+{ "branding": { "feedbackEmail": "you@example.com" } }
+```
+
+**Site rules (`branding.rules`).** Optional array of up to 4 short strings (joined ≤240 chars, ASCII, no URLs). Rendered as a list on `/about` AND injected into the magic-link email signature so users see the same text in the medium they actually read. Single source of truth — edit one config field, both surfaces stay in sync. URL ban is a phishing-vector defense; the same constraints come from knowless's `validateBodyFooter`.
+
+```jsonc
+{
+  "branding": {
+    "rules": [
+      "be civil",
+      "no spam, scams, or doxxing",
+      "no porn",
+      "mods can remove; votes can reverse soft removes"
+    ]
+  }
+}
+```
+
+When unset: no rules section on `/about`, no signature on the magic-link email. Bad shape (too many entries, non-ASCII, contains a URL, joined length over 240) throws at boot.
+
+**`/about` page.** Auto-generated. Renders the operator-supplied prelude (forum name + hosted-by + optional feedback line + optional rules) followed by project-baked sections that aren't operator-edited: a data-handling paragraph (what plato stores and doesn't), and a fork-escape paragraph. The baked sections are uniform across forks by design — the public-honesty contract isn't operator-tunable. Replaces "privacy policy" / "terms of service" boilerplate with text that's actually true of plato.
+
 **Reserved sub names.** Add to `RESERVED_SUB_NAMES` in `src/content/sub.js` if your fork adds a new top-level URL (e.g., `/shop`) that you don't want a sub to collide with.
 
 ### Tier 2: Hardcoded constant, restart, requires a deliberate decision
