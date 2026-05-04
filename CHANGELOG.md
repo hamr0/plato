@@ -6,6 +6,53 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M6/B5: inline subscribe form on `/subs` directory
+
+New per-row column on `/subs` with an inline `subscribe`/`unsubscribe` text-link button (logged-in users only). Reuses the existing POST `/sub/<name>/subscribe` endpoint and the same `.subscribe-form` / `.subscribe-btn` styling as the sub-page header button — the directory becomes a one-screen subscription manager: browse, follow, no need to click into each sub. Hidden for anonymous (same precedent as the chip strip + sub-page header button).
+
+### Added — M6/B4: per-sub Atom feed at `/sub/<name>/rss`
+
+Atom 1.0 feed of the latest 50 posts in the sub, newest-first. **Excludes both hard-removed and soft-collapsed posts** — RSS bridges plato to readers in feed shape, not in drama shape; feed readers have no "this is collapsed" affordance, so a soft-collapsed entry would land too loud. Title + author pseudonym (not raw handle) + body excerpt (≤600 chars, same shape as the modlog target preview). Headers: `Content-Type: application/atom+xml; charset=utf-8`, `Cache-Control: public, max-age=300`. The sub HTML page advertises the feed via `<link rel="alternate" type="application/atom+xml">` (autodiscovery for reader extensions) plus a visible `rss` text link in the action row. 404 for missing subs. PRD §M6 → per-sub RSS feeds.
+
+### Added — M6/B3: home-feed `subscribed | all` toggle
+
+Replaces the placeholder chip pair on the home top-nav. `?feed=subscribed` filters both the posts and comments tabs to authored content from subs the user follows. Chip pair renders for logged-in users only (anonymous + `?feed=subscribed` is normalized to `all` so chip URLs don't carry sticky filters anonymous can't even see). Logged-in user with zero subscriptions sees an empty-state pointing at `/subs` instead of "no posts." `listPostsAcrossSubs` and `listRecentCommentsAcrossSubs` gained an optional `subNames` parameter (null = no restriction; [] = no rows, query short-circuited).
+
+### Added — M6/B2: sub subscriptions
+
+Migration 014 added `subscriptions(user_handle, sub_name, created_at)` with composite PK + index on `sub_name`. Inline subscribe/unsubscribe button in the sub-page header (logged-in only); POST `/sub/<name>/subscribe` is idempotent (form `action=subscribe|unsubscribe`, missing action toggles current state). `/subs?filter=mine` filters the directory to subscribed subs (anonymous silently falls back to `all`); the previously placeholder subscribers column now shows real counts. Subscriber identities are never exposed publicly — only aggregate counts. Disallowed in `robots.txt` (`Disallow: /sub/*/subscribe`). Per PRD §Front Page → Sub subscription mechanics: private (no public follower lists), exportable (M7 archive), no notifications by default — every later M6 surface (digest, ntfy, RSS preferences) keys off these rows.
+
+### Added — M5/B16: `[new]` tag in `/modlog?mode=open` for fresh-account authors and flaggers
+
+Triaging the mod queue is faster when mods can see at-a-glance whether the actor (target author or any flagger) is brand-new. The same 7-day window `vote.js` uses for half-weight + comment-vote block now drives a muted `[new]` chip rendered next to fresh-account pseudonyms. New `newAccountHandles(db, handles, now)` batch helper in `vote.js` returns a `Set` so one indexed query covers every handle on the page. Highest-signal use: a brigade of fresh accounts converging on the same target reads as `[new] · [new] · [new]` in the breakdown line.
+
+### Changed — Flairs: server-validator cap 12 → 6, color-validator allowlist hex-only
+
+Two stale-state cleanups in `src/content/flair.js`, both now matching what the editor actually emits:
+
+- `MAX_FLAIRS_PER_SUB`: **12 → 6**. The form has rendered 6 rows since M5/B9 simplified the editor; the validator never tightened to match. No UI path reached values 7–12, so nothing is lost — the constant just stops lying. Drops three doc caveats about "legacy headroom."
+- Color validator: replaced the `;{}<>"'` blocklist with allowlist `^#[0-9a-f]{6}$`. The 8 preset swatches and the free-form `<input type="color">` both emit `#rrggbb`, so an allowlist matches what the form can send and removes the inline-style XSS surface that `rgb()` / named / CSS-keyword colors carried (a CSS parser has more side doors than a five-char blocklist; allowlist is simpler and tighter). Error message clarified: "must be a 6-digit hex like `#3b82f6`."
+
+Pre-v1, no migration shim: existing flair JSON in any DB that uses `rgb()` / named / short-hex would now fail validation on edit (per CLAUDE.md "don't add backwards-compat shims for code that isn't shipped yet"). Operators with pre-existing non-hex flairs re-pick from the swatches once.
+
+### Changed — PRD: lock cross-instance identity non-portability
+
+Identity does not travel across plato instances; history does. New instance = new pseudonym derived under the new master secret; archived posts and comments carry their origin-instance pseudonym strings as static attribution labels. **No "claim my old handle" flow, no email→pseudonym mapping in the archive, no magic-link reclaim**, all now explicit and rejected with rationale.
+
+Three PRD edits: (a) §Identity Model → Forking / moving instances rewritten away from the prior "claim old pseudonym" path; (b) §Permanently out gains an explicit "Cross-instance identity portability" bullet naming each rejected mechanism (the privacy property: per-instance HMAC keeps email from being a cross-forum tracking key; the social property: "leaving is a fresh start" stays honest); (c) §Federation (Future) drops the contradicting "identity is portable via Ed25519 pubkey" sketch — the lock holds in a federated world too. Side effect: M7 export format simplifies (no email→pseudonym mapping, no claim ceremony).
+
+### Changed — `/about` opening line: "questions or feedback" link replaces bare email; merged onto hosted-by line
+
+Same pattern as the recent plato-repo link (`768250f`): the address sits behind the link text rather than being printed in plain. Also folds the feedback line into the hosted-by paragraph so the about page opens with one sentence, not two:
+
+`this is a <forumName> instance, hosted by <hostedBy>. questions or feedback.`
+
+### Docs — Config surface map + fix stale `hostedBy` / `feedbackEmail` paragraphs
+
+Operator-guide gains a single "Config surface map" table at the top of Tier 1 enumerating every `config.json` key (branding.\*, urlDisplayMax, feedPageSize, operator.\*) and every place it reflects — UI surfaces, magic-link emails, cron-job recipients. Closing line names the two `/about` paragraphs that are deliberately NOT operator-tunable so the fork-vs-config boundary is visible in one place.
+
+Patched two stale paragraphs that pre-dated the about-page rewrite: `branding.hostedBy` now names both surfaces (footer + `/about` opening, with the `@<forumName>` fallback rule); `branding.feedbackEmail` now names both surfaces (footer + `/about` link) and notes both are `mailto:` with the address hidden behind link text. `plato.context.md` recipe rows for forumName/tagline/hostedBy and feedbackEmail enumerate every reflection surface and point at the new operator-guide table.
+
 ### Added — Privacy-led SEO (head meta, OpenGraph, robots.txt, sitemap.xml)
 
 Implements [`docs/04-process/privacy-seo.md`](docs/04-process/privacy-seo.md) for plato. Tier 1 declarative head tags + Tier 2 static-files-at-root, no analytics, no tracking. The privacy posture is what self-selects the right audience in search snippets.
