@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — Modlog filter-bar layout + non-mod chip state
+
+- **Sub `<select>` now renders inline with the filter chips** (next to `date · type · my decisions`), not on its own row above the table. `subFilterControl()` returns `{ inline, strip }`; the >20-subs branch hands `inline` to `modlogFilterBar` and skips the strip, the ≤20 branch leaves `inline` null and renders the chip strip as a separate `<p>` below the bar (chips would wrap awkwardly inline).
+- **`modlogFilterBar` container changed from `<p>` to `<div>`** so the inline `<form>` is valid HTML — `<form>` inside `<p>` auto-closes the paragraph at parse time. `.modlog-filters` was already `display: flex`; nothing visual changes for the small-N path.
+- **"my decisions" filter chip is disabled for non-mods** (logged-out OR logged-in without any moderated subs). Renders as a `<span class="filter-btn filter-btn-disabled">` with `title="mod-only: you have no actions to filter"` instead of a clickable `<a>`. Existing `.filter-btn-disabled` style (opacity 0.35, no pointer events) reused. `isMod` threaded through `renderMyModLog → renderModlogAudit`; `open`/`inbox` renderers always pass `true` since those modes are mod-gated upstream.
+
 ### Added — Public modlog, /about page, footer module, operator-supplied rules
 
 - **`/modlog` is now public.** Logged-out and non-mod visitors get the instance-wide audit view (every mod action across every sub, newest-first, paginated, fully filterable). The "public modlog" pitch is now actually visible from the footer of every page rather than gated behind a mod login. `mode=open` and `mode=inbox` stay mod-only (those are the pending-queue + inbox views). When `?sub=` is set in `mode=open`/`inbox`, plato re-clamps to subs the viewer moderates so a mod can't peek at another sub's queue via URL editing.

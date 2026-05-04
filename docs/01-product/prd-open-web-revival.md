@@ -315,7 +315,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 12. Ban evasion correlation | deferred | post-v1; needs IP /24 grouping infrastructure |
 | 13. No DMs in v1 | locked | DM is permanently out |
 | 14. No media hosting | locked | text-only is permanent |
-| 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` for mods; M5/B6 surfaces system auto-actions as `system`-attributed audit rows |
+| 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` (now **public** for the audit mode — instance-wide, no login required, linked from the footer of every page; `mode=open` and `mode=inbox` stay mod-only); M5/B6 surfaces system auto-actions as `system`-attributed audit rows |
 
 ### Build status (M5 per-sub structure)
 
