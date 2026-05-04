@@ -56,7 +56,7 @@ import { loadSpamPatterns, matchSpamPatterns, applySpamMatches, SYSTEM_HANDLE } 
 import { checkLinkCap, resolveLinkCapConfig } from '../content/linkCap.js';
 import { loadUrlhausCache, matchUrlhaus, applyUrlhausMatches } from '../content/urlhaus.js';
 import {
-  recordNotification, unreadCount, listNotifications,
+  recordNotification, unreadCount, listNotifications, listActivityForHandle,
   markNotificationRead, markAllNotificationsRead, pruneOldNotifications,
   NOTIFICATION_KINDS,
 } from '../content/notification.js';
@@ -92,7 +92,7 @@ function layout(title, body) {
 <title>${title}</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=20">
+<link rel="stylesheet" href="/static/style.css?v=24">
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -2188,15 +2188,20 @@ const MEMLOG_KIND_FILTERS = [
   { slug: 'mod-actions', kinds: ['mod_action'],        label: 'mod actions' },
 ];
 
+const MEMLOG_MODES = ['notifications', 'activity', 'all'];
+
 function memlogParseFilters(searchParams) {
+  const modeParam = searchParams?.get('mode');
+  const mode = MEMLOG_MODES.includes(modeParam) ? modeParam : 'notifications';
   const show = searchParams?.get('show') === 'all' ? 'all' : 'unread';
   const kindParam = searchParams?.get('kind') || 'all';
   const matched = MEMLOG_KIND_FILTERS.find((f) => f.slug === kindParam);
-  return { show, kindSlug: matched ? matched.slug : 'all', kinds: matched ? matched.kinds : null };
+  return { mode, show, kindSlug: matched ? matched.slug : 'all', kinds: matched ? matched.kinds : null };
 }
 
-function memlogHref({ show, kindSlug }) {
+function memlogHref({ mode, show, kindSlug }) {
   const params = new URLSearchParams();
+  if (mode && mode !== 'notifications') params.set('mode', mode);
   if (show !== 'unread') params.set('show', show);
   if (kindSlug !== 'all') params.set('kind', kindSlug);
   const qs = params.toString();
@@ -2228,6 +2233,8 @@ const MEMLOG_KIND_LABELS = {
   comment_on_post:  'comment on post',
   reply_to_comment: 'reply',
   mod_action:       'mod action',
+  my_post:          'my post',
+  my_comment:       'my comment',
 };
 
 function renderMemlog(req, res, { db, auth }, searchParams) {
@@ -2237,16 +2244,31 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   }
   pruneOldNotifications(db);
   const filters = memlogParseFilters(searchParams);
-  const rows = listNotifications(db, handle, { show: filters.show, kinds: filters.kinds, limit: 200 });
+  // Pull the rows for the active mode. notifications = received-events
+  // table; activity = my-authored posts + comments; all = both merged
+  // by created_at desc. Kind/show filters apply only to notifications;
+  // for activity they're hidden (no read-state, no kind subfilter yet).
+  let rows = [];
+  if (filters.mode === 'notifications') {
+    rows = listNotifications(db, handle, { show: filters.show, kinds: filters.kinds, limit: 200 });
+  } else if (filters.mode === 'activity') {
+    rows = listActivityForHandle(db, handle, { limit: 200 });
+  } else {
+    const notifs = listNotifications(db, handle, { show: 'all', limit: 200 });
+    const activity = listActivityForHandle(db, handle, { limit: 200 });
+    rows = [...notifs, ...activity].sort((a, b) => b.created_at - a.created_at).slice(0, 200);
+  }
   const actorHandles = [...new Set(rows.map((r) => r.actor_handle).filter(Boolean))];
   const pseudonyms = pseudonymsByHandle(db, actorHandles);
-  const filterLink = (slug, label, activeMatch) => {
+  const modeLink = (slug, label) => {
+    const isActive = filters.mode === slug;
+    const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    return html`<a class="${cls}" href="${memlogHref({ ...filters, mode: slug, kindSlug: 'all', show: 'unread' })}">${label}</a>`;
+  };
+  const filterLink = (slug, label) => {
     const isActive = (slug === 'all' && filters.kindSlug === 'all') || filters.kindSlug === slug;
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
-    const next = slug === 'all'
-      ? memlogHref({ ...filters, kindSlug: 'all' })
-      : memlogHref({ ...filters, kindSlug: slug });
-    return html`<a class="${cls}" href="${next}">${label}</a>`;
+    return html`<a class="${cls}" href="${memlogHref({ ...filters, kindSlug: slug })}">${label}</a>`;
   };
   const showLink = (val, label) => {
     const isActive = filters.show === val;
@@ -2258,28 +2280,48 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     <input type="hidden" name="return_to" value="${memlogHref(filters)}">
     <button class="filter-btn" title="mark all visible as read">mark all read</button>
   </form>`;
+  // show/kind/mark-read only meaningful for notification rows. Hide them
+  // when the active mode is activity (own posts/comments aren't unread,
+  // and the notification kind axis doesn't apply).
+  const showsNotificationFilters = filters.mode !== 'activity';
   const filterBar = html`<div class="modlog-filters muted">
-    show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
-    <span class="filter-sep">·</span>
-    kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
-    <span class="filter-sep">·</span>
-    ${markAllForm}
+    mode: ${modeLink('notifications', 'notifications')} ${modeLink('activity', 'activity')} ${modeLink('all', 'all')}
+    ${showsNotificationFilters ? html`
+      <span class="filter-sep">·</span>
+      show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
+      <span class="filter-sep">·</span>
+      kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
+      <span class="filter-sep">·</span>
+      ${markAllForm}
+    ` : html``}
   </div>`;
+  const emptyText = filters.mode === 'activity'
+    ? 'no posts or comments yet.'
+    : filters.mode === 'all'
+      ? 'nothing in your memlog yet.'
+      : (filters.show === 'unread' ? 'no unread notifications.' : 'nothing in your memlog yet.');
   const body = rows.length === 0
-    ? html`<p class="muted">${filters.show === 'unread' ? 'no unread notifications.' : 'nothing in your memlog yet.'}</p>`
+    ? html`<p class="muted">${emptyText}</p>`
     : html`<table class="modlog">
-        <thead><tr><th>when</th><th>kind</th><th>from</th><th>where</th><th>snippet</th></tr></thead>
+        <thead><tr><th>type</th><th>when</th><th>kind</th><th>from</th><th>where</th><th>snippet</th></tr></thead>
         <tbody>${rows.map((n) => {
           const link = memlogTargetLink(db, n);
           const ago = relativeTime(n.created_at);
-          const fromName = n.actor_handle ? (pseudonyms.get(n.actor_handle) ?? n.actor_handle.slice(0, 8)) : 'system';
+          const isActivity = n.kind === 'my_post' || n.kind === 'my_comment';
+          const typeLabel = isActivity ? 'actv' : 'ntfy';
+          const fromName = isActivity ? '—' : (n.actor_handle ? (pseudonyms.get(n.actor_handle) ?? n.actor_handle.slice(0, 8)) : 'system');
           const where = n.sub_name ? html`<a class="sub-link sub-${subColorIndex(n.sub_name)}" href="/sub/${n.sub_name}">//${n.sub_name}</a>` : html`—`;
           const snippet = n.snippet ?? '';
           const rowCls = n.read_at ? 'memlog-row-read' : '';
-          const whenCell = link
-            ? html`<a href="/memlog/go/${n.id}" title="open">${ago}</a>`
-            : html`<span class="muted">${ago}</span>`;
+          // Activity rows have post/comment ids, not notification ids —
+          // route directly via memlogTargetLink, no read-state to mark.
+          const whenCell = !link
+            ? html`<span class="muted">${ago}</span>`
+            : isActivity
+              ? html`<a href="${link}" title="open">${ago}</a>`
+              : html`<a href="/memlog/go/${n.id}" title="open">${ago}</a>`;
           return html`<tr class="${rowCls}">
+            <td class="muted">${typeLabel}</td>
             <td>${whenCell}</td>
             <td class="muted">${MEMLOG_KIND_LABELS[n.kind] ?? n.kind}</td>
             <td class="muted">${fromName}</td>
@@ -2288,12 +2330,20 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
           </tr>`;
         })}</tbody>
       </table>`;
+  const intro = filters.mode === 'activity'
+    ? 'showing posts and comments you authored. removed content is excluded — for that, see the public modlog of the relevant sub.'
+    : filters.mode === 'all'
+      ? 'one stream: notifications received + posts and comments authored, newest first. read state and kind filters apply only to notifications.'
+      : 'showing notifications: comments and replies you received, plus mod actions on your content. read items stay visible for 90 days.';
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
-    <p><a href="/">← home</a></p>
-    <h2>// memlog</h2>
-    <p class="muted">your private notification log. comments and replies you received, plus mod actions on your content. read items stay visible for 90 days.</p>
-    ${filterBar}
-    ${body}
+    <div class="memlog-page">
+      <p><a href="/">← home</a></p>
+      <h2>// memlog</h2>
+      <p class="muted">your private personal log — everything you do on this instance and everything done in response. one place, filtered by mode.</p>
+      <p class="muted">${intro}</p>
+      ${filterBar}
+      ${body}
+    </div>
   `));
 }
 
@@ -2411,6 +2461,9 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
   const modCell = (a) => {
     if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, modParam);
+    }
+    if (a.mod_handle == null) {
+      return html`<em class="muted">community</em>`;
     }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
     return filterToggle('mod', a.mod_handle, label, modParam);
@@ -2696,6 +2749,13 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
     }
+    // Auto-uncollapse-community rows store mod_handle = NULL — the
+    // event isn't a moderator decision, it's the community threshold
+    // firing. Surface that distinctly so a viewer doesn't read the
+    // empty cell as a missing mod.
+    if (a.mod_handle == null) {
+      return html`<em class="muted">community</em>`;
+    }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
     return filterToggle('mod', a.mod_handle, label, filters.mod);
   };
@@ -2758,7 +2818,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
+  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -2938,7 +2998,7 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
+  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
@@ -3007,6 +3067,13 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     if (a.mod_handle === SYSTEM_HANDLE) {
       return filterToggle('mod', 'system', html`<em>system</em>`, filters.mod);
     }
+    // Auto-uncollapse-community rows store mod_handle = NULL — the
+    // event isn't a moderator decision, it's the community threshold
+    // firing. Surface that distinctly so a viewer doesn't read the
+    // empty cell as a missing mod.
+    if (a.mod_handle == null) {
+      return html`<em class="muted">community</em>`;
+    }
     const label = pseudonyms.get(a.mod_handle) ?? a.mod_handle.slice(0, 8);
     return filterToggle('mod', a.mod_handle, label, filters.mod);
   };
@@ -3049,7 +3116,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
   })}</p>`;
 
-  send(res, 200, pageView({ db, currentHandle, title: '/modlog' }, html`
+  send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}

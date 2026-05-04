@@ -842,6 +842,30 @@ button:hover { filter: brightness(1.1); }
  * page so other pages aren't affected. */
 body:has(.composer-bar) { padding-bottom: 5rem; }
 
+/* Memlog stays at the standard plato column width. The table makes
+ * the early columns nowrap-tight so the snippet column absorbs the
+ * leftover space and truncates with ellipsis instead of wrapping the
+ * row onto a second line. */
+.memlog-page table.modlog { table-layout: fixed; }
+.memlog-page table.modlog th,
+.memlog-page table.modlog td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.memlog-page table.modlog th:nth-child(1),
+.memlog-page table.modlog td:nth-child(1) { width: 4rem; }   /* type */
+.memlog-page table.modlog th:nth-child(2),
+.memlog-page table.modlog td:nth-child(2) { width: 5rem; }   /* when */
+.memlog-page table.modlog th:nth-child(3),
+.memlog-page table.modlog td:nth-child(3) { width: 7rem; }   /* kind */
+.memlog-page table.modlog th:nth-child(4),
+.memlog-page table.modlog td:nth-child(4) { width: 7rem; }   /* from */
+.memlog-page table.modlog th:nth-child(5),
+.memlog-page table.modlog td:nth-child(5) { width: 8rem; }   /* where */
+.memlog-page table.modlog th:nth-child(6),
+.memlog-page table.modlog td:nth-child(6) { width: auto; }   /* snippet — absorbs the rest */
+
 .comment-header {
   display: flex;
   align-items: center;
@@ -1169,3 +1193,76 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
 .comment-tree { margin-top: 0.4rem; }
 .comment { padding: 0.4rem 0; }
 .replies { margin-top: 0.2rem; }
+
+/* ============================================================
+ * Mobile responsive (≤640px)
+ *
+ * Plato's default chrome is sized for ~880px desktops. On narrow
+ * viewports two things hurt: the header (brand + status) overlaps
+ * because flex-row doesn't wrap, and wide tables (memlog, modlog,
+ * subs) overflow horizontally and scroll the whole page sideways.
+ *
+ * This block targets both with minimal layout surgery: header
+ * wraps, body padding tightens, and content-bearing tables drop
+ * non-critical columns so the row fits in one line within the
+ * viewport. No page-level horizontal scroll under any normal
+ * device width.
+ * ============================================================ */
+@media (max-width: 640px) {
+  body { padding: 1rem 0.6rem 3rem; }
+
+  /* Header: brand + status stack instead of overlap. */
+  header.site { flex-wrap: wrap; gap: 0.4rem; }
+  .status { flex-wrap: wrap; row-gap: 0.3rem; }
+
+  /* Filter chip rows wrap onto multiple lines when they overflow. */
+  .modlog-filters,
+  .modlog-modes { flex-wrap: wrap; row-gap: 0.3rem; }
+
+  /* Memlog table: hide from + where columns at narrow widths so
+   * type/when/kind/snippet still fit one row per line. The where
+   * column is the only navigational loss; the snippet itself is
+   * already a link to the same target. */
+  .memlog-page table.modlog th:nth-child(4),
+  .memlog-page table.modlog td:nth-child(4),
+  .memlog-page table.modlog th:nth-child(5),
+  .memlog-page table.modlog td:nth-child(5) { display: none; }
+  .memlog-page table.modlog th:nth-child(1),
+  .memlog-page table.modlog td:nth-child(1) { width: 3.2rem; }
+  .memlog-page table.modlog th:nth-child(2),
+  .memlog-page table.modlog td:nth-child(2) { width: 4rem; }
+  .memlog-page table.modlog th:nth-child(3),
+  .memlog-page table.modlog td:nth-child(3) { width: 5rem; }
+  .memlog-page table.modlog th:nth-child(6),
+  .memlog-page table.modlog td:nth-child(6) { width: auto; }
+
+  /* Generic narrow-viewport safety: any wide table not specially
+   * handled scrolls within its own block instead of spilling the
+   * whole page sideways. Containers using table.modlog elsewhere
+   * (mod /modlog, subs index) get this fallback. */
+  table.modlog { display: block; overflow-x: auto; }
+  .memlog-page table.modlog { display: table; overflow: visible; }
+
+  /* Subs index: drop description, subscribers (placeholder anyway),
+   * and owner columns. Keeps sub link, post count, and last-active
+   * — the navigational essentials. */
+  table.communities th:nth-child(2),
+  table.communities td:nth-child(2),
+  table.communities th:nth-child(4),
+  table.communities td:nth-child(4),
+  table.communities th:nth-child(6),
+  table.communities td:nth-child(6) { display: none; }
+  table.communities { table-layout: auto; width: 100%; }
+  table.communities th, table.communities td {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* Forms: inputs stretch to viewport rather than overflowing. */
+  input[type="text"], input[type="email"], input[type="number"],
+  input[type="url"], textarea, select { max-width: 100%; }
+
+  /* Login popover: anchor to viewport edge so it doesn't push off
+   * screen on the narrowest phones. */
+  .login-form { right: 0.4rem; min-width: 14rem; }
+  .login-form input[type="email"] { min-width: 0; }
+}

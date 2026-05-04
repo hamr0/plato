@@ -6,6 +6,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — Memlog activity unification
+
+- **Memlog gains a top-level `mode:` axis** — `notifications` (default, prior behavior), `activity` (your authored posts + comments, removed content excluded), `all` (both streams merged by created_at desc, capped 200 rows). Mirrors the modlog mode pattern (`open / inbox / audit`) so memlog is one surface for everything personal: things done *to* the user, things done *by* the user. New `listActivityForHandle()` in `src/content/notification.js` returns posts + comments shaped to match the notification row contract; renderer slots them into the same table.
+- **First column `type`** with values `ntfy` (notification rows) / `actv` (activity rows). At-a-glance discriminator, especially in `all` mode where rows are mixed.
+- **Show / kind / mark-all-read chips hidden in activity mode** — own posts aren't unread, and the notification kind axis (comments/replies/mod actions) doesn't apply to authored content.
+- **Page header rewritten** to position memlog as a unified personal log; mode-specific second line tells the user what they're looking at.
+- **Activity-row navigation** routes directly via `memlogTargetLink` (no /memlog/go redirect — there's no read-state to mark on your own content).
+
+### Fixed — `/modlog` 500 on `auto_uncollapse_community` rows
+
+- **`modCell` rendering crashed on `mod_handle = NULL`** — the auto-uncollapse-community insert (`src/content/vote.js:140`) writes NULL by design (the event isn't a moderator decision, it's the community threshold firing), but all three modlog renderers (`renderModlogAudit`, `renderModlogInbox`, public per-sub `renderModLog`) called `mod_handle.slice(0, 8)` unconditionally. Now NULL renders as italic-muted `community` so the row distinguishes itself from a system-handle action without crashing the page.
+
+### Changed — Mobile responsive layout pass
+
+- **Mobile breakpoint at ≤640px** added as a single `@media` block at the bottom of `style.css`. Targets the three actual pain points: header overlap, table overflow, full-page horizontal scroll.
+- **Header (brand + status)** now flex-wraps so it stacks instead of overlapping on phones.
+- **Memlog table** drops `from` and `where` columns on narrow viewports; remaining `type/when/kind/snippet` fit one line per row.
+- **Subs index table** drops `description`, `subscribers` (placeholder anyway), and `owner` columns; keeps `sub / posts / active` — the navigational essentials.
+- **Wide tables generally** (audit modlog, inbox) get `overflow-x: auto` *within their own block*, so any residual horizontal scroll is contained inside the table, never the full page.
+- **Filter chip rows** wrap to multiple lines instead of overflowing.
+- **Form inputs** capped at 100% width; **login popover** anchored to viewport edge with adjusted min-width.
+
+### Changed — `/modlog` page title
+
+- **Top banner reads `modlog`** instead of `/modlog`. The leading slash conflated URL syntax with display; banner is now consistent with `// modlog` body H2 (the `//` is plato's section marker, kept on the H2; the H1 / browser tab title gets the clean form).
+
 ### Fixed — Sham/expired-token redirect leak
 
 - **Anti-enumeration silent-miss now extends to the link-click stage.** Knowless's POST `/login` flow takes pains to make valid/invalid/rate-limited responses indistinguishable, but `failureRedirect` defaulted to `loginPath` (`/login`) — meaning a user clicking a sham/expired/used token landed on a "Sign in" page that telegraphed the failure. Plato now passes `failureRedirect: '/'` to knowless (`src/auth/index.js`); rejected clicks now land on home, looking identical to any logged-out visit. The home page reveals nothing about whether a login attempt occurred.

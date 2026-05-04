@@ -103,6 +103,42 @@ export function markAllNotificationsRead(db, recipientHandle, { kinds } = {}, no
   ).run(now, ...params).changes;
 }
 
+// Activity stream: posts and comments authored by the handle, shaped to
+// match the notification row contract so the memlog renderer can slot
+// them into the same table. `id` is the post/comment id (not a
+// notification id); the renderer links to memlogTargetLink directly
+// rather than routing through /memlog/go (no read-state to mark).
+//
+// Removed targets are excluded — the user's own removed content stays
+// in the public modlog as the audit trail; their personal activity
+// view shows only live content. Same for hard-removed comments.
+export function listActivityForHandle(db, handle, { kinds = ['post', 'comment'], limit = 100, offset = 0 } = {}) {
+  if (!handle) return [];
+  const parts = [];
+  const params = [];
+  if (kinds.includes('post')) {
+    parts.push(
+      `SELECT id, 'my_post' AS kind, sub_name, 'post' AS target_type, id AS target_id,
+              NULL AS actor_handle, substr(title, 1, 120) AS snippet, created_at, NULL AS read_at
+       FROM posts WHERE handle = ? AND removed_at IS NULL`
+    );
+    params.push(handle);
+  }
+  if (kinds.includes('comment')) {
+    parts.push(
+      `SELECT c.id AS id, 'my_comment' AS kind, p.sub_name AS sub_name, 'comment' AS target_type,
+              c.id AS target_id, NULL AS actor_handle, substr(c.body, 1, 120) AS snippet,
+              c.created_at AS created_at, NULL AS read_at
+       FROM comments c JOIN posts p ON p.id = c.post_id
+       WHERE c.handle = ? AND c.removed_at IS NULL`
+    );
+    params.push(handle);
+  }
+  if (parts.length === 0) return [];
+  const sql = `SELECT * FROM (${parts.join(' UNION ALL ')}) ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+  return db.prepare(sql).all(...params, limit, offset);
+}
+
 // Lazy prune: drop rows older than the retention window regardless of
 // read state. If a notification has sat for >90d the moment has passed.
 export function pruneOldNotifications(db, now = Date.now(), retentionMs = NOTIFICATION_RETENTION_MS) {
