@@ -61,14 +61,14 @@ function seedAuthor(db, handle, pseudonym = handle.slice(0, 6)) {
   db.prepare('INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, pseudonym, Date.now() - 30 * 24 * 60 * 60 * 1000);
 }
-function seedPost(db, postsDir, { sub, handle, title, body = 'hello world', removed = false }) {
+function seedPost(db, postsDir, { sub, handle, title, body = 'hello world', removed = false, collapsed = false }) {
   const id = randomBytes(8).toString('hex');
   const file = `posts/${id}.md`;
   mkdirSync(join(postsDir, 'posts'), { recursive: true });
   writeFileSync(join(postsDir, file), `---\ntitle: ${title}\nhandle: ${handle}\n---\n\n${body}\n`);
-  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, removed_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, sub, handle, title, file, Date.now(), removed ? Date.now() : null);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, removed_at, collapsed_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, sub, handle, title, file, Date.now(), removed ? Date.now() : null, collapsed ? Date.now() : null);
   return id;
 }
 
@@ -91,30 +91,31 @@ test('GET /sub/<name>/rss: 200 with empty feed when no posts', async (t) => {
   assert.doesNotMatch(body, /<entry>/);
 });
 
-test('GET /sub/<name>/rss: lists non-removed posts in newest-first order', async (t) => {
+test('GET /sub/<name>/rss: lists non-removed, non-collapsed posts in newest-first order', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, postsDir } = ctx;
   seedSub(db, 'lobby');
   const author = 'a'.repeat(64);
   seedAuthor(db, author, 'al-pseudo');
-  const oldest = seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'oldest-post' });
-  // Bump created_at on the second insertion via raw SQL so the order
-  // is deterministic without sleeping.
-  const middleId = seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'middle-post' });
-  const newest   = seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'newest-post' });
-  const removed  = seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'REMOVED-MARK', removed: true });
-  void oldest; void middleId; void newest; void removed;
-  // Re-stamp so newest > middle > oldest > removed regardless of clock.
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'oldest-post' });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'middle-post' });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'newest-post' });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'REMOVED-MARK', removed: true });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'COLLAPSED-MARK', collapsed: true });
+  // Re-stamp so order is deterministic.
   db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(1000, 'oldest-post');
   db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(2000, 'middle-post');
   db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(3000, 'newest-post');
   db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(4000, 'REMOVED-MARK');
+  db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(5000, 'COLLAPSED-MARK');
 
   const res = await fetch(ctx.baseUrl + '/sub/lobby/rss');
   const body = await res.text();
-  // Removed post excluded.
+  // Hard-removed AND soft-collapsed both excluded — RSS bridges plato
+  // to readers in feed shape, not in drama shape.
   assert.doesNotMatch(body, /REMOVED-MARK/);
-  // Newest first.
+  assert.doesNotMatch(body, /COLLAPSED-MARK/);
+  // Newest first among the surviving entries.
   const newestPos = body.indexOf('newest-post');
   const middlePos = body.indexOf('middle-post');
   const oldestPos = body.indexOf('oldest-post');

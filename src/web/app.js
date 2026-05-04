@@ -1141,6 +1141,11 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const ownerHandles = [...new Set(subs.map((s) => s.owner_handle).filter(Boolean))];
   const pseudonyms = pseudonymsByHandle(db, ownerHandles);
   const subCounts = subscriberCounts(db, subs.map((s) => s.name));
+  // Pre-resolve subscription state per row so we can render the right
+  // label inline (subscribe vs unsubscribe). Logged-out users get no
+  // column at all — same precedent as the chip strip + the sub-page
+  // header button.
+  const subscribedSet = currentHandle ? listSubscribedSubs(db, currentHandle) : null;
   const subQs = (overrides) => {
     const params = new URLSearchParams();
     const next = { sort, filter: effectiveFilter, ...overrides };
@@ -1160,10 +1165,22 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const emptyMsg = effectiveFilter === 'mine'
     ? html`<p class="muted">you haven't subscribed to any subs yet. <a href="${subQs({ filter: 'all' })}">browse all</a>.</p>`
     : html`<p class="muted">no subs yet. <a href="/sub/create">create one</a>.</p>`;
+  const subReturnTo = subQs({});
+  const subscribeCell = (subName) => {
+    if (!subscribedSet) return html``;
+    const subbed = subscribedSet.has(subName);
+    const action = subbed ? 'unsubscribe' : 'subscribe';
+    return html`<td class="subscribe-cell"><form method="POST" action="/sub/${subName}/subscribe" class="subscribe-form">
+      <input type="hidden" name="action" value="${action}">
+      <input type="hidden" name="return_to" value="${subReturnTo}">
+      <button class="subscribe-btn" type="submit">${action}</button>
+    </form></td>`;
+  };
+  const subscribeHead = subscribedSet ? html`<th></th>` : html``;
   const rows = subs.length === 0
     ? emptyMsg
     : html`<table class="communities">
-        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>active</th><th>owner</th></tr></thead>
+        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>active</th><th>owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
@@ -1171,6 +1188,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
           <td class="num muted">${subCounts.get(s.name) ?? 0}</td>
           <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
           <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
+          ${subscribeCell(s.name)}
         </tr>`)}</tbody>
       </table>`;
   // The "mine" chip only renders for logged-in users; anonymous would
@@ -2274,12 +2292,16 @@ function renderSubRss(res, { db, postsDir }, subName) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('not found');
   }
-  // listPostsInSub already excludes nothing automatically — apply the
-  // removed_at filter inline. Soft-collapsed posts stay in the feed
-  // (community can vote them back), hard-removed disappear (matches
-  // /sub/<name> view behavior).
+  // RSS is the high-signal mirror of a sub: hard-removed AND
+  // soft-collapsed posts both excluded. Reasoning: a feed reader has
+  // no "this is collapsed" affordance, so surfacing soft-collapsed
+  // content as a normal feed entry sends a stronger signal than the
+  // collapse intends. The public sub HTML page renders them with the
+  // collapsed visual + community-revote affordance; RSS should not
+  // amplify what mods or the community judged controversial. PRD §RSS
+  // bridges plato to readers — bridges to feed, not to drama.
   const allPosts = listPostsInSub(db, subName, { limit: 50, sort: 'new' });
-  const posts = allPosts.filter((p) => p.removed_at == null);
+  const posts = allPosts.filter((p) => p.removed_at == null && p.collapsed_at == null);
   const handles = [...new Set(posts.map((p) => p.handle))];
   const pseudonyms = pseudonymsByHandle(db, handles);
   const feedUrl = `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/rss`;

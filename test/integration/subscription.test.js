@@ -283,6 +283,28 @@ test('GET /subs?filter=mine: anonymous silently falls back to all (chip not rend
   assert.match(body, /\/sub\/meta/);
 });
 
+test('GET /subs: per-row subscribe form renders for logged-in users only', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  // Anonymous: no per-row form, no extra column.
+  let res = await fetch(ctx.baseUrl + '/subs');
+  let body = await res.text();
+  assert.doesNotMatch(body, /class="subscribe-form"/);
+  // Logged-in: per-row form with subscribe label, flips to unsubscribe
+  // for already-subscribed subs.
+  const jar = await loginAs(ctx, 'a@x.test');
+  await jfetch(jar, ctx.baseUrl + '/sub/lobby/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ action: 'subscribe' }),
+  });
+  res = await jfetch(jar, ctx.baseUrl + '/subs?sort=name');
+  body = await res.text();
+  // Lobby row carries an unsubscribe form action targeting /sub/lobby/subscribe.
+  assert.match(body, /action="\/sub\/lobby\/subscribe"[^>]*>[\s\S]*?value="unsubscribe"/);
+  // Meta row carries a subscribe form (user is not subscribed there).
+  assert.match(body, /action="\/sub\/meta\/subscribe"[^>]*>[\s\S]*?value="subscribe"/);
+});
+
 test('GET /subs: subscriber column reflects real counts', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const jar = await loginAs(ctx, 'a@x.test');
