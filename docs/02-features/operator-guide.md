@@ -101,7 +101,24 @@ Color values accept any CSS color string (hex `#fff`, rgb `rgb(127, 217, 98)`, n
 
 **SMTP, port, DB path, public URL.** All in `.env`. Standard environment configuration.
 
-**Disposable-email blocklist.** `disposable-domains.txt`, one domain per line. New signups from these domains are rejected at form submission, before the magic-link is even attempted. M5 syncs this to a community-maintained upstream list automatically.
+**Disposable-email blocklist.** `disposable-domains.txt`, one domain per line. New signups from these domains are rejected at form submission, before the magic-link is even attempted. Snapshot of the [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) community list (~5400 domains, MIT). Refresh manually with `./scripts/refresh-disposable-domains.sh`, or install the autoconfigured quarterly cron — see [`cron-jobs.md`](cron-jobs.md). The list is never fetched at runtime so a remote change can't silently expand the block surface.
+
+**Operator contact (`config.json`).** Optional `operator` block carries the operator's email and systemd unit name. Cron jobs read these instead of hardcoding paths — no script editing required.
+
+```jsonc
+{
+  "operator": {
+    "email": "you@example.com",   // where cron jobs send refresh / failure reports
+    "service": "plato"            // systemd unit to restart when a snapshot changes
+  }
+}
+```
+
+If `email` is missing, cron jobs print to stderr (cron's default mailer or `journalctl` will surface it). If `service` is missing it defaults to `plato`. The forum process itself doesn't read this block — it only exists for operator tooling.
+
+**Daily backup.** `scripts/cron-backup-db.sh` snapshots `forum.db` + `knowless.db` + `posts/` to `data/backups/plato-YYYY-MM-DD.tar.gz` using SQLite `.backup` (WAL-safe). 7-day retention with auto-prune; override via `BACKUP_KEEP_DAYS` env (drop to 4 if disk-tight). Mails the operator on failure or prune events — silent success on quiet days. See [`cron-jobs.md`](cron-jobs.md) for the crontab line.
+
+**Weekly stats digest.** `bin/stats.js` (daily snapshot → `data/stats.log`) + `bin/stats-weekly.js` (Mon 06:00 UTC digest → operator email). Counters: users (`knowless.db.handles` row count — anyone who's ever requested a magic link), subs, posts, comments (the latter two excluding `removed_at`). Digest is a fixed-width 4-week table with WoW deltas; `--dry-run` prints to stdout for local testing. See [`cron-jobs.md`](cron-jobs.md).
 
 **Reserved sub names.** Add to `RESERVED_SUB_NAMES` in `src/content/sub.js` if your fork adds a new top-level URL (e.g., `/shop`) that you don't want a sub to collide with.
 
@@ -156,13 +173,7 @@ The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/d
 
 **`spam-patterns.txt`** ships with conservative starter regexes for crypto/job/wire/romance scams. Add one line per spam wave you encounter; restart picks them up. Comments start with `#`. Bad regex skips with a stderr warning rather than killing boot.
 
-**`bin/refresh-urlhaus.js`** fetches the URLhaus blocklist hourly. Wire to system cron:
-
-```
-0 * * * * cd /path/to/plato && node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
-```
-
-The script writes to `data/urlhaus.txt`. Restart plato to pick up a fresh fetch (or wait for the next deploy). Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
+**`bin/refresh-urlhaus.js`** fetches the URLhaus blocklist hourly. Wire to system cron — see [`cron-jobs.md`](cron-jobs.md) for the full crontab + how it interacts with `data/urlhaus.txt`. Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
 
 **System events in the modlog.** Spam-regex and URLhaus auto-collapses also write a `mod_actions` row attributed to the `system` pseudonym. They appear in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog` so anyone can see when and why the system intervened. Use `/modlog?mod=system` to view only auto-actions; the `reason` column carries the pattern source or blocked host.
 
@@ -294,6 +305,7 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 - **`npm run migrate`** — apply any new migrations. Idempotent; safe to run on every deploy.
 - **`npm test`** — run the 408-test suite. Should pass cleanly on every commit.
 - **`npm start`** — start the server. No build step.
+- **Cron jobs** — install the 5-line root crontab block from [`cron-jobs.md`](cron-jobs.md) once per instance. Covers daily backups (7-day retention), hourly URLhaus refresh, daily stats snapshot, weekly stats digest by email, quarterly disposable-domains refresh. All autoconfig from `config.json operator.{email,service}` — no per-script editing.
 - **Backups** — copy `forum.db` and `posts/`. SQLite WAL means a hot copy works; for safety, use `sqlite3 forum.db ".backup forum.db.bak"`.
 - **Restoring** — drop the files in place, ensure `KNOWLESS_SECRET` is the same as before (otherwise users look like new accounts), `npm start`.
 

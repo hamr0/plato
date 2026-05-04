@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — Operator cron jobs (autoconfig + email)
+
+- **`config.json operator` block** — top-level `{ email, service }` for cron tooling. The forum process ignores it; cron scripts read it instead of hardcoding paths or notify addresses. `email` falls back to stderr when unset; `service` defaults to `plato`.
+- **Disposable-domains quarterly refresh** — `scripts/refresh-disposable-domains.sh` (atomic curl + sanity check, refuses upstream <1000 lines) + `scripts/cron-refresh-disposable.sh` (autoconfig, sha256-gated `systemctl restart`, sendmail report). Snapshot refreshed from 16 → 5437 domains (upstream `disposable-email-domains`, MIT). List is never fetched at runtime — a remote change can't silently expand the block surface.
+- **Daily full-state backup** — `scripts/cron-backup-db.sh` tars `forum.db` + `knowless.db` + `posts/` (WAL-safe via SQLite `.backup`) to `data/backups/plato-YYYY-MM-DD.tar.gz`. 7-day retention with auto-prune; `BACKUP_KEEP_DAYS` env override. Mails operator only on failure or prune events — silent success on quiet days.
+- **Daily stats snapshot + weekly digest** — `bin/stats.js` appends `{snapshot_at, users, subs, posts, comments}` JSONL to `data/stats.log` (append-only, never rewrites). `bin/stats-weekly.js` reads the log, groups by ISO week (latest snapshot per week), takes the most recent 4 weeks, renders a fixed-width WoW-delta table, mails to `operator.email`. Both support `--dry-run`. Counter definitions: users = `knowless.db.handles` (anyone who ever requested a magic link), posts/comments exclude `removed_at`.
+- **`docs/02-features/cron-jobs.md`** — single source for all 5 cron jobs (URLhaus hourly + the 4 above), including a copy-paste 5-line root crontab block, manual verification recipe, sendmail preflight, disk-pressure escape hatch, and per-cadence rationale. Operator-guide gets Tier 1 entries for backup + stats + operator block; plato.context gets table rows mirroring the same surfaces (these are part of setup, not optional polish). Cross-linked from operator-guide, plato.context, and README.
+
 ### Added — Memlog activity unification
 
 - **Memlog gains a top-level `mode:` axis** — `notifications` (default, prior behavior), `activity` (your authored posts + comments, removed content excluded), `all` (both streams merged by created_at desc, capped 200 rows). Mirrors the modlog mode pattern (`open / inbox / audit`) so memlog is one surface for everything personal: things done *to* the user, things done *by* the user. New `listActivityForHandle()` in `src/content/notification.js` returns posts + comments shaped to match the notification row contract; renderer slots them into the same table.

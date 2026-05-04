@@ -66,6 +66,7 @@ Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.disc
 - **Mail**: dev → [Mailpit](https://github.com/axllent/mailpit) on port 1025; prod → see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 - **Spam knobs**: tighten via `config.json` (rate limits, link cap, regex patterns, URLhaus). Floors are PRD-locked — operators tighten, never loosen.
 - **Per-sub settings**: owner sets auto-uncollapse thresholds at `/sub/create`. Spam knobs are forum-wide on purpose.
+- **Cron jobs**: hourly URLhaus refresh, daily full-state backup (7-day retention), daily stats snapshot, weekly stats digest by email, quarterly disposable-domains refresh — all autoconfig from `config.json` `operator.{email,service}`. See [cron-jobs.md](docs/02-features/cron-jobs.md).
 
 ---
 
@@ -93,6 +94,7 @@ Open `http://localhost:8080` and post.
 ## Documentation
 
 - [Operator Guide](docs/02-features/operator-guide.md) — running and customizing your instance.
+- [Cron jobs](docs/02-features/cron-jobs.md) — URLhaus + disposable-domains refresh, autoconfig from `config.json`.
 - [Integration Guide](docs/02-features/plato.context.md) — wiring plato into a project.
 - [PRD](docs/01-product/prd-open-web-revival.md) — spec + rationale for every locked-in choice.
 - [Build plan](docs/01-product/build-plan.md) — milestone roadmap.

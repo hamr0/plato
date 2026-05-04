@@ -40,7 +40,11 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Override vote arrow colors | `branding.colors.{up,down}` in `config.json` |
 | Tighten rate limits / link cap | `config.json` at project root — see Operator Config below |
 | Append spam regex patterns | `spam-patterns.txt` at project root, one regex per line |
-| Refresh URLhaus blocklist | wire `bin/refresh-urlhaus.js` to system cron, hourly |
+| Refresh URLhaus blocklist | wire `bin/refresh-urlhaus.js` to system cron, hourly — see [`cron-jobs.md`](cron-jobs.md) |
+| Refresh disposable-email blocklist | install `scripts/cron-refresh-disposable.sh` quarterly. See [`cron-jobs.md`](cron-jobs.md) |
+| Daily full-state backup | install `scripts/cron-backup-db.sh` daily — tarballs `forum.db` + `knowless.db` + `posts/`, 7-day retention with auto-prune. See [`cron-jobs.md`](cron-jobs.md) |
+| Weekly stats digest by email | install `bin/stats.js` (daily snapshot) + `bin/stats-weekly.js` (Mon 06:00 UTC digest). 4-week WoW table delivered to `operator.email`. See [`cron-jobs.md`](cron-jobs.md) |
+| Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
 | Change score-collapse threshold | `COLLAPSE_THRESHOLD` in `src/web/app.js` (default −3) |
 | Change max comment-tree depth | `MAX_DEPTH` in `src/web/app.js` (default 4) |
 | Change inline comment preview length | `COMMENT_PREVIEW_CHARS` in `src/web/app.js` (default 280) |
@@ -218,9 +222,12 @@ Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wher
   "spamPatternsFile": "spam-patterns.txt",
   "urlhausCacheFile": "data/urlhaus.txt",
   "urlDisplayMax":    30,
-  "feedPageSize":     50
+  "feedPageSize":     50,
+  "operator": { "email": "you@example.com", "service": "plato" }
 }
 ```
+
+The `operator` block is metadata for cron tooling (see [`cron-jobs.md`](cron-jobs.md)) — `email` receives refresh / failure reports, `service` (default `plato`) is the systemd unit cron jobs restart on snapshot change. The forum process itself ignores the block. Both fields are optional: missing `email` falls back to stderr.
 
 `urlDisplayMax` (default 30, integer 10–200) is a display-only knob: bare auto-linked URLs longer than this render with a `…` ellipsis on the visible text while keeping `href` and a `title`-attribute hover-preview intact. `[label](url)` markdown with explicit labels is untouched. No security floor; bad value still throws at boot.
 

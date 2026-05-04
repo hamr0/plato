@@ -395,7 +395,7 @@ Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the 
 - `ivolo/disposable-email-domains` (older, larger, less actively maintained)
 - For commercial-grade detection: Kickbox, ZeroBounce, or similar APIs (paid, not recommended for v1)
 
-Pull the list at install time and re-pull weekly via cron. Allow the operator to override (whitelist a domain that's incorrectly flagged).
+**Implemented as**: ship a snapshot of `disposable_email_blocklist.conf` (~5400 domains) at `disposable-domains.txt`. Refresh via `scripts/cron-refresh-disposable.sh` quarterly — the script autoconfigs from `config.json operator.{email,service}`, restarts the service only if the sha256 changed, and emails the operator (success and failure both). Quarterly cadence — not weekly — because the upstream churns slowly and operator email volume should stay low (4/year, not 52). The list is intentionally **not** fetched at runtime so a remote list change can't silently expand the block surface; updates require a deliberate cron run + service restart, both auditable in the operator's inbox. Allow the operator to override (whitelist a domain that's incorrectly flagged).
 
 ### 5. Honeypot fields in post forms
 
