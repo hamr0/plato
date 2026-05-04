@@ -653,6 +653,31 @@ test('GET /modlog: >20 subs renders <select> (default "all" selected)', async (t
   assert.doesNotMatch(body, /class="sub-toggle"/);
 });
 
+test('GET /modlog: anonymous viewers see "my decisions" disabled', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/modlog');
+  const body = await res.text();
+  // Disabled span (not a clickable <a>), with reason in the title attr
+  assert.match(body, /<span class="filter-btn filter-btn-disabled"[^>]*>my decisions<\/span>/);
+  assert.doesNotMatch(body, /<a[^>]*>my decisions<\/a>/);
+});
+
+test('GET /modlog: >20 subs renders <select> INSIDE the filter bar', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  for (let i = 0; i < 25; i++) {
+    db.prepare('INSERT OR IGNORE INTO subs (name, created_at) VALUES (?, ?)').run(`s${i}`, Date.now());
+  }
+  const res = await fetch(baseUrl + '/modlog');
+  const body = await res.text();
+  // The filter bar wrapper should contain the sub-filter form — i.e. the
+  // form is inline with date/type/my-decisions chips, not on its own row.
+  const filterBarMatch = body.match(/<div class="modlog-filters muted">[\s\S]*?<\/div>/);
+  assert.ok(filterBarMatch, 'modlog-filters div present');
+  assert.match(filterBarMatch[0], /<form class="mod-subs-form"/, 'sub-filter form sits inside the filter bar');
+  assert.match(filterBarMatch[0], /<select name="sub"/);
+});
+
 test('GET /modlog?sub=s3 with >20 subs preselects that sub in dropdown', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;

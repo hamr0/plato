@@ -2750,7 +2750,7 @@ function renderMyModLog(req, res, { db, auth, postsDir }, searchParams) {
     currentHandle, db,
     modSubs: allSubNames,
     scopedSubs: filters.sub ? [filters.sub] : allSubNames,
-    filters, modHandle,
+    filters, modHandle, isMod,
   });
 }
 
@@ -2814,7 +2814,7 @@ export function buildRevokeMap(db, actions, currentHandle) {
   return out;
 }
 
-function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filters, modHandle }) {
+function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filters, modHandle, isMod = false }) {
   const since = filters.date === '24h' ? Date.now() - 24 * 60 * 60 * 1000 : null;
   const actionFilter = MODLOG_TYPES[filters.type] ?? null;
   const queryOpts = {
@@ -2926,14 +2926,14 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
         </tr>`)}</tbody>
       </table>`;
 
-  const subStrip = subFilterControl(modSubs, filters);
+  const subControl = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
-    ${modlogFilterBar(filters, currentHandle)}
-    ${subStrip}
+    ${modlogFilterBar(filters, currentHandle, subControl.inline, isMod)}
+    ${subControl.strip ?? ''}
     ${modlogActiveSummary(filters, pseudonyms, modHandle)}
     ${rowsView}
     ${pager}
@@ -3101,14 +3101,14 @@ function renderModlogOpen(res, { currentHandle, db, postsDir, modSubs, scopedSub
         </details>`;
       })}</div>`;
 
-  const subStrip = subFilterControl(modSubs, filters);
+  const subControl = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
-    ${modlogFilterBar(filters, currentHandle)}
-    ${subStrip}
+    ${modlogFilterBar(filters, currentHandle, subControl.inline, true)}
+    ${subControl.strip ?? ''}
     ${modlogActiveSummary(filters, pseudonyms, null)}
     <p class="muted">user-flagged content awaiting your decision. expand a row to see who flagged it and why, then rule.</p>
     ${rowsView}
@@ -3214,14 +3214,14 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
         </tr>`)}</tbody>
       </table>`;
 
-  const subStrip = subFilterControl(modSubs, filters);
+  const subControl = subFilterControl(modSubs, filters);
 
   send(res, 200, pageView({ db, currentHandle, title: 'modlog' }, html`
     <p><a href="/">← home</a> · my modlog</p>
     <h2>// my modlog</h2>
     ${modlogModeBar(filters)}
-    ${modlogFilterBar(filters, currentHandle)}
-    ${subStrip}
+    ${modlogFilterBar(filters, currentHandle, subControl.inline, true)}
+    ${subControl.strip ?? ''}
     ${modlogActiveSummary(filters, pseudonyms, modHandle)}
     <p class="muted">deduped — one row per affected user or piece of content. click ${actions.length === 0 ? 'audit' : 'a row'} for the per-target history (coming with row expansion in next step).</p>
     ${rowsView}
@@ -3229,29 +3229,37 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
   `));
 }
 
-// Sub filter rendering. ≤ MODLOG_SUB_CHIP_LIMIT subs → inline chip strip
-// (current behavior). Above the limit the chip row would wrap into a wall
-// of names, so flip to a labelled <select> form. Default option "all"
-// (value="") drops the ?sub= param. Hidden inputs preserve the other
-// active filters when the form GETs back to /modlog. JS-on path
-// auto-submits on change; JS-off path uses the explicit filter button.
+// Sub filter rendering. Two layouts share one entry point:
+//
+//  - ≤ MODLOG_SUB_CHIP_LIMIT subs → returns { strip } : the chip strip
+//    renders on its own line below the filter bar (current behavior).
+//    Chips read better at a glance for small instances.
+//
+//  - > MODLOG_SUB_CHIP_LIMIT subs → returns { inline } : a labelled
+//    <select> form rendered INSIDE the filter bar (next to date / type /
+//    my-decisions chips). The chip row would wrap into a wall of names
+//    above the limit, so collapse to a dropdown. Default option "all"
+//    (value="") drops the ?sub= param. Hidden inputs preserve the other
+//    active filters when the form GETs back to /modlog. JS-on path
+//    auto-submits on change; JS-off path uses the explicit filter button.
 const MODLOG_SUB_CHIP_LIMIT = 20;
 
 function subFilterControl(modSubs, filters) {
-  if (modSubs.length === 0) return html``;
+  if (modSubs.length === 0) return { inline: null, strip: null };
   if (modSubs.length <= MODLOG_SUB_CHIP_LIMIT) {
-    return html`<p class="mod-subs muted">${modSubs.map((s, i) => {
+    const strip = html`<p class="mod-subs muted">${modSubs.map((s, i) => {
       const isActive = filters.sub === s;
       const href = modlogHref({ ...filters, sub: isActive ? null : s, page: null });
       const cls = isActive ? 'sub-toggle sub-toggle-active' : 'sub-toggle';
       return html`${i > 0 ? raw(' · ') : raw('')}<a class="${cls}" href="${href}">${s}</a>`;
     })}</p>`;
+    return { inline: null, strip };
   }
   const passthroughKeys = ['mode', 'date', 'type', 'mod', 'user'];
   const hidden = passthroughKeys
     .filter((k) => filters[k] != null && filters[k] !== '')
     .map((k) => html`<input type="hidden" name="${k}" value="${filters[k]}">`);
-  return html`<form class="mod-subs-form muted" method="GET" action="/modlog">
+  const inline = html`<form class="mod-subs-form" method="GET" action="/modlog">
     ${hidden}
     <label>sub:
       <select name="sub" class="mod-subs-select" onchange="this.form.submit()">
@@ -3261,6 +3269,7 @@ function subFilterControl(modSubs, filters) {
     </label>
     <button class="filter-btn" type="submit">filter</button>
   </form>`;
+  return { inline, strip: null };
 }
 
 function modlogModeBar(filters) {
@@ -3277,7 +3286,7 @@ function modlogModeBar(filters) {
   </p>`;
 }
 
-function modlogFilterBar(filters, currentHandle) {
+function modlogFilterBar(filters, currentHandle, inlineSubControl = null, isMod = false) {
   const dateBtn = (val, label) => {
     const isActive = filters.date === val;
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
@@ -3288,20 +3297,28 @@ function modlogFilterBar(filters, currentHandle) {
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
     return html`<a class="${cls}" href="${modlogHref({ ...filters, type: val === 'all' ? null : val, page: null })}">${label}</a>`;
   };
-  const meIsActive = filters.mod === 'me' || filters.mod === currentHandle;
-  const meHref = modlogHref({
-    ...filters,
-    mod: meIsActive ? null : 'me',
-    page: null,
-  });
-  const meCls = meIsActive ? 'filter-btn filter-btn-active' : 'filter-btn';
-  return html`<p class="modlog-filters muted">
+  // "my decisions" is mod-only — non-mods (logged-out or logged-in
+  // without any sub) have no actions to filter to. Render disabled
+  // rather than letting them click into an always-empty result.
+  let myDecisions;
+  if (isMod) {
+    const meIsActive = filters.mod === 'me' || filters.mod === currentHandle;
+    const meHref = modlogHref({ ...filters, mod: meIsActive ? null : 'me', page: null });
+    const meCls = meIsActive ? 'filter-btn filter-btn-active' : 'filter-btn';
+    myDecisions = html`<a class="${meCls}" href="${meHref}" title="filter to your own decisions">my decisions</a>`;
+  } else {
+    myDecisions = html`<span class="filter-btn filter-btn-disabled" title="mod-only: you have no actions to filter">my decisions</span>`;
+  }
+  // <div> (not <p>) so the inline sub-filter <form> is valid HTML — a
+  // <form> inside <p> auto-closes the paragraph at parse time.
+  return html`<div class="modlog-filters muted">
+    ${inlineSubControl ? html`${inlineSubControl}<span class="filter-sep">·</span>` : html``}
     ${dateBtn('24h', 'new (24h)')} ${dateBtn('all', 'all-time')}
     <span class="filter-sep">·</span>
     ${typeBtn('flagged', 'flagged')} ${typeBtn('banned', 'banned')} ${typeBtn('removed', 'removed')} ${typeBtn('all', 'all')}
     <span class="filter-sep">·</span>
-    <a class="${meCls}" href="${meHref}" title="filter to your own decisions">my decisions</a>
-  </p>`;
+    ${myDecisions}
+  </div>`;
 }
 
 function modlogActiveSummary(filters, pseudonyms, resolvedModHandle) {
