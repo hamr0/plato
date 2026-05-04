@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M6/B6: token-gated personal RSS feeds at `/u/<token>/...`
+
+Two new pull-only feed URLs tied to the logged-in user, sharing a single per-user token:
+
+- `/u/<token>/subs.rss` — latest 50 posts merged across every sub the user has subscribed to (newest first, hard-removed + soft-collapsed both excluded, same drama-shape filter as per-sub RSS). The "give me my whole subscription list as one feed" channel.
+- `/u/<token>/rss` — the above plus the user's memlog notifications (replies to their comments, mod actions on their content) interleaved by time. The "everything tied to my account" channel.
+
+Token is opaque random hex (32 bytes → 64 chars), generated lazily on first `/memlog` visit, regenerable from a button at the bottom of `/memlog`. Rotation invalidates **both** URLs at once. The token *is* the credential — no handle in the URL — which keeps the pseudonym out of reader app logs, corporate proxies, screenshots, and support tickets. Headers: `Content-Type: application/atom+xml; charset=utf-8`, `Cache-Control: private, no-store` (personal feeds shouldn't be cached by intermediaries). 404 on bad/missing token (hex shape validated before any DB hit). Disallowed in `robots.txt` (`Disallow: /u/`).
+
+Migration 015 adds nullable `handles.rss_token TEXT` with a UNIQUE partial index. New module `src/content/rss-token.js` exposes `getOrCreateRssToken / regenerateRssToken / handleByRssToken`.
+
+### Changed — M6 scope: email digest and ntfy push both cut, three-tier RSS replaces them
+
+Both push channels are now PRD-locked under §Permanently out, not v1 limitations.
+
+- **ntfy push** would silently work on Android and feel broken on iOS (Apple's APNs gate routes self-hosted ntfy only via `ntfy.sh`). Plato's audience is too small to absorb that platform-skew support cost.
+- **Email digest** would have required either plato persisting plaintext addresses (breaks the auth-layer "never stored" lock) or coupling to a knowless email-retention feature; either path drags scheduler / cadence config / opt-out tokens / footer rendering / bounce handling / operator deliverability burden into a forum that explicitly rejects urgency engineering. Magic-link auth is preserved as plato's only outbound email — and **only** as the auth floor.
+
+The replacement is a three-tier pull-shape RSS surface: per-sub at `/sub/<name>/rss` (public, M6/B4), all-subs aggregate at `/u/<token>/subs.rss` (token-gated, M6/B6), all-subs + notifications at `/u/<token>/rss` (token-gated, M6/B6). Same ground covered, none of the email or push surface.
+
 ### Added — M6/B5: inline subscribe form on `/subs` directory
 
 New per-row column on `/subs` with an inline `subscribe`/`unsubscribe` text-link button (logged-in users only). Reuses the existing POST `/sub/<name>/subscribe` endpoint and the same `.subscribe-form` / `.subscribe-btn` styling as the sub-page header button — the directory becomes a one-screen subscription manager: browse, follow, no need to click into each sub. Hidden for anonymous (same precedent as the chip strip + sub-page header button).

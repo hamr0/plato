@@ -25,9 +25,9 @@ These apply to both products. Anything that violates a principle needs an explic
 - **One-command export, one-command import.** A user or community can leave any hosted instance with their full data and import it into a fork. This is the actual power-check, not voting or governance.
 - **No algorithmic feed.** Chronological, reverse-chronological, or user-defined sorts only. No "for you," no engagement optimization, no recommendation engine.
 - **No telemetry.** Server logs only. No third-party analytics, no pixels, no tracking.
-- **Notifications are opt-in, per-source, and never the default.** Email digests and ntfy push are available where they fit, but the default for both products is *the user visits when they want*. No urgency engineering, no "you have 5 unread," no push-by-default. Notifications are a convenience the user explicitly turns on for specific sources, not a behavior the platform pushes onto them.
+- **Notifications are opt-in, per-source, and never the default.** Email digests and per-sub RSS feeds are available where they fit, but the default is *the user visits when they want*. No urgency engineering, no "you have 5 unread," no push-by-default. Notifications are a convenience the user explicitly turns on for specific sources, not a behavior the platform pushes onto them. Push channels (ntfy, web push, native push) are deliberately out of scope — see §Push notifications: deliberately not shipped.
 - **Self-hostable in five minutes.** One docker-compose command or equivalent. Hosted version available for non-technical operators, with one-click migration in either direction.
-- **Boring, mature dependencies.** PostgreSQL, SQLite, Caddy, standard libraries. No chasing the new shiny. External services (ntfy, malicious-URL feeds, disposable-email lists) are opt-in transports, never required.
+- **Boring, mature dependencies.** PostgreSQL, SQLite, Caddy, standard libraries. No chasing the new shiny. External services (malicious-URL feeds, disposable-email lists) are opt-in transports, never required.
 
 ---
 
@@ -179,30 +179,38 @@ The simplest possible version that doesn't break:
 
 - One click from any sub page to subscribe or unsubscribe.
 - Subscriptions are **private**. Nobody can see who's subscribed to what. No "followers of this sub" page. Member counts can be displayed (they're a fact of the sub existing), but no leaderboard of who-subscribes-where.
-- **Notification modes** (per-sub, user choice):
+- **Notification modes** are pull-only by design, three tiers:
   - **None (default)**: subscribe silently. Posts appear on the My Subs page when the user visits.
-  - **Email digest**: daily or weekly summary of new posts in subscribed subs.
-  - **ntfy push**: real-time phone notification when a new post hits the sub. The user provides their own ntfy topic URL (see *ntfy integration* below). Useful for time-sensitive subs (classifieds, local emergencies, job postings) where a daily digest is too slow.
+  - **Per-sub RSS** (`/sub/<name>/rss`, public): the sub's feed in any standard reader. Anyone with the URL can read it; no account required.
+  - **All-subs RSS** (`/me/subs.rss`, token-gated): one feed merging new posts across every sub the user has subscribed to. Sub activity only.
+  - **All-subs + notifications RSS** (`/me/rss`, token-gated): the all-subs feed plus the user's memlog signals (replies to their comments, mod actions on their content) interleaved by time.
 - Subscription lists are **exportable** as part of user profile data. If the user forks to a new instance, they bring their list and can re-subscribe in one click.
 
-### ntfy integration
+### Outbound channels: pull-only, deliberately
 
-[ntfy](https://ntfy.sh) is a generic HTTP-based push notification service: subscribe to a topic URL with the ntfy phone app, anyone (or anything) that can `curl` to that URL pushes notifications to your phone. No accounts on either side. Self-hostable. Open source.
+Plato's default for "what happened in your subs / what mentions you" is **come back when it itches you**. The forum is not the senate; nothing here is time-sensitive enough to justify push channels or email digests, both of which drag a tail of urgency-engineering, opt-out plumbing, and (for email) plaintext-address storage that conflicts with plato's locked auth posture.
 
-The forum supports ntfy as an opt-in notification channel:
+The outbound shapes plato supports are all pull, three tiers wide:
 
-- **The user provides their own topic URL.** They install the ntfy app, pick a private-ish topic name (`https://ntfy.sh/my-forum-pings-x9k2-q7p4`), and paste that URL into the forum's notification settings per-sub. The forum doesn't operate ntfy infrastructure or assign topics — the user owns that side.
-- **The forum's only job is one HTTP POST per notification.** When a new post hits a sub the user has marked for ntfy push, the forum POSTs the title and a click-back URL to the user's topic. That's the entire integration. No ntfy SDK, no library, one `curl`-equivalent call.
-- **Self-hosted ntfy is fully supported.** Users (or instance operators) can point at their own ntfy server. The forum doesn't care which.
-- **No state beyond the user's preference.** If ntfy.sh (or the user's chosen ntfy host) disappears tomorrow, the forum keeps working; the user just doesn't get phone pushes.
+- **Per-sub RSS** at `/sub/<name>/rss` — public, anyone in any reader.
+- **All-subs RSS** at `/me/subs.rss` — token-gated, merges posts across all the user's subscribed subs. Sub activity only.
+- **All-subs + notifications RSS** at `/me/rss` — token-gated, the above plus memlog signals (replies, mod actions). The "everything tied to my account" feed.
 
-ntfy is **never the default** and **never used for sensitive content**. Email remains the floor for anything that must reach the user (account events, mod notifications, magic links, password-equivalent flows). ntfy is opt-in convenience for "something I care about happened in this sub."
+The two token-gated feeds share **one** per-user token, shown on the memlog page with a "regenerate" affordance; rotating it invalidates both URLs at once. Subscription lists are private (PRD §Sub subscription mechanics), so neither aggregated feed can be public-readable.
+
+Cut from the original M6 plan and not shipping:
+
+- **Email digests.** Would have required either plato storing plaintext email (breaks the auth-layer lock) or coupling to a knowless feature that retains email for opted-in users. Either path hands plato an outbound-mail responsibility beyond magic-link delivery, plus deliverability, bounce handling, opt-out tokens, cadence config, and operator burden. The pull shapes above cover the same ground without any of that.
+- **ntfy push.** Self-hosted ntfy can't deliver real iOS push (Apple's APNs gate routes only via `ntfy.sh`), so the experience would silently work on Android and feel broken on iOS. Platform-skew support cost too large for a hobby-scale forum.
+- **Native web push / browser push.** Same urgency-engineering objection as ntfy, plus permission-prompt friction, plus an additional cryptographic-key surface. Not interesting.
+
+Email is preserved as plato's auth floor (magic links via knowless) and **only** as the auth floor. There is no "email me when X happens" mode of any kind, anywhere in the product, deliberately.
 
 ### Per-sub RSS
 
-Every sub publishes an RSS feed at `/sub/<name>/feed.xml`. Users subscribe in any standard reader (NetNewsWire, Miniflux, FreshRSS, Reeder, etc.) alongside blogs, newsletters, and watched URLs. The "follow a sub" mechanism inside the forum and the "subscribe via RSS" mechanism outside it coexist; users pick whichever fits their workflow. RSS is the open-web staying-current pattern plato wires into by default — there's no in-house reader to ship.
+Every sub publishes an Atom feed at `/sub/<name>/rss`. Users subscribe in any standard reader (NetNewsWire, Miniflux, FreshRSS, Reeder, etc.) alongside blogs, newsletters, and watched URLs. The "follow a sub" mechanism inside the forum and the "subscribe via RSS" mechanism outside it coexist; users pick whichever fits their workflow. RSS is the open-web staying-current pattern plato wires into by default — there's no in-house reader to ship.
 
-plato's job ends at "publish RSS for each sub"; whatever reader the user picks handles cross-source aggregation. Most users will use in-forum sub subscriptions for plato and RSS for everything else. Power users can do either. Both work.
+plato's per-sub feeds are public; the two **personal aggregated feeds** at `/me/subs.rss` (subs only) and `/me/rss` (subs + notifications) are token-gated because the subscription list and the memlog they draw from are private. Together the three tiers cover "follow this sub publicly", "give me my whole subscription list as one feed", and "give me everything tied to my account" without ever pushing to the user.
 
 ## Authentication Flow
 
@@ -650,7 +658,7 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - Single instance, no federation
 - Subs, posts, comments, voting, sorting
 - Magic-link auth, three email subscription modes
-- Sub subscriptions (private, exportable, three notification modes: none / email digest / ntfy push)
+- Sub subscriptions (private, exportable, pull-only: none / per-sub RSS / personal aggregated RSS at `/me/rss`)
 - Front page with active subs + recent posts (chronological, 2/sub cap); "my subs" page for subscribed users
 - User display: account age bucket, sub tenure, per-post score, mod-confirmed removal history (90 days). No karma, no flag counts, no leaderboards.
 - Two-tier moderation with public log
@@ -688,6 +696,8 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 - **Age verification / ID checks.** Operator-layer concern, not forum feature. Forum exposes a per-sub `sensitive` flag (M5/B11) as a generic content advisory; if a jurisdiction requires age gates, the operator runs them in a reverse proxy or content gateway in front of the forum. Forum never sees IDs.
 - **NSFW labeling.** Plato uses a generic `sensitive` flag (M5/B11), not "NSFW." Reason: plato's default community rules ban porn, so labeling something "NSFW" in a porn-banned forum invites the very content the rules forbid. `sensitive` is the operator/community-defined catch-all (graphic violence, abuse discussions, intense political topics, suicide/eating-disorder threads, etc.). A fork that wants to allow porn can rename/repurpose the flag — that's a fork concern, not plato's.
 - **Cross-instance identity portability.** A user moving to a new instance gets a new pseudonym, derived under the new instance's master secret. History is portable via M7 archive export/import; identity is not. Reason: per-instance HMAC of email is the entire identity mechanism, and the per-instance master secret is precisely what makes the same email yield different pseudonyms across forks. Building any "claim my old pseudonym on the new instance" path (signed handle export, federation primitive, email→pseudonym mapping in the archive, magic-link reclaim flow — all considered, all rejected) re-introduces the cross-forum tracking key the HMAC design refuses, and turns the social property *"leaving is a fresh start"* into a lie. Old pseudonyms travel with the archive as static attribution labels, never as claimable accounts. See *Identity Model → Forking / moving instances*.
+- **Email digests / "email me when X happens" of any kind.** Plato's only outbound email is the magic-link auth flow via knowless. Adding a digest channel would require either plato persisting plaintext addresses (breaks the auth-layer "never stored" lock) or coupling to a knowless email-retention feature; either path drags scheduler, cadence config, opt-out tokens, footer rendering, bounce handling, and operator deliverability burden into a forum that explicitly rejects urgency engineering ("come back when it itches"). Pull-shape RSS — per-sub at `/sub/<name>/rss` and personal aggregated at `/me/rss` — covers the same ground without any of that surface. Revisiting this is a fork, not a feature.
+- **Push notifications of any kind** (ntfy, web push, browser push, native push). Same urgency-engineering objection as email digests. ntfy specifically: self-hosted ntfy can't deliver real iOS push (Apple's APNs gate routes only via `ntfy.sh`), so the experience would silently work on Android and feel broken on iOS — a platform-skew support cost too large for a hobby-scale forum. Web push adds a permission-prompt friction surface and a cryptographic-key store. The forum is not the senate; nothing here is time-sensitive enough to justify any push channel.
 - **Operator-configurable typeface.** The body font (`'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace` at `style.css:62`) is locked. Mono-by-default is part of plato's voice — terminal-honest, scannable, line-aligned. Offering a serif/sans preset dilutes the identity for a feature nobody's asked for; an open-ended `fontStack` config string invites a typography decision operators didn't ask to make. Operators who actually want a different typeface fork the CSS — same path as the logo and the literal "plato" footer attribution. Same precedent as HN, lobste.rs, old.reddit (locked) vs Discourse/Lemmy (theme systems with strong defaults). Revisit only if a real operator pushes back; do not pre-build presets.
 
 ## Needs further discussion (parked, not decided)

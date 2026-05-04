@@ -64,6 +64,9 @@ import {
   markNotificationRead, markAllNotificationsRead, pruneOldNotifications,
   NOTIFICATION_KINDS,
 } from '../content/notification.js';
+import {
+  getOrCreateRssToken, regenerateRssToken, handleByRssToken,
+} from '../content/rss-token.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -2222,6 +2225,7 @@ function renderRobots(res) {
     'Disallow: /memlog',
     'Disallow: /modlog/resolve',
     'Disallow: /sub/*/subscribe',
+    'Disallow: /u/',
     `Sitemap: ${siteMeta.baseUrl}/sitemap.xml`,
     '',
   ];
@@ -2343,6 +2347,139 @@ function renderSubRss(res, { db, postsDir }, subName) {
   res.writeHead(200, {
     'Content-Type': 'application/atom+xml; charset=utf-8',
     'Cache-Control': 'public, max-age=300',
+  });
+  res.end(xml);
+}
+
+// /u/<token>/subs.rss and /u/<token>/rss — token-gated personal feeds.
+//
+//   subs.rss = latest 50 posts merged across the user's subscribed subs
+//              (no notifications). Same drama-shape exclusion as per-sub
+//              RSS: hard-removed AND soft-collapsed both omitted.
+//   rss      = subs.rss content + memlog notifications (replies, mod
+//              actions on the user's content) interleaved by time.
+//
+// One token covers both URLs (see migration 015). The token *is* the
+// credential — no handle in the URL — so leakage is contained to the
+// reader app/proxy that saw it; rotating the token from /memlog
+// invalidates both URLs in one move. 404 on missing/malformed token
+// (validated in handleByRssToken before any DB hit). PRD §Outbound
+// channels: pull-only, by design.
+function renderPersonalRss(res, { db, postsDir }, token, { includeNotifications }) {
+  const handle = handleByRssToken(db, token);
+  if (!handle) {
+    res.writeHead(404, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    return res.end('not found');
+  }
+  const subscribed = [...listSubscribedSubs(db, handle)];
+  // Empty subscription list short-circuits to an empty feed (still 200,
+  // still valid Atom). The reader will just see "no entries yet" — same
+  // posture as a sub with no posts. listPostsAcrossSubs handles []
+  // explicitly so we don't need to branch here.
+  const allPosts = listPostsAcrossSubs(db, { sort: 'new', limit: 50, subNames: subscribed });
+  const posts = allPosts.filter((p) => p.removed_at == null && p.collapsed_at == null);
+  const postEntries = posts.map((p) => ({
+    kind: 'post',
+    created_at: p.created_at,
+    post: p,
+  }));
+  let notifEntries = [];
+  if (includeNotifications) {
+    const notifs = listNotifications(db, handle, { show: 'all', limit: 50 });
+    notifEntries = notifs.map((n) => ({
+      kind: 'notif',
+      created_at: n.created_at,
+      notif: n,
+    }));
+  }
+  const merged = [...postEntries, ...notifEntries]
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(0, 50);
+  // Resolve every author pseudonym we'll need in one batch.
+  const allHandles = new Set();
+  for (const e of merged) {
+    if (e.kind === 'post') allHandles.add(e.post.handle);
+    else if (e.notif.actor_handle) allHandles.add(e.notif.actor_handle);
+  }
+  const pseudonyms = pseudonymsByHandle(db, [...allHandles]);
+  const flavor = includeNotifications ? 'rss' : 'subs.rss';
+  const feedUrl = `${siteMeta.baseUrl}/u/${encodeURIComponent(token)}/${flavor}`;
+  const homeUrl = `${siteMeta.baseUrl}/`;
+  const updated = new Date(
+    merged.length > 0 ? merged[0].created_at : Date.now()
+  ).toISOString();
+  const entries = merged.map((e) => {
+    if (e.kind === 'post') {
+      const p = e.post;
+      const url = `${siteMeta.baseUrl}/sub/${encodeURIComponent(p.sub_name)}/post/${encodeURIComponent(p.id)}`;
+      const author = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
+      const preview = getPostPreview(p, postsDir, { maxChars: 600 });
+      const stamp = new Date(p.created_at).toISOString();
+      return (
+        `  <entry>\n` +
+        `    <id>${escapeXml(url)}</id>\n` +
+        `    <title>${escapeXml(`//${p.sub_name}: ${p.title}`)}</title>\n` +
+        `    <link href="${escapeXml(url)}"/>\n` +
+        `    <published>${stamp}</published>\n` +
+        `    <updated>${stamp}</updated>\n` +
+        `    <author><name>${escapeXml(author)}</name></author>\n` +
+        `    <content type="html">${escapeXml(preview.html)}</content>\n` +
+        `  </entry>`
+      );
+    }
+    // notif: build link via memlogTargetLink shape, fall back to /memlog
+    const n = e.notif;
+    const target = memlogTargetLink(db, n);
+    const url = target
+      ? `${siteMeta.baseUrl}${target}`
+      : `${siteMeta.baseUrl}/memlog`;
+    // Stable id — even if the same notification ever resurfaced, the
+    // (id, kind) pair keeps it unique across both feeds.
+    const entryId = `${siteMeta.baseUrl}/memlog/n/${n.id}`;
+    const stamp = new Date(n.created_at).toISOString();
+    const kindLabel = MEMLOG_KIND_LABELS[n.kind] ?? n.kind;
+    const where = n.sub_name ? ` in //${n.sub_name}` : '';
+    const title = `[${kindLabel}]${where}`;
+    const fromName = n.actor_handle
+      ? (pseudonyms.get(n.actor_handle) ?? n.actor_handle.slice(0, 8))
+      : 'system';
+    const snippet = n.snippet ?? '';
+    const body = snippet
+      ? `<p><em>${escapeXml(kindLabel)}</em> from ${escapeXml(fromName)}${escapeXml(where)}</p><p>${escapeXml(snippet)}</p>`
+      : `<p><em>${escapeXml(kindLabel)}</em> from ${escapeXml(fromName)}${escapeXml(where)}</p>`;
+    return (
+      `  <entry>\n` +
+      `    <id>${escapeXml(entryId)}</id>\n` +
+      `    <title>${escapeXml(title)}</title>\n` +
+      `    <link href="${escapeXml(url)}"/>\n` +
+      `    <published>${stamp}</published>\n` +
+      `    <updated>${stamp}</updated>\n` +
+      `    <author><name>${escapeXml(fromName)}</name></author>\n` +
+      `    <content type="html">${escapeXml(body)}</content>\n` +
+      `  </entry>`
+    );
+  }).join('\n');
+  const feedTitle = includeNotifications
+    ? `${branding.forumName} · my feed`
+    : `${branding.forumName} · my subs`;
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<feed xmlns="http://www.w3.org/2005/Atom">\n` +
+    `  <id>${escapeXml(feedUrl)}</id>\n` +
+    `  <title>${escapeXml(feedTitle)}</title>\n` +
+    `  <link rel="self" href="${escapeXml(feedUrl)}"/>\n` +
+    `  <link rel="alternate" type="text/html" href="${escapeXml(homeUrl)}"/>\n` +
+    `  <updated>${updated}</updated>\n` +
+    (entries ? entries + '\n' : '') +
+    `</feed>\n`;
+  res.writeHead(200, {
+    'Content-Type': 'application/atom+xml; charset=utf-8',
+    // Token feeds are personal — don't let intermediaries cache them.
+    // The reader hits us directly, polling cadence stays its own concern.
+    'Cache-Control': 'private, no-store',
   });
   res.end(xml);
 }
@@ -2819,6 +2956,23 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     : filters.mode === 'all'
       ? 'one stream: notifications received + posts and comments authored, newest first. read state and kind filters apply only to notifications.'
       : 'showing notifications: comments and replies you received, plus mod actions on your content. read items stay visible for 90 days.';
+  // Personal RSS feed URLs. Token generated lazily on first /memlog
+  // visit; rotation invalidates both URLs at once.
+  const rssToken = getOrCreateRssToken(db, handle);
+  const subsRssUrl = `${siteMeta.baseUrl}/u/${rssToken}/subs.rss`;
+  const allRssUrl = `${siteMeta.baseUrl}/u/${rssToken}/rss`;
+  const feedsBlock = html`
+    <details class="memlog-feeds">
+      <summary class="muted">personal RSS feeds</summary>
+      <p class="muted">two pull-only feed URLs tied to your account. drop either into any RSS reader. token in the URL <em>is</em> the credential — keep these private. regenerating rotates both at once.</p>
+      <ul>
+        <li><code>${subsRssUrl}</code> — new posts across your subscribed subs</li>
+        <li><code>${allRssUrl}</code> — the above plus your memlog notifications</li>
+      </ul>
+      <form method="POST" action="/memlog/rss-regenerate" class="filter-form">
+        <button class="filter-btn" title="invalidates both URLs and issues new ones">regenerate token</button>
+      </form>
+    </details>`;
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <div class="memlog-page">
       <p><a href="/">← home</a></p>
@@ -2827,8 +2981,20 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
       <p class="muted">${intro}</p>
       ${filterBar}
       ${body}
+      ${feedsBlock}
     </div>
   `));
+}
+
+async function handleMemlogRssRegenerate(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to regenerate your feed token.',
+    }));
+  }
+  regenerateRssToken(db, handle);
+  redirect(res, '/memlog');
 }
 
 async function handleMemlogMarkRead(req, res, { db, auth }) {
@@ -3768,6 +3934,8 @@ const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
+const PERSONAL_RSS_PATH_RE      = /^\/u\/([0-9a-f]{64})\/rss$/;
+const PERSONAL_SUBS_RSS_PATH_RE = /^\/u\/([0-9a-f]{64})\/subs\.rss$/;
 const SUB_MODLOG_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/modlog$/;
 const SUB_POST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})$/;
 const SUB_POST_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/post\/([0-9a-f]{16})\/edit$/;
@@ -3979,6 +4147,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       if ((m = path.match(SUB_RSS_PATH_RE)) && method === 'GET') {
         return renderSubRss(res, { db, postsDir }, m[1]);
       }
+      if ((m = path.match(PERSONAL_RSS_PATH_RE)) && method === 'GET') {
+        return renderPersonalRss(res, { db, postsDir }, m[1], { includeNotifications: true });
+      }
+      if ((m = path.match(PERSONAL_SUBS_RSS_PATH_RE)) && method === 'GET') {
+        return renderPersonalRss(res, { db, postsDir }, m[1], { includeNotifications: false });
+      }
       if ((m = path.match(SUB_MODLOG_PATH_RE)) && method === 'GET') {
         return renderModLog(req, res, { db, auth }, m[1], url.searchParams);
       }
@@ -3993,6 +4167,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if (path === '/memlog/mark-read' && method === 'POST') {
         return handleMemlogMarkRead(req, res, { db, auth });
+      }
+      if (path === '/memlog/rss-regenerate' && method === 'POST') {
+        return handleMemlogRssRegenerate(req, res, { db, auth });
       }
       if ((m = path.match(/^\/memlog\/go\/(\d+)$/)) && method === 'GET') {
         return handleMemlogGo(req, res, { db, auth }, m[1]);
