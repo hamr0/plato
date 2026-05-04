@@ -1025,6 +1025,9 @@ table.communities th { color: var(--text-dim); font-weight: 500; font-size: 0.78
 table.communities td.num { font-variant-numeric: tabular-nums; text-align: right; }
 table.communities td:first-child { white-space: nowrap; }
 table.communities td.desc-cell { white-space: normal; overflow-wrap: anywhere; }
+table.communities .col-active,
+table.communities .col-owner { white-space: nowrap; }
+table.communities td.col-owner { font-variant-numeric: tabular-nums; }
 table.communities tr:hover td { background: var(--bg-soft); }
 #community-filter {
   background: var(--bg-soft); border: 1px solid var(--border); color: var(--text);

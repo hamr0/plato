@@ -1183,14 +1183,14 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const rows = subs.length === 0
     ? emptyMsg
     : html`<table class="communities">
-        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>subscribers</th><th>active</th><th>owner</th>${subscribeHead}</tr></thead>
+        <thead><tr><th>sub</th><th>description</th><th>posts</th><th>mem</th><th class="col-active">active</th><th class="col-owner">owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted">${subCounts.get(s.name) ?? 0}</td>
-          <td class="muted">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
-          <td class="muted">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
+          <td class="muted col-active">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
+          <td class="muted col-owner">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
           ${subscribeCell(s.name)}
         </tr>`)}</tbody>
       </table>`;
@@ -1299,7 +1299,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}</p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</p>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
