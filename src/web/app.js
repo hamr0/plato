@@ -1049,7 +1049,7 @@ function renderAbout(req, res, { db, auth }) {
   const currentHandle = auth.handleFromRequest(req);
   const handle = branding.hostedBy ?? `@${branding.forumName}`;
   const feedback = branding.feedbackEmail
-    ? html`<p>questions or feedback: <a href="mailto:${branding.feedbackEmail}">${branding.feedbackEmail}</a>.</p>`
+    ? html` <a href="mailto:${branding.feedbackEmail}">questions or feedback</a>.`
     : html``;
   const rules = branding.rules.length > 0
     ? html`<section class="about-section">
@@ -1080,8 +1080,7 @@ function renderAbout(req, res, { db, auth }) {
     canonical: `${siteMeta.baseUrl}/about`,
   }, html`
     <article class="about">
-      <p>this is a <strong>${branding.forumName}</strong> instance, hosted by ${handle}.</p>
-      ${feedback}
+      <p>this is a <strong>${branding.forumName}</strong> instance, hosted by ${handle}.${feedback}</p>
       ${rules}
       ${dataHandling}
       ${fork}
