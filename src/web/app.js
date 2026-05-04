@@ -219,7 +219,7 @@ function siteFooter() {
   return html`<footer class="site-footer">
     <a href="/" class="logo-home">${logoMark({ size: 22 })}</a>
     <span class="hosted-by muted">a plato instance hosted by ${handle}</span>
-    <span class="footer-links muted">${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a></span>
+    <span class="footer-links muted">· ${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a></span>
     <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
