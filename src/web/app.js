@@ -127,6 +127,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
+<script src="/static/subscribe.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -1258,7 +1259,11 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
 
 // Inline subscribe / unsubscribe form for the sub-page header. The
 // label flips based on current state (subscribed → "unsubscribe",
-// otherwise "subscribe"). One POST endpoint, one button — no JS.
+// otherwise "subscribe"). One POST endpoint, one button — works
+// without JS via the standard form submit + 302 redirect; with JS,
+// the static/subscribe.js script intercepts the submit, fetches the
+// POST in place, and flips the label without a full page reload (no
+// flicker, no scroll reset).
 function subscribeForm({ subName, currentHandle, db, returnTo }) {
   const subbed = isSubscribed(db, currentHandle, subName);
   const action = subbed ? 'unsubscribe' : 'subscribe';
