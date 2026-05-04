@@ -16,15 +16,15 @@ test('parseFlairs: empty defaults to []', () => {
 test('parseFlairs: valid array roundtrips', () => {
   const flairs = [
     { slug: 'news',      label: 'news',      color: '#58a6ff' },
-    { slug: 'meta',      label: 'meta',      color: 'rgb(127, 217, 98)' },
+    { slug: 'meta',      label: 'meta',      color: '#3FB950' },
   ];
   assert.deepEqual(parseFlairs(JSON.stringify(flairs)), flairs);
 });
 
 test('parseFlairs: trims label and color whitespace', () => {
-  const out = parseFlairs(JSON.stringify([{ slug: 'a', label: '  news  ', color: '  #fff  ' }]));
+  const out = parseFlairs(JSON.stringify([{ slug: 'a', label: '  news  ', color: '  #ffffff  ' }]));
   assert.equal(out[0].label, 'news');
-  assert.equal(out[0].color, '#fff');
+  assert.equal(out[0].color, '#ffffff');
 });
 
 test('parseFlairs: malformed JSON throws', () => {
@@ -37,63 +37,73 @@ test('parseFlairs: non-array throws', () => {
 
 test('parseFlairs: too many flairs throws', () => {
   const many = Array.from({ length: MAX_FLAIRS_PER_SUB + 1 }, (_, i) => ({
-    slug: `f${i}`, label: `f${i}`, color: '#fff',
+    slug: `f${i}`, label: `f${i}`, color: '#ffffff',
   }));
-  assert.throws(() => parseFlairs(JSON.stringify(many)), /max 12/);
+  assert.throws(() => parseFlairs(JSON.stringify(many)), new RegExp(`max ${MAX_FLAIRS_PER_SUB}`));
 });
 
 test('parseFlairs: duplicate slugs throw', () => {
   assert.throws(
     () => parseFlairs(JSON.stringify([
-      { slug: 'a', label: 'A', color: '#fff' },
-      { slug: 'a', label: 'A2', color: '#000' },
+      { slug: 'a', label: 'A', color: '#ffffff' },
+      { slug: 'a', label: 'A2', color: '#000000' },
     ])),
     /duplicated/
   );
 });
 
 test('parseFlairs: bad slug format throws', () => {
-  assert.throws(() => parseFlairs(JSON.stringify([{ slug: 'BadCaps', label: 'x', color: '#fff' }])), /slug/);
-  assert.throws(() => parseFlairs(JSON.stringify([{ slug: '-leading', label: 'x', color: '#fff' }])), /slug/);
-  assert.throws(() => parseFlairs(JSON.stringify([{ slug: 'a'.repeat(21), label: 'x', color: '#fff' }])), /slug/);
+  assert.throws(() => parseFlairs(JSON.stringify([{ slug: 'BadCaps', label: 'x', color: '#ffffff' }])), /slug/);
+  assert.throws(() => parseFlairs(JSON.stringify([{ slug: '-leading', label: 'x', color: '#ffffff' }])), /slug/);
+  assert.throws(() => parseFlairs(JSON.stringify([{ slug: 'a'.repeat(21), label: 'x', color: '#ffffff' }])), /slug/);
 });
 
 test('parseFlairs: label too long throws', () => {
   assert.throws(
-    () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x'.repeat(25), color: '#fff' }])),
+    () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x'.repeat(25), color: '#ffffff' }])),
     /label/
   );
 });
 
 test('parseFlairs: empty label throws', () => {
   assert.throws(
-    () => parseFlairs(JSON.stringify([{ slug: 'a', label: '', color: '#fff' }])),
+    () => parseFlairs(JSON.stringify([{ slug: 'a', label: '', color: '#ffffff' }])),
     /label/
   );
 });
 
-test('parseFlairs: CSS injection in color throws', () => {
-  assert.throws(
-    () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x', color: 'red; --bg: red' }])),
-    /invalid characters/
-  );
-  assert.throws(
-    () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x', color: 'red} body{color:red' }])),
-    /invalid characters/
-  );
+test('parseFlairs: non-hex color throws', () => {
+  // Hex-only allowlist rejects every CSS-injection vector by construction
+  // (no semicolons, braces, or parens can match `^#[0-9a-f]{6}$`), plus
+  // named colors and rgb()/hsl() functions that the form never emits.
+  for (const bad of [
+    'red; --bg: red',
+    'red} body{color:red',
+    'rgb(127, 217, 98)',
+    'tomato',
+    '#fff',          // 3-digit shorthand: form always emits 6
+    '#1234567',      // 7 digits
+    '58a6ff',        // missing #
+  ]) {
+    assert.throws(
+      () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x', color: bad }])),
+      /must be a 6-digit hex/,
+      `expected ${JSON.stringify(bad)} to be rejected`,
+    );
+  }
 });
 
 test('parseFlairs: missing color throws', () => {
   assert.throws(
     () => parseFlairs(JSON.stringify([{ slug: 'a', label: 'x', color: '' }])),
-    /color/
+    /must be a 6-digit hex/
   );
 });
 
 test('serializeFlairs: validates before stringifying', () => {
-  assert.throws(() => serializeFlairs([{ slug: 'BAD', label: 'x', color: '#fff' }]), /slug/);
+  assert.throws(() => serializeFlairs([{ slug: 'BAD', label: 'x', color: '#ffffff' }]), /slug/);
 });
 
 test('validateFlair: index appears in error', () => {
-  assert.throws(() => validateFlair({ slug: 'BAD', label: 'x', color: '#fff' }, 3), /flair\[3\]/);
+  assert.throws(() => validateFlair({ slug: 'BAD', label: 'x', color: '#ffffff' }, 3), /flair\[3\]/);
 });

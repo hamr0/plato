@@ -5,14 +5,14 @@
 // Posts reference a flair by slug. flairs_required = 1 forces every new
 // post to carry one. Slugs are sub-scoped — same slug across subs is fine.
 
-export const MAX_FLAIRS_PER_SUB = 12;
+export const MAX_FLAIRS_PER_SUB = 6;
 const FLAIR_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$/;
 export const FLAIR_LABEL_MAX = 24;
 
-// Same guard as resolveBrandingColors in app.js: any CSS color string is
-// fine (hex, rgb(), named) but reject characters that can break out of
-// the style attribute and inject rules.
-const COLOR_UNSAFE_RE = /[;{}<>"']/;
+// 6-digit hex only. The flair editor's <input type="color"> always emits
+// `#rrggbb`, so an allowlist matches what the form can send and shrinks
+// the inline-style XSS surface (no rgb()/named/CSS-keyword side doors).
+const FLAIR_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 export function validateFlair({ slug, label, color }, index = 0) {
   if (typeof slug !== 'string' || !FLAIR_SLUG_RE.test(slug)) {
@@ -21,15 +21,8 @@ export function validateFlair({ slug, label, color }, index = 0) {
   if (typeof label !== 'string' || label.length === 0 || label.length > FLAIR_LABEL_MAX) {
     throw new Error(`flair[${index}].label must be 1–${FLAIR_LABEL_MAX} characters`);
   }
-  if (typeof color !== 'string' || color.trim().length === 0) {
-    throw new Error(`flair[${index}].color is required`);
-  }
-  const trimmedColor = color.trim();
-  if (COLOR_UNSAFE_RE.test(trimmedColor)) {
-    throw new Error(`flair[${index}].color contains invalid characters`);
-  }
-  if (trimmedColor.length > 32) {
-    throw new Error(`flair[${index}].color too long`);
+  if (typeof color !== 'string' || !FLAIR_COLOR_RE.test(color.trim())) {
+    throw new Error(`flair[${index}].color must be a 6-digit hex like #3b82f6`);
   }
 }
 

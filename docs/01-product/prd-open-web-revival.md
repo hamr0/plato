@@ -322,7 +322,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | Feature | Status | Notes |
 |---|---|---|
 | B9: branding colors override + vote recolor + edit window + action-pill unification | shipped (M5/B9) | `resolveBrandingColors`; 24h edit window (`EDIT_WINDOW_MS`); `BRAND_ICONS` removed |
-| B10: per-sub flairs | shipped (M5/B10) | max 12, owner-curated, optional `flairs_required` |
+| B10: per-sub flairs | shipped (M5/B10) | max 6, owner-curated, 6-digit hex color, optional `flairs_required` |
 | B11: per-sub sensitive flag | shipped (M5/B11) | amber banner, not NSFW labeling |
 | B11.1: per-post sensitive flag | shipped (M5/B9 polish, migration 012) | author-set; stacks with per-sub flag |
 | B9.1: flair editor simplified | shipped (M5/B9 polish) | label + color only; slug auto-derived; native picker + 8-color palette; auto-contrast text |

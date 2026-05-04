@@ -156,7 +156,7 @@ These are deliberate product decisions. The PRD treats them as load-bearing; cha
 - **Two-tier moderation.** Soft removal (`collapse`, reversible, reason optional, `[+] [collapsed by mod]` chip-as-fold) vs hard removal (`remove`, reason required, `[−] [removed by mod]` static stub). Hard removals never auto-revert via votes; soft removals do, at the per-sub threshold.
 - **Public mod log per sub.** Every action logged with mod handle, action, target, optional reason. System-driven actions (`auto_uncollapse_community`) write `mod_handle = NULL` and render as "community overruled".
 - **No NSFW labeling, no age verification.** Plato uses a generic `sensitive` per-sub flag (M5/B11) — banner + advisory mark in the home strip, no age-gating. NSFW as a label is excluded specifically because the default rules ban porn, so labeling something NSFW would invite the very content the rules forbid. Age verification is an operator-layer concern (reverse proxy / content gateway), not a forum feature.
-- **No tags / hashtags.** Per-sub flairs (M5/B10) are the structured-categorization escape valve: closed list, owner-curated, max 12 per sub, slug + label + raw CSS color, optional unless `flairs_required`.
+- **No tags / hashtags.** Per-sub flairs (M5/B10) are the structured-categorization escape valve: closed list, owner-curated, max 6 per sub, slug derived from label, color is 6-digit hex (8 preset swatches + free-form `<input type="color">` in the editor; both emit `#rrggbb` and the validator hard-rejects everything else), optional unless `flairs_required`.
 - **No private subs.** PRD §Permanently out — different product.
 - **`general` is archive-only.** Legacy backfill bucket from migration 002. New posts must land in a real sub.
 - **No image embeds, no video, no rich media.** Text-first by design.
@@ -270,7 +270,7 @@ System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` r
 | `autoUncollapsePost` | **50** | 50 | Net upvotes since collapse to auto-uncollapse a soft-removed post. Locked at creation. |
 | `autoUncollapseComment` | **20** | 20 | Same, for comments. Locked at creation. |
 | `flagThreshold` | **3** | 3 | Distinct flaggers required to auto-hide a target. Raise to make niche subs more permissive; cannot lower (a single flagger collapsing a target would defeat the "distinct flaggers" defense). |
-| `flairs` | max 12 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?` (no leading/trailing hyphen, 1–20 chars), label ≤ 24 chars, color is any CSS string. Owner-curated. |
+| `flairs` | max 6 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?` (no leading/trailing hyphen, 1–20 chars, derived from label by the form), label ≤ 24 chars, color is 6-digit hex `^#[0-9a-f]{6}$` (8 preset swatches + free-form `<input type="color">` in the editor — both emit `#rrggbb`; rgb()/named/CSS-keyword forms rejected at validate time). Owner-curated. |
 | `flairsRequired` | requires ≥ 1 flair | `false` | When set, every new post in the sub must carry a flair. |
 | `sensitive` | — | `false` | Generic content-advisory flag. Two layers: per-sub (this row, owner-set) renders the amber banner across the whole sub + `[!]` in directories; per-post (author-set on create or within edit window, migration 012) renders the same banner above the individual post body and `[!]` next to the title in feeds. Either source triggers the advisory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
 
@@ -335,7 +335,7 @@ Every number in plato that gates behavior. Floors are PRD-locked safe minimums; 
 | Sub name | 3–30 | `validateSubName` (`sub.js`); regex `[a-z0-9-]`, no leading/trailing hyphen |
 | Sub description | 200 | `SUB_DESCRIPTION_MAX` (`sub.js`) |
 | Flair label | 24 | `FLAIR_LABEL_MAX` (`flair.js`) |
-| Flairs per sub | 12 | `MAX_FLAIRS_PER_SUB` (`flair.js`) |
+| Flairs per sub | 6 | `MAX_FLAIRS_PER_SUB` (`flair.js`) / `FLAIR_EDITOR_ROWS` (`web/app.js`) |
 | Notification snippet | 160 | `SNIPPET_MAX` (`notification.js`) — auto-truncated with `…` |
 | Bare-URL display (visible text only) | 30 | `URL_DISPLAY_MAX` operator-tunable 10–200 (`markdown.js`) |
 | Comment fold preview | 280 | `COMMENT_PREVIEW_CHARS` (`app.js`) |
