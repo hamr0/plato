@@ -98,6 +98,14 @@ export function createSub(db, {
     db.prepare(
       `INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)`
     ).run(name, ownerHandle, 'owner');
+    // Mod role implies subscribership: auto-subscribe the owner so the sub
+    // appears in their subscribed feed without an extra click. The /sub
+    // page hides the subscribe toggle for mods (mod role is sticky;
+    // unsubscribing while modding would just hide the sub from the feed
+    // they need to monitor). UI: see app.js sub-action-row.
+    db.prepare(
+      `INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)`
+    ).run(ownerHandle, name, Date.now());
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');

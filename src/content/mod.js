@@ -138,6 +138,13 @@ function applyState(db, { action, targetType, targetId, subName, modHandle, reas
     }
     // New owner's row in sub_mods, if any, is removed — owner_handle is the source of truth.
     db.prepare('DELETE FROM sub_mods WHERE sub_name = ? AND handle = ?').run(subName, targetId);
+    // Mod role implies subscribership: ensure the new owner is subscribed
+    // so the sub stays in their subscribed feed. They were a co-mod (so
+    // already subscribed at promotion time), but may have unsubscribed
+    // since — re-establish the invariant.
+    db.prepare(
+      `INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)`
+    ).run(targetId, subName, now);
   }
 }
 

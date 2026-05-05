@@ -880,7 +880,7 @@ function buildFlairMap(db, posts) {
 // `mem` matches the /subs directory column header (subscribers count is
 // the "membership" signal exposed at instance level — actual subscriber
 // identities are private per PRD §Sub subscription mechanics).
-function activeSubsBlock({ subs, currentHandle, memCounts }) {
+function activeSubsBlock({ subs, currentHandle, memCounts, modSet }) {
   const top = subs.slice(0, 4);
   const newSubLink = currentHandle
     ? html`<a class="new-sub" href="/sub/create">+ new sub</a>`
@@ -895,7 +895,7 @@ function activeSubsBlock({ subs, currentHandle, memCounts }) {
     <h3 class="section">// active subs · last 24h</h3>
     <div class="active-subs-list">
       ${top.map((s) => html`<div class="active-sub-row">
-        <a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
+        ${modSet?.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
         ${s.sensitive ? html`<span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}
         <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
         <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · <strong data-mem-count="${s.name}">${memCounts?.get(s.name) ?? 0}</strong> mem</span>
@@ -1107,7 +1107,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       canonical: `${siteMeta.baseUrl}/`,
     }, html`
       ${anonHintFor(currentHandle)}
-      ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts })}
+      ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts, modSet: currentHandle ? new Set(listSubsModeratedBy(db, currentHandle)) : null })}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
         ${postFormFor({ currentHandle, postableSubs })}
@@ -1209,6 +1209,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   // column at all — same precedent as the chip strip + the sub-page
   // header button.
   const subscribedSet = currentHandle ? listSubscribedSubs(db, currentHandle) : null;
+  const modSet = currentHandle ? new Set(listSubsModeratedBy(db, currentHandle)) : new Set();
   const subQs = (overrides) => {
     const params = new URLSearchParams();
     const next = { sort, filter: effectiveFilter, ...overrides };
@@ -1245,7 +1246,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>mem</th><th class="col-active">active</th><th class="col-owner">owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
+          <td>${modSet.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" data-mem-count="${s.name}">${subCounts.get(s.name) ?? 0}</td>
@@ -1363,7 +1364,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
+      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle && !modRole ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${subStateBanner({ db, sub, modRole })}
       ${anonHintFor(currentHandle)}
@@ -1581,7 +1582,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
           <datalist id="promote-list-${subName}">
             ${candidates.map((c) => html`<option value="${c.pseudonym}"></option>`)}
           </datalist>
-          <button>promote to co-mod</button>
+          <button class="mod-action-pill">promote to co-mod</button>
         </form>`;
   }
 

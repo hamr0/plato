@@ -1103,25 +1103,60 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 
 /* Inline two-step confirmation: <details> wraps a destructive form so the
    submit only appears after the user opens the disclosure. Replaces native
-   confirm() popups for mod actions (demote, step-down, disable-sub). */
+   confirm() popups for mod actions (demote, step-down, disable-sub).
+   Summary is styled as a blue pill — visually paired with the promote
+   button (.mod-action-pill) so all mod-management triggers read as a set. */
 .inline-confirm { display: inline-block; }
 .inline-confirm > summary {
   list-style: none;
   cursor: pointer;
   font-size: 0.78rem;
-  color: var(--text-dim);
+  color: var(--accent);
   text-decoration: none;
-  border: 1px solid var(--border);
-  padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  border: 1px solid var(--accent);
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
   display: inline-flex;
   align-items: center;
   line-height: 1.2;
+  background: transparent;
 }
 .inline-confirm > summary::-webkit-details-marker { display: none; }
 .inline-confirm > summary::marker { content: ''; }
-.inline-confirm > summary:hover { color: var(--accent); border-color: var(--accent); }
-.inline-confirm[open] > summary { color: var(--accent); border-color: var(--accent); }
+.inline-confirm > summary:hover { background: var(--accent); color: var(--bg); }
+.inline-confirm[open] > summary { background: var(--accent); color: var(--bg); }
+
+/* Promote button — same pill shape as the inline-confirm triggers so all
+   mod-management actions read as a single visual family. */
+.mod-action-pill {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.mod-action-pill:hover { background: var(--accent); color: var(--bg); }
+
+/* Co-mod list: pseudonym + demote pill on a single row. */
+.co-mod-list { list-style: none; padding: 0; margin: 0.4rem 0 0.8rem; }
+.co-mod-list > li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  flex-wrap: wrap;
+}
+
+/* Inline mod indicator before sub names for subs you mod / co-mod. */
+.mod-indicator {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 0.15rem;
+  font-family: var(--font-mono, monospace);
+}
 .inline-confirm-form {
   display: flex;
   flex-wrap: wrap;
