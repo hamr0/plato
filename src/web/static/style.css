@@ -67,7 +67,12 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+/* Global hover hint: dotted underline. Matches the rssvp / subscribe
+   button affordance so every link in the forum reads the same way on
+   hover. Class-specific `text-decoration: underline` rules elsewhere
+   in this file (.memlog-link, .memlog-chip, etc) keep their own
+   solid hover styles where they want a stronger signal. */
+a:hover { text-decoration: underline dotted; }
 
 .muted { color: var(--text-dim); }
 
@@ -554,7 +559,7 @@ button.link {
   font: inherit;
   cursor: pointer;
 }
-button.link:hover { color: var(--accent); text-decoration: underline; }
+button.link:hover { color: var(--accent); text-decoration: underline dotted; }
 
 h3.section {
   font-size: 0.78rem;
@@ -791,7 +796,7 @@ button:hover { filter: brightness(1.1); }
   list-style: none;
 }
 .more-replies > summary::-webkit-details-marker { display: none; }
-.more-replies > summary:hover { text-decoration: underline; }
+.more-replies > summary:hover { text-decoration: underline dotted; }
 
 /* Sticky composer at the bottom of the post page. Always-visible reply
  * affordance — user doesn't need to scroll past long threads to comment.
@@ -983,7 +988,7 @@ a.reply-count .reply-icon { vertical-align: -2px; opacity: 0.85; }
 a.reply-count .reply-count-n { font-variant-numeric: tabular-nums; }
 a.reply-count.reply-count-zero { color: var(--text-dim); font-weight: normal; }
 a.reply-count.reply-count-zero .reply-icon { opacity: 0.55; }
-a.reply-count:hover { text-decoration: underline; }
+a.reply-count:hover { text-decoration: underline dotted; }
 
 /* UX-C: sub color accent on feed. 8-color palette indexed by hash of
  * sub_name (see subColorIndex in app.js). Forks override here. */
@@ -1044,14 +1049,14 @@ table.communities tr:hover td { background: var(--bg-soft); }
 /* memlog (per-user notification log) chrome. */
 .memlog-link { color: var(--accent); text-decoration: none; }
 .memlog-link strong { color: var(--accent); font-weight: 600; }
-.memlog-link:hover strong { text-decoration: underline; }
+.memlog-link:hover strong { text-decoration: underline dotted; }
 .memlog-chip {
   color: var(--accent);
   font-weight: 600;
   text-decoration: none;
   margin-left: 0.15rem;
 }
-.memlog-chip:hover { text-decoration: underline; }
+.memlog-chip:hover { text-decoration: underline dotted; }
 table.modlog tr.memlog-row-read td { opacity: 0.55; }
 table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 
@@ -1065,7 +1070,7 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .rssvp-link:hover { text-decoration: underline dotted; }
 .rssvp-link.rssvp-copied { color: var(--up); text-decoration: none; }
 .memlog-feeds > summary { cursor: pointer; padding: 0.25rem 0; }
-.memlog-feeds > summary:hover .rssvp-mark { text-decoration: underline; }
+.memlog-feeds > summary:hover .rssvp-mark { text-decoration: underline dotted; }
 .rssvp-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
 .rssvp-list li { margin: 0.35rem 0; }
 .rssvp-copy {
