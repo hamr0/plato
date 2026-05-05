@@ -21,6 +21,21 @@ Lowercase + ASCII to fit plato voice and the validator (anti-phishing on the ema
 
 This closes the original M6 "outbound-mail signature + default rules" item: the validator and config wiring shipped in M5, only the baked-in defaults were missing.
 
+### Changed — Per-sub `rssvp` link is now click-to-copy (consistent with `/memlog`)
+
+The per-sub `rssvp` link in the sub-page action row used to be a plain anchor (click → opens Atom XML in browser); the personal feeds on `/memlog` were already click-to-copy buttons. That asymmetry is gone — both surfaces now copy on click and flash a transient `copied!` affordance.
+
+New `src/web/static/rssvp.js` (~50 LOC, defer-loaded in chrome) handles both surfaces with one delegated click listener:
+
+- `.rssvp-copy` (button on `/memlog`, `data-copy=URL`)
+- `.rssvp-link` (anchor in sub-page action row, copies `href`)
+
+Modifier-clicks bypass the handler — `cmd`/`ctrl`/`shift`/`alt`/middle-click all do their normal browser thing (new tab, new window, aux button), so power users keep `open feed in new tab` via context menu / cmd-click. Without JS, `.rssvp-link` still works as a plain link (browser opens the feed) and `.rssvp-copy` text inside `<code>` is selectable. The inline script that previously lived at the bottom of `/memlog` is dropped — `rssvp.js` covers both selectors. CSS adds a dotted-underline hover hint on `.rssvp-link` mirroring `.rssvp-copy` and a green-flash on `.rssvp-copied`.
+
+### Changed — Subscribe / unsubscribe button: drop the static underline
+
+Was rendering `subscribe`/`unsubscribe` as underlined accent text; now no underline at rest, dotted underline on hover. Matches the rhythm of the other accent-colored interactive bits in the action row (`rssvp` link, rssvp copy buttons) — the `·` separators carry enough button-as-text affordance without a static underline.
+
 ### Changed — Subscribe in-place via fetch (kills below-the-fold flicker)
 
 Subscribe / unsubscribe was a full POST → 302 → reload cycle, which caused a visible flicker as below-the-fold content reflowed and scroll reset to the top. New `src/web/static/subscribe.js` (~50 LOC, defer-loaded alongside `vote.js` / `comment.js` / `flair.js`) intercepts the form submit, fetches the POST in place, flips the button label + hidden action input. No full reload, no scroll reset, no flicker. Pure progressive enhancement: without JS the form still POSTs the standard way and the server's 302 still lands the user correctly. 401 (session expired) and network errors fall back to a normal `form.submit()` so the user always gets through.
