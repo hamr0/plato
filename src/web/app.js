@@ -1560,7 +1560,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
               </form>
             </details>`
           : html``);
-    return html`<li><strong>${ps}</strong>${h === currentHandle ? html` <span class="muted">(you)</span>` : html``} ${demoteForm}</li>`;
+    return html`<li><strong>${ps}</strong>${h === currentHandle ? html`<span class="muted">(you)</span>` : html``}${demoteForm}</li>`;
   });
 
   // Promote form: owner picks any subscriber not already a mod. List the
@@ -1626,7 +1626,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   const reactivateBlock = disabled
     ? html`<div class="sensitive-banner">[!] this sub is read-only. <form method="POST" action="/sub/${subName}/mods" class="inline">
         <input type="hidden" name="action" value="reactivate">
-        <button>reactivate</button>
+        <button class="mod-action-pill">reactivate</button>
       </form></div>`
     : html``;
 
@@ -1647,7 +1647,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
             <input type="number" name="flagThreshold" value="${sub.flag_threshold}" min="3" step="1" required>
           </label>
         </fieldset>
-        <button>save</button>
+        <button class="mod-action-pill">save</button>
       </form>
       <p class="muted">name is permanent. auto-uncollapse thresholds locked at creation.</p>`
     : html`<p class="muted">only the sub's mod can edit description, flairs, sensitive flag, and thresholds. co-mods manage their own role here.</p>`;

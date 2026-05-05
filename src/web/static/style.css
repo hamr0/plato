@@ -1140,15 +1140,18 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 }
 .mod-action-pill:hover { background: var(--accent); color: var(--bg); }
 
-/* Co-mod list: pseudonym + demote pill on a single row. */
+/* Co-mod list: pseudonym + demote pill sit tight on a single row, with
+   the expanded confirm form (when [open]) wrapping below the trigger. */
 .co-mod-list { list-style: none; padding: 0; margin: 0.4rem 0 0.8rem; }
 .co-mod-list > li {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
   padding: 0.3rem 0;
   flex-wrap: wrap;
 }
+.co-mod-list > li > strong { margin-right: 0; }
+.co-mod-list > li > .inline-confirm { margin-left: 0; }
 
 /* Inline mod indicator before sub names for subs you mod / co-mod. */
 .mod-indicator {
