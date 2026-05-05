@@ -1545,6 +1545,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
             <input type="hidden" name="target" value="${h}">
             <span class="muted">demote ${ps}? they keep their account but lose mod tools.</span>
             <button>yes, demote</button>
+            <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
           </form>
         </details>`
       : (h === currentHandle
@@ -1554,6 +1555,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
                 <input type="hidden" name="action" value="self_demote">
                 <span class="muted">step down as co-mod of //${subName}? you keep your account but lose mod tools here.</span>
                 <button>yes, step down</button>
+                <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
               </form>
             </details>`
           : html``);
@@ -1589,19 +1591,19 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   let stepDownSection = html``;
   if (isOwner && !disabled) {
     if (coMods.length > 0) {
-      stepDownSection = html`<fieldset class="sub-stepdown">
-        <legend class="muted">step down as mod</legend>
-        <p class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod.</p>
-        <form method="POST" action="/sub/${subName}/mods">
+      stepDownSection = html`<details class="inline-confirm sub-stepdown-toggle">
+        <summary class="action-link">step down as mod</summary>
+        <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form" autocomplete="off">
           <input type="hidden" name="action" value="transfer_owner">
+          <span class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod. logged publicly in the modlog.</span>
           <input name="target" list="successor-list-${subName}" placeholder="pseudonym of co-mod" autocomplete="off" required>
           <datalist id="successor-list-${subName}">
             ${coMods.map((h) => html`<option value="${pseudonymFor(db, h)}"></option>`)}
           </datalist>
           <button>transfer & step down</button>
-          <p class="muted">this is logged publicly in the modlog.</p>
+          <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
         </form>
-      </fieldset>`;
+      </details>`;
     } else {
       stepDownSection = html`<fieldset class="sub-stepdown">
         <legend class="muted">step down as mod</legend>
@@ -1612,6 +1614,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
             <input type="hidden" name="action" value="disable_sub">
             <span class="muted">disable //${subName}? content stays readable; no new posts until a mod reactivates. there is no operator override.</span>
             <button>yes, disable sub</button>
+            <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
           </form>
         </details>
       </fieldset>`;

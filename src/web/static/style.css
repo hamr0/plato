@@ -1135,6 +1135,12 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 }
 .inline-confirm-form > span { flex: 1 1 14rem; font-size: 0.85rem; }
 .inline-confirm-form > button { white-space: nowrap; }
+.inline-confirm-cancel {
+  font-size: 0.78rem;
+  text-decoration: none;
+  padding: 0.15rem 0.4rem;
+}
+.inline-confirm-cancel:hover { color: var(--accent); }
 
 /* Outbound-link badges on feed post rows */
 .links { color: var(--text-dim); font-size: 0.75rem; margin-top: 0.25rem; display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: baseline; }
