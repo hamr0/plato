@@ -182,6 +182,8 @@ Bad shape (too many entries, non-ASCII, contains a URL, joined length over 240) 
 
 Per-page descriptions are auto-derived: `/about` says what plato keeps and doesn't, `/modlog` describes the public audit, sub pages prefer `sub.description`, post pages excerpt the first ~155 chars of the body. See [`docs/04-process/privacy-seo.md`](../04-process/privacy-seo.md) for the full SEO playbook (head tags, robots.txt, sitemap.xml, what's never added).
 
+Two more audience signals ship at root: `/humans.txt` (lists the operator handle, the project, Apache-2.0, and the "what we don't do" stance — no analytics, no third-party JS, no tracking, no email retention, no algorithmic feed) and `/.well-known/security.txt` (RFC 9116 — Contact resolves to `branding.feedbackEmail` if set, else the GitHub issues URL; Expires auto-renews to 365 days from each request so a long-running instance never serves a stale date). Both static-shape, no new config keys, derive entirely from existing branding. Tier 1 + tier 2 of the playbook complete; `og:image` (1200×630 PNG card for richer link unfurls) and JSON-LD remain explicitly deferred — image is M8 polish, JSON-LD is "skip on principle" per the playbook itself.
+
 **Reserved sub names.** Add to `RESERVED_SUB_NAMES` in `src/content/sub.js` if your fork adds a new top-level URL (e.g., `/shop`) that you don't want a sub to collide with.
 
 ### Tier 2: Hardcoded constant, restart, requires a deliberate decision

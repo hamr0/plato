@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — `/humans.txt` and `/.well-known/security.txt`
+
+Closes the tier-1+2 portion of `docs/04-process/privacy-seo.md` for plato. The headline OG / canonical / robots.txt / sitemap.xml work was already in place; this adds the two cheap signals the playbook recommends and notes as "optional but valuable" for privacy-positioned projects.
+
+- **`GET /humans.txt`** — terse, ASCII, no third-party links. Names the operator (from `branding.hostedBy`), the project (`plato` + GitHub URL + Apache-2.0), and a "what we don't do" stance: no analytics, no third-party JS, no tracking pixels, no email retention, no algorithmic feed. The audience that opens humans.txt is the audience that values the gesture.
+- **`GET /.well-known/security.txt`** (RFC 9116) — Contact field uses `branding.feedbackEmail` if set, else falls back to the GitHub issues URL. Expires field auto-renews 365 days from each request so an instance that just keeps running doesn't surface stale dates. Preferred-Languages: en. Acknowledgments points at `/about`.
+
+Both endpoints serve `text/plain; charset=utf-8`. No new branding fields or config keys — fully derives from existing operator config.
+
+Deferred to M8 polish (matches the same posture as late.fyi): `og:image` (a 1200×630 PNG card for richer link unfurls). Without it, link unfurls fall back to title+description, which still works. JSON-LD remains explicitly skipped on principle, per the privacy-seo.md guidance.
+
+2 new integration tests in `test/integration/seo.test.js`. 571/571 (was 569).
+
 ### Added — M5/B12: daily inactivity cron + about-page guide (commit 2 of 2)
 
 Closes the M5/B12 arc. Commit 1 shipped the data model, write-path enforcement, and UI; this commit ships the cron that exercises the 30-day rule and the docs/UX surface that makes it legible to mods and members.

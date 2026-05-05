@@ -74,6 +74,30 @@ test('GET /robots.txt: standard policy + sitemap reference', async (t) => {
   assert.match(body, /^Disallow: \/sub\/\*\/subscribe$/m);
 });
 
+test('GET /humans.txt: lists project + privacy posture, no analytics mention', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/humans.txt');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/plain/);
+  const body = await res.text();
+  assert.match(body, /name:\s+plato/);
+  assert.match(body, /https:\/\/github\.com\/hamr0\/plato/);
+  assert.match(body, /Apache-2\.0/);
+  assert.match(body, /no analytics/);
+  assert.match(body, /no third-party javascript/);
+});
+
+test('GET /.well-known/security.txt: RFC 9116 minimum (Contact + Expires)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/.well-known/security.txt');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/plain/);
+  const body = await res.text();
+  assert.match(body, /^Contact:/m);
+  assert.match(body, /^Expires:\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m);
+  assert.match(body, /^Preferred-Languages:\s+en$/m);
+});
+
 test('GET /sitemap.xml: lists static pages + every sub + every non-removed post', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;

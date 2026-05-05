@@ -2526,6 +2526,61 @@ function renderRobots(res) {
   res.end(lines.join('\n'));
 }
 
+// /humans.txt — web-revival adjacent, signals the people behind the
+// instance. Keep it terse, ASCII, no links to ad networks. The audience
+// that opens humans.txt is the audience that values the gesture.
+function renderHumans(res) {
+  const lines = [
+    `/* the people behind this instance */`,
+    ``,
+    `name:   ${branding.hostedBy ?? branding.forumName}`,
+  ];
+  if (branding.feedbackEmail) lines.push(`contact: ${branding.feedbackEmail}`);
+  lines.push(
+    ``,
+    `/* the software */`,
+    ``,
+    `name:    plato`,
+    `source:  https://github.com/hamr0/plato`,
+    `license: Apache-2.0`,
+    ``,
+    `/* what we don't do */`,
+    ``,
+    `* no analytics`,
+    `* no third-party javascript`,
+    `* no tracking pixels`,
+    `* no email retention (magic-link login only; addresses hashed away on receipt)`,
+    `* no algorithmic feed`,
+    ``,
+  );
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(lines.join('\n'));
+}
+
+// /.well-known/security.txt — RFC 9116. Declares how to report security
+// issues. Doesn't help SEO; signals seriousness to the audience that
+// looks for it. The Contact field is required; everything else is
+// optional but useful.
+function renderSecurityTxt(res) {
+  // 1-year expiry from boot. Operators who want a longer window edit
+  // and redeploy; the constant lives at request-time so it auto-renews
+  // without code changes for an instance that just keeps running.
+  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+    .toISOString().slice(0, 19) + 'Z';
+  const contact = branding.feedbackEmail
+    ? `mailto:${branding.feedbackEmail}`
+    : `https://github.com/hamr0/plato/issues`;
+  const lines = [
+    `Contact: ${contact}`,
+    `Expires: ${expires}`,
+    `Preferred-Languages: en`,
+    `Acknowledgments: ${siteMeta.baseUrl}/about`,
+    ``,
+  ];
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(lines.join('\n'));
+}
+
 // /sitemap.xml — every public, indexable URL on this instance:
 //   /, /about, /modlog, /subs, /sub/<name>, /sub/<name>/post/<id>
 // Pagination + filter params excluded; canonical pages only.
@@ -4402,6 +4457,8 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
 
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
+      if (path === '/humans.txt' && method === 'GET') return renderHumans(res);
+      if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
       if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);
