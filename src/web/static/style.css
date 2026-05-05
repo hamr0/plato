@@ -1101,6 +1101,41 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 }
 .action-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
 
+/* Inline two-step confirmation: <details> wraps a destructive form so the
+   submit only appears after the user opens the disclosure. Replaces native
+   confirm() popups for mod actions (demote, step-down, disable-sub). */
+.inline-confirm { display: inline-block; }
+.inline-confirm > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.2;
+}
+.inline-confirm > summary::-webkit-details-marker { display: none; }
+.inline-confirm > summary::marker { content: ''; }
+.inline-confirm > summary:hover { color: var(--accent); border-color: var(--accent); }
+.inline-confirm[open] > summary { color: var(--accent); border-color: var(--accent); }
+.inline-confirm-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-soft, transparent);
+}
+.inline-confirm-form > span { flex: 1 1 14rem; font-size: 0.85rem; }
+.inline-confirm-form > button { white-space: nowrap; }
+
 /* Outbound-link badges on feed post rows */
 .links { color: var(--text-dim); font-size: 0.75rem; margin-top: 0.25rem; display: flex; gap: 0.9rem; flex-wrap: wrap; align-items: baseline; }
 .links .lh { display: inline-flex; align-items: center; }

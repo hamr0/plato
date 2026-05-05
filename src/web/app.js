@@ -1538,16 +1538,24 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   const coModRows = coMods.map((h) => {
     const ps = pseudonymFor(db, h);
     const demoteForm = isOwner
-      ? html`<form method="POST" action="/sub/${subName}/mods" class="inline" onsubmit="return confirm('demote ${ps} from co-mod? they keep their account but lose mod tools in //${subName}.');">
-          <input type="hidden" name="action" value="demote_mod">
-          <input type="hidden" name="target" value="${h}">
-          <button>demote</button>
-        </form>`
+      ? html`<details class="inline-confirm">
+          <summary class="action-link">demote</summary>
+          <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form">
+            <input type="hidden" name="action" value="demote_mod">
+            <input type="hidden" name="target" value="${h}">
+            <span class="muted">demote ${ps}? they keep their account but lose mod tools.</span>
+            <button>yes, demote</button>
+          </form>
+        </details>`
       : (h === currentHandle
-          ? html`<form method="POST" action="/sub/${subName}/mods" class="inline" onsubmit="return confirm('step down as co-mod of //${subName}? you keep your account but lose mod tools here.');">
-              <input type="hidden" name="action" value="self_demote">
-              <button>step down</button>
-            </form>`
+          ? html`<details class="inline-confirm">
+              <summary class="action-link">step down</summary>
+              <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form">
+                <input type="hidden" name="action" value="self_demote">
+                <span class="muted">step down as co-mod of //${subName}? you keep your account but lose mod tools here.</span>
+                <button>yes, step down</button>
+              </form>
+            </details>`
           : html``);
     return html`<li><strong>${ps}</strong>${h === currentHandle ? html` <span class="muted">(you)</span>` : html``} ${demoteForm}</li>`;
   });
@@ -1584,23 +1592,28 @@ function renderSubEdit(req, res, { db, auth }, subName) {
       stepDownSection = html`<fieldset class="sub-stepdown">
         <legend class="muted">step down as mod</legend>
         <p class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod.</p>
-        <form method="POST" action="/sub/${subName}/mods" onsubmit="return confirm('transfer mod role for //${subName}? you become a co-mod; the chosen successor takes over as mod. this is logged publicly.');">
+        <form method="POST" action="/sub/${subName}/mods">
           <input type="hidden" name="action" value="transfer_owner">
           <input name="target" list="successor-list-${subName}" placeholder="pseudonym of co-mod" autocomplete="off" required>
           <datalist id="successor-list-${subName}">
             ${coMods.map((h) => html`<option value="${pseudonymFor(db, h)}"></option>`)}
           </datalist>
           <button>transfer & step down</button>
+          <p class="muted">this is logged publicly in the modlog.</p>
         </form>
       </fieldset>`;
     } else {
       stepDownSection = html`<fieldset class="sub-stepdown">
         <legend class="muted">step down as mod</legend>
         <p class="muted">no co-mods exist. stepping down here will <strong>disable the sub</strong> — content stays readable, but no new posts/comments/votes until a mod returns. there is no operator override; communities reactivate themselves or members migrate by creating a new sub.</p>
-        <form method="POST" action="/sub/${subName}/mods" onsubmit="return confirm('disable //${subName}? content stays readable; no new posts until reactivated.');">
-          <input type="hidden" name="action" value="disable_sub">
-          <button>disable sub</button>
-        </form>
+        <details class="inline-confirm">
+          <summary class="action-link">disable sub</summary>
+          <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form">
+            <input type="hidden" name="action" value="disable_sub">
+            <span class="muted">disable //${subName}? content stays readable; no new posts until a mod reactivates. there is no operator override.</span>
+            <button>yes, disable sub</button>
+          </form>
+        </details>
       </fieldset>`;
     }
   }
