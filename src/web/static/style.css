@@ -1157,7 +1157,8 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
    surrogate for the maxlength attribute so users can see how much room
    remains as they type / paste. Goes accent-warm at 90%, accent-warn
    at the cap. */
-.textarea-wrap { position: relative; display: block; }
+.textarea-wrap { position: relative; display: block; width: 100%; }
+.textarea-wrap > textarea { width: 100%; box-sizing: border-box; }
 .char-counter {
   font-size: 0.72rem;
   text-align: right;

@@ -6,6 +6,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — M5/B12 smoke-pass UX polish
+
+Follow-up to M5/B12 after the first smoke run. All behavior locks; the
+underlying mod model and sub-state lifecycle are unchanged.
+
+- **Self-flag rejected.** `submitFlag` now refuses when the flagger is the
+  target's author, and the flag affordance is hidden on your own posts and
+  comments. Self-flag would only pollute the audit trail; authors edit or
+  remove their own content directly.
+- **Modlog labels.** Rows for `promote_mod`, `demote_mod`, `transfer_owner`,
+  `auto_disable_inactivity`, and `manual_reactivate` now render with
+  human-readable labels instead of raw enum strings.
+- **Mod-management forms re-styled as inline `<details>` confirms.** Demote,
+  step-down, disable-sub, and transfer-owner triggers no longer use browser-
+  native `confirm()` popups; they're rounded-blue pills (matching the
+  promote / save / reactivate buttons) that expand inline to reveal the
+  confirmation text + submit button + cancel link. Cancel hard-refreshes
+  the manage page so a half-typed picker can't get stuck open across
+  navigations.
+- **Pseudonym-typeahead pickers.** Promote and successor pickers swapped
+  `<select>` for `<input list>` + `<datalist>` so long subscriber lists are
+  filterable. Handler resolves typed pseudonyms → handles via the UNIQUE
+  constraint on `handles.pseudonym`; still accepts 64-char handles for
+  back-compat.
+- **Mods are implicitly subscribed to subs they moderate.** `createSub`
+  auto-inserts a subscription row for the owner, and `transfer_owner` does
+  the same for the new owner. The subscribe / unsubscribe toggle is hidden
+  on `/sub/<name>` when the current user has any mod role — mod role is a
+  stickier relationship than subscription, and unsubscribing while modding
+  would just hide the sub from the feed they need to monitor. Subscriptions
+  remain personal-preference-toggleable for non-mod users (PRD lock).
+- **Sub-mod link in header survives transfers.** `listSubsModeratedBy` now
+  UNIONs `subs.owner_handle` so the new owner of a transferred sub still
+  sees their `/modlog` link in the page header. (`transfer_owner` removes
+  the new owner's `sub_mods` row — owner_handle is the source of truth, but
+  the listing query was only reading `sub_mods`.)
+- **`>` indicator** prefixed to subs the current user moderates in the
+  `/subs` directory and the home active-subs block.
+- **Browser-side maxlength + live char counter** on every post and comment
+  textarea (new post, post edit, top-level comment, comment reply, comment
+  edit). The browser refuses keystrokes past `BODY_MAX` (40000) /
+  `COMMENT_BODY_MAX` (10000) and a small "<used> / <max>" counter goes
+  accent-warm at 90% so users aren't surprised by the cap. Server-side
+  validation in `submitDraft` / `editPost` / `addComment` / `editComment`
+  remains the backstop.
+- **`subs.owner_handle` UNION fix is regression-tested** in
+  `test/integration/sub-state.test.js`. Self-flag also has an integration
+  test in `test/integration/flag.test.js`. 573/573.
+
 ### Added — `/humans.txt` and `/.well-known/security.txt`
 
 Closes the tier-1+2 portion of `docs/04-process/privacy-seo.md` for plato. The headline OG / canonical / robots.txt / sitemap.xml work was already in place; this adds the two cheap signals the playbook recommends and notes as "optional but valuable" for privacy-positioned projects.
