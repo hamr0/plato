@@ -66,8 +66,16 @@ export function submitFlag(db, {
   // Existence check before the UNIQUE collision so the error message is
   // friendlier than "FOREIGN KEY constraint failed".
   const table = targetType === 'post' ? 'posts' : 'comments';
-  const target = db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(targetId);
+  const target = db.prepare(`SELECT id, handle FROM ${table} WHERE id = ?`).get(targetId);
   if (!target) throw new Error(`submitFlag: ${targetType} ${targetId} not found`);
+
+  // Self-flag is a no-op concern (the author can edit/delete their own
+  // content directly). Reject so the audit trail isn't polluted with
+  // "user flagged themselves" rows. UI hides the affordance too; this
+  // is the mechanism-layer guard.
+  if (target.handle === flaggerHandle) {
+    throw new Error('submitFlag: cannot flag your own content');
+  }
 
   // Reject flagging in a read-only sub. The target may still need attention,
   // but a sub awaiting reactivation isn't generating new mod activity, so a

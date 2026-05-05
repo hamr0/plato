@@ -322,6 +322,11 @@ const MOD_ACTION_LABELS = {
   remove:                    'hard removal',
   unremove:                  'hard removal undone',
   auto_uncollapse_community: 'community overruled',
+  promote_mod:               'promoted to co-mod',
+  demote_mod:                'demoted from co-mod',
+  transfer_owner:            'transferred mod role',
+  auto_disable_inactivity:   'auto-disabled (mod inactivity)',
+  manual_reactivate:         'reactivated',
 };
 
 function logoMark({ size = 22, loading = false } = {}) {
@@ -783,7 +788,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
         <div class="post-title-line">
           <h2><a href="${link}">${post.title}</a>${(post.sensitive || post.sub_sensitive) ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
           <div class="post-actions">
-            ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
+            ${currentHandle && currentHandle !== post.handle && post.removed_at == null && !(modRole && subName === post.sub_name)
               ? flagButton({
                   targetType: 'post', targetId: post.id, returnTo: perPostReturn,
                   alreadyFlagged: flaggedSet?.has(post.id) ?? false,
@@ -1531,13 +1536,13 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   const coModRows = coMods.map((h) => {
     const ps = pseudonymFor(db, h);
     const demoteForm = isOwner
-      ? html`<form method="POST" action="/sub/${subName}/mods" class="inline">
+      ? html`<form method="POST" action="/sub/${subName}/mods" class="inline" onsubmit="return confirm('demote ${ps} from co-mod? they keep their account but lose mod tools in //${subName}.');">
           <input type="hidden" name="action" value="demote_mod">
           <input type="hidden" name="target" value="${h}">
           <button>demote</button>
         </form>`
       : (h === currentHandle
-          ? html`<form method="POST" action="/sub/${subName}/mods" class="inline">
+          ? html`<form method="POST" action="/sub/${subName}/mods" class="inline" onsubmit="return confirm('step down as co-mod of //${subName}? you keep your account but lose mod tools here.');">
               <input type="hidden" name="action" value="self_demote">
               <button>step down</button>
             </form>`
@@ -1560,10 +1565,10 @@ function renderSubEdit(req, res, { db, auth }, subName) {
       ? html`<p class="muted">no eligible subscribers to promote. members must subscribe to the sub first.</p>`
       : html`<form method="POST" action="/sub/${subName}/mods" class="inline">
           <input type="hidden" name="action" value="promote_mod">
-          <select name="target" required>
-            <option value="">— pick a subscriber —</option>
-            ${candidates.map((c) => html`<option value="${c.user_handle}">${c.pseudonym}</option>`)}
-          </select>
+          <input name="target" list="promote-list-${subName}" placeholder="pseudonym" autocomplete="off" required>
+          <datalist id="promote-list-${subName}">
+            ${candidates.map((c) => html`<option value="${c.pseudonym}"></option>`)}
+          </datalist>
           <button>promote to co-mod</button>
         </form>`;
   }
@@ -1577,12 +1582,12 @@ function renderSubEdit(req, res, { db, auth }, subName) {
       stepDownSection = html`<fieldset class="sub-stepdown">
         <legend class="muted">step down as mod</legend>
         <p class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod.</p>
-        <form method="POST" action="/sub/${subName}/mods">
+        <form method="POST" action="/sub/${subName}/mods" onsubmit="return confirm('transfer mod role for //${subName}? you become a co-mod; the chosen successor takes over as mod. this is logged publicly.');">
           <input type="hidden" name="action" value="transfer_owner">
-          <select name="target" required>
-            <option value="">— pick a successor —</option>
-            ${coMods.map((h) => html`<option value="${h}">${pseudonymFor(db, h)}</option>`)}
-          </select>
+          <input name="target" list="successor-list-${subName}" placeholder="pseudonym of co-mod" autocomplete="off" required>
+          <datalist id="successor-list-${subName}">
+            ${coMods.map((h) => html`<option value="${pseudonymFor(db, h)}"></option>`)}
+          </datalist>
           <button>transfer & step down</button>
         </form>
       </fieldset>`;
@@ -1717,14 +1722,24 @@ async function handleSubMods(req, res, { db, auth }, subName) {
     title: 'action failed', message: msg,
     links: html`<p><a href="${back}">← back</a></p>`,
   }));
+  // promote_mod and transfer_owner accept either a 64-char handle (legacy
+  // / hidden-field path) or a pseudonym typed into the datalist input.
+  // Pseudonyms are UNIQUE per instance; resolve to handle here.
+  const resolveTargetHandle = (raw) => {
+    if (!raw) return null;
+    if (raw.length === 64 && /^[0-9a-f]+$/.test(raw)) return raw;
+    const row = db.prepare('SELECT handle FROM handles WHERE pseudonym = ?').get(raw);
+    return row?.handle ?? null;
+  };
 
   try {
     if (action === 'promote_mod') {
       if (role !== 'owner') return rejectWith('only the mod can promote co-mods.');
-      if (!target || target.length !== 64) return rejectWith('pick a subscriber to promote.');
+      const targetHandle = resolveTargetHandle(target);
+      if (!targetHandle) return rejectWith('pick a subscriber to promote (no user with that pseudonym).');
       recordAction(db, {
         subName, modHandle: currentHandle, action: 'promote_mod',
-        targetType: 'handle', targetId: target,
+        targetType: 'handle', targetId: targetHandle,
       });
     } else if (action === 'demote_mod') {
       if (role !== 'owner') return rejectWith('only the mod can demote co-mods. (you can step down via the self-demote button.)');
@@ -1742,10 +1757,11 @@ async function handleSubMods(req, res, { db, auth }, subName) {
       });
     } else if (action === 'transfer_owner') {
       if (role !== 'owner') return rejectWith('only the mod can transfer the role.');
-      if (!target || target.length !== 64) return rejectWith('pick a successor from your co-mods.');
+      const targetHandle = resolveTargetHandle(target);
+      if (!targetHandle) return rejectWith('pick a successor from your co-mods (no user with that pseudonym).');
       recordAction(db, {
         subName, modHandle: currentHandle, action: 'transfer_owner',
-        targetType: 'handle', targetId: target,
+        targetType: 'handle', targetId: targetHandle,
       });
     } else if (action === 'disable_sub') {
       if (role !== 'owner') return rejectWith('only the mod can disable the sub.');
@@ -2103,7 +2119,7 @@ function commentNodeView(node, ctx, depth) {
         ${ctx.currentHandle === node.handle && !removed && (Date.now() - node.created_at) <= COMMENT_EDIT_WINDOW_MS
           ? html`<a class="action-link" href="/sub/${ctx.subName}/post/${ctx.postId}/comment/${node.id}/edit">edit</a>`
           : html``}
-        ${ctx.currentHandle && !removed && !ctx.modRole
+        ${ctx.currentHandle && ctx.currentHandle !== node.handle && !removed && !ctx.modRole
           ? flagButton({
               targetType: 'comment', targetId: node.id,
               returnTo: `${ctx.returnTo}#comment-${node.id}`,
@@ -2212,7 +2228,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
               ${currentHandle === post.handle && post.removed_at == null && (Date.now() - post.created_at) <= POST_EDIT_WINDOW_MS
                 ? html`<a class="action-link" href="/sub/${subName}/post/${postId}/edit">edit</a>`
                 : html``}
-              ${currentHandle && post.removed_at == null && !modRole
+              ${currentHandle && currentHandle !== post.handle && post.removed_at == null && !modRole
                 ? flagButton({
                     targetType: 'post', targetId: postId, returnTo,
                     alreadyFlagged: flaggedPosts.has(postId),

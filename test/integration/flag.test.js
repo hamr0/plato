@@ -63,6 +63,19 @@ test('submitFlag: rejects unknown target', () => {
   );
 });
 
+test('submitFlag: rejects self-flag (author flagging their own content)', () => {
+  const db = freshDb();
+  assert.throws(
+    () => submitFlag(db, { targetType: 'post', targetId: 'p1', flaggerHandle: OWNER, category: 'spam' }),
+    /cannot flag your own content/,
+  );
+  assert.throws(
+    () => submitFlag(db, { targetType: 'comment', targetId: 'c1', flaggerHandle: OWNER, category: 'spam' }),
+    /cannot flag your own content/,
+  );
+  assert.equal(pendingFlagCount(db, 'post', 'p1'), 0);
+});
+
 test('submitFlag: rejects invalid category', () => {
   const db = freshDb();
   assert.throws(
