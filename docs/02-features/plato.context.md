@@ -308,6 +308,10 @@ Marker: `/subs` directory shows `[read-only]` next to disabled-sub names. PRD-lo
 - **Self-demote** allowed for co-mods on `demote_mod` (carve-out from OWNER_ONLY check when `mod_handle === target_id`). Demoting *another* co-mod still requires owner.
 - **Step-down (mod)** = `transfer_owner` to a chosen co-mod (if any exist) or `disable_sub` (if none). Mod cannot just leave; sub always has either a successor or read-only state.
 - **Mod queue** is shared between mod and co-mods. No fan-out notifications when a flag arrives — pending actions are visible to anyone with mod role on the sub. The first to act records the row. Modlog rows do NOT carry a role badge — pseudonym is the actor identity, role at-time-of-action is intentionally not denormalized.
+- **Mod role implies subscribership.** `createSub` auto-subscribes the owner; `transfer_owner` re-establishes the subscription for the new owner. The `/sub/<name>` action row hides the subscribe / unsubscribe toggle for any user with mod role on that sub. Subscriptions remain personal-preference for non-mod users (PRD lock unchanged). `listSubsModeratedBy` UNIONs `subs.owner_handle` with `sub_mods` so the post-transfer owner keeps their `/modlog` header link even though `transfer_owner` deletes their `sub_mods` row (owner_handle is the source of truth).
+- **Mod-management UI: pill triggers + inline `<details>` confirms.** Promote / save / reactivate are blue pills (`.mod-action-pill`); demote / step-down / disable-sub / transfer-owner triggers are `<details>` whose `<summary>` matches the same pill style and whose body contains the confirmation form + a `cancel` link. No browser-native `confirm()`. Subs the current user moderates carry a `>` indicator before the sub name in `/subs` and the home active-subs block.
+- **Modlog action labels.** `MOD_ACTION_LABELS` (in `src/web/app.js`) covers `promote_mod`, `demote_mod`, `transfer_owner`, `auto_disable_inactivity`, `manual_reactivate` so rows render as e.g. "transferred mod role" rather than the raw enum.
+- **Pseudonym → handle resolution** for the promote and successor pickers. The form posts the typed pseudonym (from a `<datalist>`); the handler resolves to a handle via the UNIQUE `handles.pseudonym` lookup before calling `recordAction`. 64-char hex handles still pass through for back-compat.
 
 ### Per-handle rules (locked)
 
@@ -357,7 +361,10 @@ Every number in plato that gates behavior. Floors are PRD-locked safe minimums; 
 | Auto-uncollapse comments | 20 | 20 | `AUTO_UNCOLLAPSE_COMMENT_FLOOR` (`sub.js`) |
 | Flag threshold (distinct flaggers to auto-hide for review) | 3 | 3 | `FLAG_THRESHOLD_FLOOR` (`flag.js`) |
 
-### Length limits (server-side; forms also carry `maxlength`)
+### Length limits (server-side validation + browser `maxlength` + live char counter)
+
+Every long-form input pairs three layers: `<textarea data-charcount maxlength="…">` for browser-side hard-stop, a sibling `.char-counter` updated by `static/charcount.js` so users see how much room remains, and a server-side `if (body.length > MAX) throw` in the content module as the backstop. The browser refuses keystrokes past the cap; the counter goes accent-warm at 90% so a paste-near-the-limit isn't surprising.
+
 
 | Field | Max chars | Source |
 |---|---|---|
