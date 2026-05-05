@@ -247,20 +247,21 @@ export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, off
     clauses.push(`sub_name IN (${subNames.map(() => '?').join(',')})`);
     params.push(...subNames);
   }
-  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-  const baseSelect = `SELECT *,
+  const where = clauses.length > 0 ? `WHERE ${clauses.map((c) => `posts.${c}`).join(' AND ')}` : '';
+  const baseSelect = `SELECT posts.*,
+    s.sensitive AS sub_sensitive,
     (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
-    FROM posts ${where}`;
+    FROM posts LEFT JOIN subs s ON s.name = posts.sub_name ${where}`;
   if (sort === 'hot') {
     return db.prepare(
-      `${baseSelect} ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC LIMIT ? OFFSET ?`
+      `${baseSelect} ORDER BY score / POWER((? - posts.created_at) / 3600000.0 + 2, 1.5) DESC, posts.created_at DESC LIMIT ? OFFSET ?`
     ).all(...params, now, limit, offset);
   }
   const order = sort === 'top'
-    ? 'ORDER BY score DESC, created_at DESC'
+    ? 'ORDER BY posts.score DESC, posts.created_at DESC'
     : sort === 'old'
-      ? 'ORDER BY created_at ASC'
-      : 'ORDER BY created_at DESC';
+      ? 'ORDER BY posts.created_at ASC'
+      : 'ORDER BY posts.created_at DESC';
   return db.prepare(`${baseSelect} ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset);
 }
 
@@ -275,10 +276,13 @@ export function listPostsAcrossSubs(db, { sort = 'new', sinceMs, limit = 50, off
 //   10-min-old shrugs. Tunable in v1.1 if usage suggests it.
 // Time inputs are injectable so tests can assert deterministic ordering
 // against synthetic timestamps without real-clock manipulation.
+// Columns are explicitly prefixed with `posts.` because the queries below
+// LEFT JOIN subs (for sub_sensitive); unqualified column names would be
+// ambiguous if a future migration adds a same-named column on subs.
 const SORT_CLAUSES = {
-  new: 'ORDER BY created_at DESC',
-  old: 'ORDER BY created_at ASC',
-  top: 'ORDER BY score DESC, created_at DESC',
+  new: 'ORDER BY posts.created_at DESC',
+  old: 'ORDER BY posts.created_at ASC',
+  top: 'ORDER BY posts.score DESC, posts.created_at DESC',
 };
 
 export const SUB_SORTS = ['new', 'old', 'top', 'hot'];
@@ -286,23 +290,26 @@ export const SUB_SORTS = ['new', 'old', 'top', 'hot'];
 export function listPostsInSub(db, subName, { limit = 50, offset = 0, sort = 'new', flairSlug = null, now = Date.now() } = {}) {
   if (!SUB_SORTS.includes(sort)) throw new Error(`listPostsInSub: unknown sort '${sort}'`);
 
-  const flairFilter = flairSlug ? 'AND flair_slug = ?' : '';
+  const flairClause = flairSlug ? 'AND posts.flair_slug = ?' : '';
   const flairArg = flairSlug ? [flairSlug] : [];
 
   if (sort === 'hot') {
     return db.prepare(`
-      SELECT *,
+      SELECT posts.*,
+        s.sensitive AS sub_sensitive,
         (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
-      FROM posts
-      WHERE sub_name = ? ${flairFilter}
-      ORDER BY score / POWER((? - created_at) / 3600000.0 + 2, 1.5) DESC, created_at DESC
+      FROM posts LEFT JOIN subs s ON s.name = posts.sub_name
+      WHERE posts.sub_name = ? ${flairClause}
+      ORDER BY posts.score / POWER((? - posts.created_at) / 3600000.0 + 2, 1.5) DESC, posts.created_at DESC
       LIMIT ? OFFSET ?
     `).all(subName, ...flairArg, now, limit, offset);
   }
 
   return db.prepare(
-    `SELECT *,
+    `SELECT posts.*,
+       s.sensitive AS sub_sensitive,
        (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) AS comment_count
-     FROM posts WHERE sub_name = ? ${flairFilter} ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
+     FROM posts LEFT JOIN subs s ON s.name = posts.sub_name
+     WHERE posts.sub_name = ? ${flairClause} ${SORT_CLAUSES[sort]} LIMIT ? OFFSET ?`
   ).all(subName, ...flairArg, limit, offset);
 }

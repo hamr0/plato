@@ -127,7 +127,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
-<script src="/static/subscribe.js?v=1" defer></script>
+<script src="/static/subscribe.js?v=2" defer></script>
 <script src="/static/rssvp.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
@@ -596,7 +596,7 @@ function parseFlairFormFields(form) {
   return out;
 }
 
-function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false, defaults = {} }) {
+function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false, defaults = {}, subSensitive = false }) {
   // No default catch-all sub — every post must pick a sub with a real owner.
   // When a sub is contextually fixed (the sub page itself), the picker is
   // hidden and pinned. Otherwise both anon and logged-in users see a real
@@ -668,8 +668,10 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     ${flairField}
     <textarea name="body" placeholder="markdown body" required>${dBody}</textarea>
     <label class="post-form-row sensitive-row">
-      <input type="checkbox" name="sensitive" value="1" ${dSensitive ? 'checked' : ''}>
-      <span class="muted">mark as sensitive (advisory banner; not for porn — see rules)</span>
+      <input type="checkbox" name="sensitive" value="1" ${(dSensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
+      <span class="muted">${subSensitive
+        ? html`this sub is marked sensitive — all posts inherit the <span class="sensitive-mark">[!]</span> badge`
+        : html`mark as sensitive (advisory banner; not for porn — see rules)`}</span>
     </label>
     <button>post</button>
   </form>`;
@@ -698,6 +700,7 @@ function postRetryView({ db, currentHandle, subName, errorMessage, defaults }) {
       subFlairs,
       flairsRequired,
       defaults,
+      subSensitive: !!sub?.sensitive,
     })}
   `;
 }
@@ -776,7 +779,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
       })}
       <div class="body">
         <div class="post-title-line">
-          <h2><a href="${link}">${post.title}</a>${post.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
+          <h2><a href="${link}">${post.title}</a>${(post.sensitive || post.sub_sensitive) ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
           <div class="post-actions">
             ${currentHandle && post.removed_at == null && !(modRole && subName === post.sub_name)
               ? flagButton({
@@ -886,7 +889,7 @@ function activeSubsBlock({ subs, currentHandle, memCounts }) {
         <a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
         ${s.sensitive ? html`<span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}
         <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
-        <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · <strong>${memCounts?.get(s.name) ?? 0}</strong> mem</span>
+        <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · <strong data-mem-count="${s.name}">${memCounts?.get(s.name) ?? 0}</strong> mem</span>
       </div>`)}
     </div>
     ${newSubLink ? html`<p class="active-subs-foot">${newSubLink}</p>` : html``}
@@ -1220,7 +1223,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
           <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
-          <td class="num muted">${subCounts.get(s.name) ?? 0}</td>
+          <td class="num muted" data-mem-count="${s.name}">${subCounts.get(s.name) ?? 0}</td>
           <td class="muted col-active">${s.last_post_at ? relativeTime(s.last_post_at) : '—'}</td>
           <td class="muted col-owner">${s.owner_handle ? (pseudonyms.get(s.owner_handle) ?? s.owner_handle.slice(0, 8)) : '—'}</td>
           ${subscribeCell(s.name)}
@@ -1340,7 +1343,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
-        ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [], subFlairs, flairsRequired: !!sub.flairs_required })}
+        ${postFormFor({ currentHandle, defaultSub: subName, postableSubs: [], subFlairs, flairsRequired: !!sub.flairs_required, subSensitive: !!sub.sensitive })}
       </details>
       <h3 class="section">// posts · sort:</h3>
       ${sortNav}
@@ -1975,7 +1978,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
           </div>
           ${authorMeta({ ...post, comment_count: comments.length }, pseudonyms.get(post.handle), { showComments: true, flair: postFlair })}
           ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
-          ${post.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
+          ${(post.sensitive || sub.sensitive) ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
           ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
         </div>
       </div>
@@ -2119,6 +2122,8 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     return send(res, 403, quickPage(req, { db, auth }, 'edit window closed', html`<p class="muted">the 24h edit window has passed. <a href="${permalinkFor(post)}">back</a></p>`));
   }
   const permalink = permalinkFor(post);
+  const sub = getSubByName(db, subName);
+  const subSensitive = !!sub?.sensitive;
   send(res, 200, pageView({ db, currentHandle: handle, title: `edit: ${post.title}` }, html`
     <p><a href="${permalink}">← back to post</a></p>
     <h2 class="section">// edit post</h2>
@@ -2126,8 +2131,10 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
       <label>body (markdown)</label>
       <textarea name="body" required>${body}</textarea>
       <label class="post-form-row sensitive-row">
-        <input type="checkbox" name="sensitive" value="1" ${post.sensitive ? 'checked' : ''}>
-        <span class="muted">mark as sensitive (advisory banner; not for porn — see rules)</span>
+        <input type="checkbox" name="sensitive" value="1" ${(post.sensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
+        <span class="muted">${subSensitive
+          ? html`this sub is marked sensitive — all posts inherit the <span class="sensitive-mark">[!]</span> badge`
+          : html`mark as sensitive (advisory banner; not for porn — see rules)`}</span>
       </label>
       <div class="form-actions">
         <button>save</button>

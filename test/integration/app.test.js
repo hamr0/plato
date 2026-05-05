@@ -558,6 +558,74 @@ test('home active-subs block: empty-state when no sub had posts in last 24h', as
   assert.doesNotMatch(body, /\/sub\/beta/);
 });
 
+test('mem-count cells carry data-mem-count for the optimistic subscribe.js update', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const handle = 'h'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'memtest', Date.now());
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, ?, ?, ?, ?, ?)`)
+    .run('1'.repeat(16), 'lobby', handle, 't', 'posts/x.md', Date.now());
+
+  // /subs directory cell carries the attr
+  const subsBody = await (await fetch(`${baseUrl}/subs`)).text();
+  assert.match(subsBody, /data-mem-count="lobby"/);
+
+  // home active-subs strip carries the attr too (post in last 24h gates inclusion)
+  const homeBody = await (await fetch(`${baseUrl}/`)).text();
+  assert.match(homeBody, /data-mem-count="lobby"/);
+});
+
+test('sensitive sub: posts inherit [!] in list + banner on detail; flipping the sub flag unmarks them', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+
+  // Sub created sensitive; post itself has post.sensitive = 0.
+  db.prepare('INSERT INTO subs (name, created_at, sensitive) VALUES (?, ?, 1)').run('lobby', Date.now());
+  const handle = 'h'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(handle, 'sens-test', Date.now());
+  const postId = '1'.repeat(16);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, sensitive)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(postId, 'lobby', handle, 'cw-inherits', 'posts/cw.md', Date.now(), 0);
+  // file body: getPost reads the markdown file
+  const fs = await import('node:fs');
+  fs.writeFileSync(`${ctx.postsDir}/cw.md`, '---\nid: x\n---\nbody');
+
+  // List view: badge present even though post.sensitive=0
+  let body = await (await fetch(`${baseUrl}/sub/lobby`)).text();
+  assert.match(body, /sensitive-mark/);
+
+  // Detail view: banner derives from sub.sensitive
+  body = await (await fetch(`${baseUrl}/sub/lobby/post/${postId}`)).text();
+  assert.match(body, /sensitive-banner/);
+
+  // Flip sub flag off — badge and banner disappear; never sticky.
+  db.prepare('UPDATE subs SET sensitive = 0 WHERE name = ?').run('lobby');
+  body = await (await fetch(`${baseUrl}/sub/lobby`)).text();
+  assert.doesNotMatch(body, /sensitive-mark/);
+  body = await (await fetch(`${baseUrl}/sub/lobby/post/${postId}`)).text();
+  assert.doesNotMatch(body, /sensitive-banner/);
+});
+
+test('sensitive sub: new-post form has checkbox checked + disabled + explainer', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  db.prepare('INSERT INTO subs (name, created_at, sensitive) VALUES (?, ?, 1)').run('gritty', Date.now());
+
+  const body = await (await fetch(`${baseUrl}/sub/gritty`)).text();
+  // Checkbox renders with both `checked` and `disabled`
+  assert.match(body, /name="sensitive"[^>]*checked[^>]*disabled|name="sensitive"[^>]*disabled[^>]*checked/);
+  assert.match(body, /this sub is marked sensitive/);
+});
+
 test('M3: legacy /post/<id> 301 redirects to /sub/<name>/post/<id>', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

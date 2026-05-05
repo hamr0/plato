@@ -319,7 +319,7 @@ test('GET /subs: subscriber column reflects real counts', async (t) => {
   // <td class="num muted">. Anchored to the row to avoid matching meta.
   const lobbyRow = body.match(/<tr>[^]*?\/sub\/lobby[^]*?<\/tr>/)?.[0] ?? '';
   assert.ok(lobbyRow, 'lobby row should exist');
-  assert.match(lobbyRow, /<td class="num muted">1<\/td>/);
+  assert.match(lobbyRow, /<td class="num muted" data-mem-count="lobby">1<\/td>/);
 });
 
 test('GET /sub/<name>: subscribe button absent for anonymous', async (t) => {

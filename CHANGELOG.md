@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — Subscribe / unsubscribe now updates the visible mem count without a reload
+
+The progressive-enhancement subscribe button (`static/subscribe.js`) flips its label in place to kill the post-redirect flicker, but until now it never touched the adjacent `mem` column number — so on `/subs` and the home `// active subs` strip, the count stayed stale until the next full page load. Without JS the 302 redirect rendered fresh counts and it worked; the JS path was the regression.
+
+Fix: every mem-count cell now carries `data-mem-count="<subname>"` (`/subs` directory `<td>`, home active-subs strip `<strong>`). On submit, `subscribe.js` does an optimistic ±1 on every matching cell — no new server endpoint, no JSON contract, no reload. Server is still the source of truth on next load. Without JS, nothing changes — the no-JS path was already correct.
+
+Cache-busting bumped on the `<script src=...?v=2>` tag so cached browsers pick up the new behavior.
+
+### Changed — Sensitive flag on a sub now propagates to every post under it
+
+Marking a sub as sensitive (`/sub/<name>/edit` → sensitive checkbox) now causes every post in that sub to render the `[!]` badge in lists and the sensitive banner on the post detail page — without touching `posts.sensitive` in the DB. The rule is a render-time derivation: `effective_sensitive = post.sensitive OR sub.sensitive`. Flipping the sub flag back unmarks all the posts; never sticky, never denormalized.
+
+The new-post form on a sensitive sub renders the `mark as sensitive` checkbox `checked` + `disabled` with a one-line explainer (`this sub is marked sensitive — all posts inherit the [!] badge`), so authors see why the badge is being applied. The edit-post form does the same when the post's sub is currently sensitive.
+
+Implementation:
+- `listPostsAcrossSubs` and `listPostsInSub` now `LEFT JOIN subs` and expose `sub_sensitive` on each row.
+- `postRowsView` and the post detail page use `post.sensitive || sub.sensitive` for both the inline `[!]` and the full-width banner.
+- `postFormFor` accepts a `subSensitive` flag; pinned-sub callers (sub page, retry view) and the edit-post form pass it through.
+
+5 new tests in `test/integration/sensitive.test.js` and `test/integration/app.test.js` cover: `sub_sensitive` exposed across all sort modes, list+detail rendering inheriting the badge, the badge disappearing when the sub flag is flipped off, and the disabled-checkbox UI on a sensitive sub's new-post form.
+
 ### Added — M6 closeout: default community rules ship baked-in
 
 `DEFAULT_BRANDING_RULES` exported from `src/web/app.js`. A fresh instance with no `branding.rules` configured surfaces the canonical four-line default on `/about` and at the foot of every magic-link email:

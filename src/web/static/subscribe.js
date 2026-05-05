@@ -47,9 +47,25 @@
       // Flip label + hidden action. The user's next click will toggle
       // back. No partial state — server is the source of truth, and a
       // page reload would reflect the same flipped state.
-      const flipped = actionInput.value === 'subscribe' ? 'unsubscribe' : 'subscribe';
+      const wasSubscribe = actionInput.value === 'subscribe';
+      const flipped = wasSubscribe ? 'unsubscribe' : 'subscribe';
       actionInput.value = flipped;
       button.textContent = flipped;
+
+      // Optimistic ±1 on every visible mem-count cell for this sub.
+      // The action URL is /sub/<name>/subscribe — pull the name back out.
+      // No-op if no cell exists (e.g. on the sub page itself, where mem
+      // count isn't surfaced).
+      const m = (form.getAttribute('action') ?? '').match(/\/sub\/([^/]+)\/subscribe$/);
+      if (m) {
+        const subName = m[1];
+        const delta = wasSubscribe ? 1 : -1;
+        const cells = document.querySelectorAll(`[data-mem-count="${CSS.escape(subName)}"]`);
+        cells.forEach((el) => {
+          const n = parseInt(el.textContent, 10);
+          if (Number.isFinite(n)) el.textContent = String(Math.max(0, n + delta));
+        });
+      }
     } catch (err) {
       // Network blip / blocked fetch — fall back to a normal submit so
       // the user still gets the action through.
