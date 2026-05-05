@@ -450,11 +450,15 @@ function listPostableSubs(db) {
 // description, hottest first. Home renders the top 4 as the
 // "// active subs · last 24h" block.
 function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {}) {
+  // INNER JOIN excludes subs with zero posts in the window — "active in
+  // last 24h" should not lie. If no sub had any activity, the caller's
+  // empty-state branch handles the fallback ("no subs yet").
   return db.prepare(
-    `SELECT s.name, s.description,
-       (SELECT COUNT(*) FROM posts p WHERE p.sub_name = s.name AND p.created_at >= ?) AS post_count
+    `SELECT s.name, s.description, s.sensitive, COUNT(p.id) AS post_count
      FROM subs s
+     JOIN posts p ON p.sub_name = s.name AND p.created_at >= ?
      WHERE s.name != 'general'
+     GROUP BY s.name, s.description, s.sensitive
      ORDER BY post_count DESC, s.name ASC`
   ).all(sinceMs);
 }
@@ -872,7 +876,7 @@ function activeSubsBlock({ subs, currentHandle, memCounts }) {
   if (top.length === 0) {
     return html`<section class="active-subs">
       <h3 class="section">// active subs · last 24h</h3>
-      <p class="muted"><em>no subs yet.</em> ${newSubLink}</p>
+      <p class="muted"><em>no activity in the last 24h.</em> <a href="/subs">browse all subs</a> ${newSubLink}</p>
     </section>`;
   }
   return html`<section class="active-subs">

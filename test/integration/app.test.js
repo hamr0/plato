@@ -500,20 +500,21 @@ test('M2: /draft to unknown sub returns 400', async (t) => {
   assert.match(await res.text(), /doesn't exist/);
 });
 
-test('home active-subs block: shows top 4 subs by 24h post count', async (t) => {
+test('home active-subs block: shows only subs with posts in last 24h, top 4 by post count', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
 
-  // Five real subs; top 4 by activity should appear, fifth should not.
-  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon']) {
+  // Six real subs; only the four with recent posts should appear.
+  for (const name of ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta']) {
     db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run(name, Date.now());
   }
   const handle = 'h'.repeat(64);
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, 'strip-test', Date.now() - 10000);
-  // alpha(5), beta(3), gamma(1) get recent posts; delta and epsilon get none (alphabetical tiebreak).
-  for (const [name, n] of [['alpha', 5], ['beta', 3], ['gamma', 1]]) {
+  // alpha(5), beta(3), gamma(2), delta(1) get recent posts; epsilon and
+  // zeta get nothing — strict 24h filter must exclude them entirely.
+  for (const [name, n] of [['alpha', 5], ['beta', 3], ['gamma', 2], ['delta', 1]]) {
     for (let i = 0; i < n; i++) {
       db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
                   VALUES (?, ?, ?, ?, ?, ?)`)
@@ -524,19 +525,22 @@ test('home active-subs block: shows top 4 subs by 24h post count', async (t) => 
   const res = await fetch(baseUrl + '/');
   const body = await res.text();
 
-  // Active-subs block present, top 4 subs rendered.
   assert.match(body, /class="active-subs"/);
   assert.match(body, /\/sub\/alpha/);
   assert.match(body, /\/sub\/beta/);
   assert.match(body, /\/sub\/gamma/);
-  assert.match(body, /\/sub\/delta/);   // 4th by tiebreak (alpha sort after gamma)
-  assert.doesNotMatch(body, /\/sub\/epsilon/); // 5th — not shown
+  assert.match(body, /\/sub\/delta/);
+  // Subs with no activity in 24h are excluded — "active in last 24h"
+  // shouldn't lie. Zero-post subs were getting padded in before; that
+  // was the bug the strict-filter fix closed.
+  assert.doesNotMatch(body, /\/sub\/epsilon/);
+  assert.doesNotMatch(body, /\/sub\/zeta/);
 
-  // Order: alpha (most active) appears before delta (zero activity).
+  // Order: most-active first.
   assert.ok(body.indexOf('/sub/alpha') < body.indexOf('/sub/delta'));
 });
 
-test('home active-subs block: renders with fewer than 4 subs', async (t) => {
+test('home active-subs block: empty-state when no sub had posts in last 24h', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));
   const { db, baseUrl } = ctx;
@@ -547,8 +551,11 @@ test('home active-subs block: renders with fewer than 4 subs', async (t) => {
   const res = await fetch(baseUrl + '/');
   const body = await res.text();
   assert.match(body, /class="active-subs"/);
-  assert.match(body, /\/sub\/alpha/);
-  assert.match(body, /\/sub\/beta/);
+  assert.match(body, /no activity in the last 24h/);
+  assert.match(body, /browse all subs/);
+  // Subs exist but had no recent posts — neither row renders.
+  assert.doesNotMatch(body, /\/sub\/alpha/);
+  assert.doesNotMatch(body, /\/sub\/beta/);
 });
 
 test('M3: legacy /post/<id> 301 redirects to /sub/<name>/post/<id>', async (t) => {
