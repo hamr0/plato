@@ -134,6 +134,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/subscribe.js?v=2" defer></script>
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
+<script src="/static/uxbits.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -690,6 +691,40 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
   </form>`;
 }
 
+// Translate raw mechanism-layer errors to user-facing copy. Strips the
+// function-name prefix and the 64-char handle, second-person framing.
+// Falls through to the original message for cases we haven't classified
+// (length issues, link cap, rate limit, etc. — those already read OK).
+function friendlyPostError(message, subName) {
+  if (!message) return 'something went wrong.';
+  // finalizeDraft: <handle> is banned from <sub>
+  if (/ is banned from /.test(message)) {
+    return `you've been banned from //${subName}. you can post your draft to a different sub below, or step away.`;
+  }
+  if (/ is read-only/.test(message)) {
+    return `//${subName} is read-only — no new posts until a mod reactivates it. pick a different sub below.`;
+  }
+  if (/requires a flair/.test(message)) {
+    return `//${subName} requires a flair on every post. pick one from the dropdown.`;
+  }
+  if (/is not available in /.test(message)) {
+    return `the flair you picked isn't available in //${subName}. pick another.`;
+  }
+  // Strip "submitDraft:" / "finalizeDraft:" / "editPost:" prefixes for any
+  // remaining throws so the banner doesn't read like a stack trace.
+  return message.replace(/^(submitDraft|finalizeDraft|editPost|addComment|editComment):\s*/, '');
+}
+
+// Scenarios where the user's only recovery is to re-target the draft to
+// a different sub: banned, sub read-only, flair mismatch. For these, the
+// retry view exposes the full sub dropdown so the post can be moved.
+function isSubSpecificRejection(message) {
+  return / is banned from /.test(message)
+    || / is read-only/.test(message)
+    || /requires a flair/.test(message)
+    || /is not available in /.test(message);
+}
+
 // Re-render the post form with the user's typed values preserved, plus an
 // inline error banner. Used when a logged-in user's submission is rejected
 // post-validation (link cap, rate limit, banned, flair mismatch). Avoids the
@@ -698,22 +733,32 @@ function postRetryView({ db, currentHandle, subName, errorMessage, defaults }) {
   const sub = subName ? getSubByName(db, subName) : null;
   const subFlairs = sub ? parseFlairs(sub.flairs) : [];
   const flairsRequired = !!sub?.flairs_required;
+  const friendly = friendlyPostError(errorMessage, subName);
+  // For ban/read-only/flair errors, surface the full sub dropdown so the
+  // user can move their draft. Other errors (length, link cap, rate
+  // limit) keep the sub fixed — the issue is in the body, not the
+  // destination.
+  const subSpecific = isSubSpecificRejection(errorMessage);
+  const allPostable = subSpecific ? listPostableSubs(db) : [];
   const backLink = subName
     ? html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`
     : html`<p><a href="/">← back home</a></p>`;
   return html`
     ${backLink}
     <h2 class="section">// post not accepted</h2>
-    <div class="post-error-banner">${errorMessage}</div>
+    <div class="post-error-banner">
+      <span class="post-error-message">${friendly}</span>
+      <button type="button" class="post-error-copy" data-copy-target="body" title="copy your draft to clipboard">copy your draft</button>
+    </div>
     <p class="muted">your text is preserved below — fix the issue and resubmit.</p>
     ${postFormFor({
       currentHandle,
-      defaultSub: subName ?? null,
-      postableSubs: [],
-      subFlairs,
-      flairsRequired,
+      defaultSub: subSpecific ? null : subName,
+      postableSubs: allPostable,
+      subFlairs: subSpecific ? [] : subFlairs,
+      flairsRequired: subSpecific ? false : flairsRequired,
       defaults,
-      subSensitive: !!sub?.sensitive,
+      subSensitive: !!sub?.sensitive && !subSpecific,
     })}
   `;
 }

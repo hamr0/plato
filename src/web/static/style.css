@@ -1290,7 +1290,25 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   border-radius: 3px;
   font-family: monospace;
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
 }
+.post-error-banner > .post-error-message { flex: 1 1 18rem; }
+.post-error-copy {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.post-error-copy:hover { background: var(--accent); color: var(--bg); }
+.post-error-copy:disabled { opacity: 0.6; cursor: default; }
 
 /* Sensitive content advisory — generic, not NSFW. The default rules ban
    porn (see operator-guide), so calling this "NSFW" would invite content
