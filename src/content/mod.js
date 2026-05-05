@@ -231,11 +231,20 @@ export function listModActions(db, subName, { limit = 100, offset = 0 } = {}) {
 // Subs (by name) where this handle has any mod role (owner or co). Used to
 // surface a "modlog" link in the header for active mods, and to gate the
 // cross-sub /modlog view to actions in the user's own subs.
+//
+// Owner is sourced from subs.owner_handle (source of truth); co-mods from
+// sub_mods. After transfer_owner the new owner is removed from sub_mods,
+// so a UNION across both tables is required to keep their modlog link.
 export function listSubsModeratedBy(db, handle) {
   if (!handle) return [];
   return db.prepare(
-    `SELECT sub_name FROM sub_mods WHERE handle = ? ORDER BY sub_name ASC`
-  ).all(handle).map((r) => r.sub_name);
+    `SELECT sub_name FROM (
+       SELECT name AS sub_name FROM subs WHERE owner_handle = ?
+       UNION
+       SELECT sub_name        FROM sub_mods WHERE handle = ?
+     )
+     ORDER BY sub_name ASC`
+  ).all(handle, handle).map((r) => r.sub_name);
 }
 
 // Cross-sub mod actions for a multi-sub mod. Includes sub_name in each row

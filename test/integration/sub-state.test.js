@@ -10,6 +10,7 @@ import { createSub } from '../../src/content/sub.js';
 import {
   recordAction, canModerate, isDisabled, listCoMods,
   lastModActivity, runInactivitySweep, SUB_INACTIVITY_THRESHOLD_MS,
+  listSubsModeratedBy,
 } from '../../src/content/mod.js';
 import { finalizeDraft, submitDraft } from '../../src/content/post.js';
 import { addComment } from '../../src/content/comment.js';
@@ -270,6 +271,27 @@ test('transfer_owner: old mod becomes co-mod, new mod takes over', () => {
   });
   assert.equal(canModerate(db, 'lobby', SUBSCRIBER), 'owner');
   assert.equal(canModerate(db, 'lobby', OWNER), 'co');
+  // Both must surface the sub in listSubsModeratedBy so the header
+  // "modlog" link renders for both. Regression guard: transfer_owner
+  // deletes the new owner's sub_mods row, so the listing has to UNION
+  // subs.owner_handle to keep them.
+  assert.deepEqual(listSubsModeratedBy(db, SUBSCRIBER), ['lobby']);
+  assert.deepEqual(listSubsModeratedBy(db, OWNER), ['lobby']);
+});
+
+test('listSubsModeratedBy: returns sub for fresh owner, co-mod, and post-transfer owner', () => {
+  const db = fresh();
+  // Fresh owner (createSub inserts both owner_handle and sub_mods)
+  assert.deepEqual(listSubsModeratedBy(db, OWNER), ['lobby']);
+  // Promote co-mod
+  subscribe(db, SUBSCRIBER);
+  recordAction(db, {
+    subName: 'lobby', modHandle: OWNER, action: 'promote_mod',
+    targetType: 'handle', targetId: SUBSCRIBER,
+  });
+  assert.deepEqual(listSubsModeratedBy(db, SUBSCRIBER), ['lobby']);
+  // Stranger: empty
+  assert.deepEqual(listSubsModeratedBy(db, STRANGER), []);
 });
 
 // --- Inactivity cron sweep (M5/B12 commit 2) ---
