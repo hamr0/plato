@@ -67,11 +67,10 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; }
-/* Global hover hint: dotted underline. Matches the rssvp / subscribe
-   button affordance so every link in the forum reads the same way on
-   hover. Class-specific `text-decoration: underline` rules elsewhere
-   in this file (.memlog-link, .memlog-chip, etc) keep their own
-   solid hover styles where they want a stronger signal. */
+/* Global hover hint: dotted underline. Forum-wide consistency — every
+   class-specific hover rule below uses the same `underline dotted`
+   so the hover affordance reads the same anywhere a user moves the
+   cursor. If you add a new hover rule, match the pattern. */
 a:hover { text-decoration: underline dotted; }
 
 .muted { color: var(--text-dim); }
