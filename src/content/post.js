@@ -3,7 +3,7 @@ import { writeFileSync, readFileSync, mkdirSync, renameSync, unlinkSync } from '
 import { resolve, basename } from 'node:path';
 import { renderMarkdown } from './markdown.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
-import { isBanned } from './mod.js';
+import { isBanned, isDisabled } from './mod.js';
 import { parseFlairs } from './flair.js';
 
 // Post + draft IDs are 8 random bytes (16 hex chars). Birthday-collision
@@ -93,6 +93,9 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   if (isBanned(db, draft.sub_name, handle)) {
     throw new Error(`finalizeDraft: ${handle} is banned from ${draft.sub_name}`);
   }
+  if (isDisabled(db, draft.sub_name)) {
+    throw new Error(`finalizeDraft: //${draft.sub_name} is read-only`);
+  }
 
   // Validate flair against the sub's current list. Drafts can outlive flair
   // edits (a flair removed between draft and finalize); reject the post in
@@ -175,6 +178,7 @@ export function editPost(db, { postId, handle, body, sensitive, postsDir, now = 
   if (!post) throw new Error(`editPost: post ${postId} not found`);
   if (post.handle !== handle) throw new Error('editPost: not the author');
   if (now - post.created_at > EDIT_WINDOW_MS) throw new Error('editPost: edit window has closed');
+  if (isDisabled(db, post.sub_name)) throw new Error(`editPost: //${post.sub_name} is read-only`);
 
   const absPath = resolve(postsDir, basename(post.file_path));
   const raw = readFileSync(absPath, 'utf8');

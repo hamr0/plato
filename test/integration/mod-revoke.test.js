@@ -92,6 +92,9 @@ test('buildRevokeMap: only revocable actions count (no transfer_owner etc.)', ()
   // promote_mod: even though it has an inverse (demote_mod), REVOKE_MAP
   // intentionally doesn't list it — sub-keys-of-the-kingdom changes need
   // explicit re-action through the mod-management surface, not a one-click.
+  // M5/B12: promote_mod target must be subscribed to the sub.
+  db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)')
+    .run(VICTIM, 'lobby', Date.now());
   recordAction(db, {
     subName: 'lobby', modHandle: OWNER, action: 'promote_mod', targetType: 'handle', targetId: VICTIM,
   });

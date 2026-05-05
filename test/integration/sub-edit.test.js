@@ -125,10 +125,13 @@ async function loginPlainUser(ctx, { email }) {
   return { jar, handle };
 }
 
-test('GET /sub/<name>/edit: co-mod (non-owner) gets 403', async (t) => {
+test('GET /sub/<name>/edit: co-mod sees a manage page (no 403); owner-only fields hidden', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { jar: ownerJar, ownerHandle } = await loginAndCreateSub(ctx, { email: 'owner@x.test', sub: 'lobby' });
   const { handle: comodHandle } = await loginPlainUser(ctx, { email: 'comod@x.test' });
+  // M5/B12: promotion requires the target to be subscribed to the sub.
+  ctx.db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)')
+    .run(comodHandle, 'lobby', Date.now());
   recordAction(ctx.db, {
     subName: 'lobby', modHandle: ownerHandle,
     action: 'promote_mod', targetType: 'handle', targetId: comodHandle,
@@ -147,7 +150,13 @@ test('GET /sub/<name>/edit: co-mod (non-owner) gets 403', async (t) => {
     return { jar: j };
   })();
   const res = await jfetch(comodJar, ctx.baseUrl + '/sub/lobby/edit');
-  assert.equal(res.status, 403);
+  // M5/B12: co-mods get the manage page (so they can self-demote) but the
+  // owner-only fields (description, flairs, threshold) are not rendered.
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /step down/);
+  assert.doesNotMatch(body, /flag auto-hide threshold/);
+  assert.doesNotMatch(body, /one-line description/);
 });
 
 test('POST /sub/<name>/edit: below-floor flagThreshold rolls back all other writes', async (t) => {

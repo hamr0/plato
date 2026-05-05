@@ -15,6 +15,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { pseudonymFor } from '../identity/pseudonym.js';
+import { isDisabled } from './mod.js';
 
 const ID_BYTES = 8;
 const newId = () => randomBytes(ID_BYTES).toString('hex');
@@ -67,6 +68,16 @@ export function submitFlag(db, {
   const table = targetType === 'post' ? 'posts' : 'comments';
   const target = db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(targetId);
   if (!target) throw new Error(`submitFlag: ${targetType} ${targetId} not found`);
+
+  // Reject flagging in a read-only sub. The target may still need attention,
+  // but a sub awaiting reactivation isn't generating new mod activity, so a
+  // new flag would just sit forever. Surface to the user instead.
+  const subName = targetType === 'post'
+    ? db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(targetId)?.sub_name
+    : db.prepare('SELECT p.sub_name AS sub_name FROM posts p JOIN comments c ON c.post_id = p.id WHERE c.id = ?').get(targetId)?.sub_name;
+  if (subName && isDisabled(db, subName)) {
+    throw new Error(`submitFlag: //${subName} is read-only`);
+  }
 
   const id = newId();
   db.exec('BEGIN');

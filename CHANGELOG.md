@@ -6,6 +6,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M5/B12: co-mod model + sub state lifecycle (commit 1 of 2; cron deferred)
+
+Plato's two-tier mod model is now usable end-to-end. Previously the data layer supported owner + co-mod roles (migration 002, sub_mods table) but there was no UI to actually create co-mods — they could only be added via direct SQL. This commit ships the management surface, plus the read-only state mechanism that closes off the operator-as-arbiter posture for sub governance.
+
+**New on `/sub/<name>/edit` (now accessible to all mods, was owner-only):**
+- Co-mod list with promote/demote forms for the owner.
+- Promote dropdown lists current subscribers; non-subscribers cannot be promoted (eligibility check at promotion time only — unsubscribing later does not auto-revoke mod status).
+- Self-demote button for co-mods (step down without owner action).
+- Step-down section for the owner: with co-mods, picks a successor and transfers ownership; without co-mods, replaces the form with "disable sub" — the only way out of being the only mod.
+- Reactivate button surfaces when the sub is in read-only state and the user is a current mod.
+- Owner-only fields (description, flairs, sensitive, threshold) hidden from co-mods. Page title flips from "edit" to "manage" to reflect the broader scope.
+- Sub-page action row now shows "manage" (instead of owner-only "edit sub") for any mod role.
+
+**New sub state — read-only:**
+- Migration 016: `subs.disabled_at INTEGER NULL`. Active = NULL; read-only = unix-ms timestamp of disable.
+- Migration 017: extends `mod_actions.action` CHECK with `auto_disable_inactivity` and `manual_reactivate`; extends `target_type` CHECK to include `'sub'` so sub-state changes record cleanly in the public modlog.
+- Read-only sub rejects all writes: post finalize, comment, vote, flag, and mod actions other than `manual_reactivate`. Reads stay fully open. Subscribe/unsubscribe stay open (subscription is a personal preference, not content).
+- Recovery: any current mod flips it back via the reactivate button. If no mods exist (the disable-on-step-down case), the sub is permanently read-only — no operator override path exists. Members migrate by creating a successor sub via normal in-app affordances. The PRD's *Permanently out* list now locks both the lack of operator authority over sub governance and the lack of any "close my sub" button.
+
+**Banner surface:**
+- Per-sub banner (computed from current state, no DB column) renders at the top of `/sub/<name>` in three modes: read-only-with-mods (prompts mod to reactivate), read-only-without-mods (member-fork only, no operator), and 28-day-warning (active sub, mods inactive 28+ days, surfaces a "this will become read-only in ~Nh, create a successor sub now" prompt with the explicit migration framing).
+- `/subs` directory marks read-only subs with a `[read-only]` chip next to the name (alongside the existing `[!]` for sensitive).
+
+**Mod content layer (`src/content/mod.js`):**
+- `MOD_ACTIONS` extended to 11 entries (was 9): adds `auto_disable_inactivity` and `manual_reactivate`.
+- `recordAction` enforces: subscriber-eligibility on `promote_mod`, self-demote carve-out on `demote_mod`, system-handle requirement on `auto_disable_inactivity`, read-only gate on every action except reactivate.
+- New helpers: `isDisabled`, `modsOfSub`, `listCoMods`, `lastModActivity` (max across posts/comments/mod_actions by any current mod, the cron's input next commit), `listDisabledSubs`. `SUB_INACTIVITY_THRESHOLD_MS` (30d) and `SUB_INACTIVITY_WARNING_MS` (28d) exported as floor-locked constants.
+
+**PRD updates:**
+- Rewrote "Mod structure" with the M5/B12 model: one mod per sub, subscriber-eligibility, self-demote, no fan-out (shared queue is the channel), no role badge in modlog rendering.
+- New "Sub Lifecycle" section: two states only (active, read-only), entry paths (step-down-no-successor, 30d cron — cron in commit 2), exit paths, operator-out-of-sub-governance posture. Marker on `/subs`, not `/about` (refined from earlier draft).
+- Five new entries in *Permanently out*: sub rename, more-than-two-states, "close my sub" affordance, auto-archive on post age, operator authority over sub-level governance (with the operator-coercion-via-authority defense framing), fan-out push notifications.
+
+**What ships in commit 2 (deferred):**
+- The daily cron that runs `lastModActivity` and auto-disables subs at 30d. Without this, the warning banner still surfaces (computed from current state) but auto-disable doesn't fire — still safe, just manual-step-down only for now.
+
+15 new integration tests in `test/integration/sub-state.test.js`: subscriber-eligibility, self-demote semantics, owner-immune-to-other-co-mod-demote, isDisabled state transitions, manual_reactivate clears state + writes modlog, read-only rejects post/comment/vote/mod-action paths, reactivate exception path, lastModActivity max-across-mods, listCoMods excludes owner, transfer_owner round-trip. Existing modlog/sub-edit/mod-revoke fixtures updated to seed subscriptions before promotion. 564/564 total.
+
 ### Fixed — Subscribe / unsubscribe now updates the visible mem count without a reload
 
 The progressive-enhancement subscribe button (`static/subscribe.js`) flips its label in place to kill the post-redirect flicker, but until now it never touched the adjacent `mem` column number — so on `/subs` and the home `// active subs` strip, the count stayed stale until the next full page load. Without JS the 302 redirect rendered fresh counts and it worked; the JS path was the regression.

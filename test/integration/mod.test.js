@@ -159,8 +159,10 @@ test('listModActions: returns most-recent first, scoped to sub', () => {
   assert.equal(rows[1].target_id, 'p1');
 });
 
-test('MOD_ACTIONS exposes all 9 known actions and is frozen', () => {
-  assert.equal(MOD_ACTIONS.length, 9);
+test('MOD_ACTIONS exposes all 11 known actions and is frozen', () => {
+  // 9 baseline + 2 sub-state actions added in M5/B12 (auto_disable_inactivity,
+  // manual_reactivate). Count guard so adding silent actions surfaces in CI.
+  assert.equal(MOD_ACTIONS.length, 11);
   assert.ok(Object.isFrozen(MOD_ACTIONS));
 });
 

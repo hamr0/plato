@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { html, render, raw } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
@@ -45,7 +46,8 @@ import {
   canModerate, recordAction, listModActions, MOD_ACTIONS,
   listSubsModeratedBy, listModActionsAcrossSubs, countModActionsAcrossSubs,
   listInboxAcrossSubs, countInboxAcrossSubs,
-  isBanned,
+  isBanned, isDisabled, listCoMods, listDisabledSubs,
+  SUB_INACTIVITY_WARNING_MS, SUB_INACTIVITY_THRESHOLD_MS, lastModActivity,
 } from '../content/mod.js';
 import {
   submitFlag, FLAG_CATEGORIES, flaggedTargetsByHandle,
@@ -1220,7 +1222,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>mem</th><th class="col-active">active</th><th class="col-owner">owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</td>
+          <td><a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" data-mem-count="${s.name}">${subCounts.get(s.name) ?? 0}</td>
@@ -1338,8 +1340,9 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole === 'owner' ? html` · <a href="/sub/${subName}/edit">edit sub</a>` : html``}</div>
+      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
+      ${subStateBanner({ db, sub, modRole })}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
@@ -1455,6 +1458,35 @@ async function handleSubCreate(req, res, { db, auth }) {
   redirect(res, `/sub/${name}`);
 }
 
+// Read-only and warning banners for sub pages. Computed at request time
+// from sub.disabled_at + lastModActivity — no DB column for warning state.
+//
+// Three states the banner can render:
+//   1. disabled & no mods exist → permanent read-only, member-fork only.
+//   2. disabled & mods exist     → reactivation possible, prompt the mod.
+//   3. active & approaching 30d  → 28d warning with migration framing.
+function subStateBanner({ db, sub, modRole }) {
+  if (sub.disabled_at != null) {
+    const subName = sub.name;
+    const owner = sub.owner_handle;
+    const hasAnyMod = !!owner || listCoMods(db, subName).length > 0;
+    if (!hasAnyMod) {
+      return html`<div class="sensitive-banner">[!] this sub is read-only. no mods remain — content stays viewable, but reactivation requires forking the community to a new sub. <a href="/sub/create">create a successor</a> if you'd like to carry it forward.</div>`;
+    }
+    return html`<div class="sensitive-banner">[!] this sub is read-only. ${modRole
+      ? html`<a href="/sub/${subName}/edit">reactivate</a> to resume posts/comments/votes.`
+      : html`waiting for a mod to reactivate.`}</div>`;
+  }
+  // Active state: check inactivity, surface warning at 28d.
+  const last = lastModActivity(db, sub.name);
+  if (last == null) return html``;
+  const elapsed = Date.now() - last;
+  if (elapsed < SUB_INACTIVITY_WARNING_MS) return html``;
+  const willLockAt = new Date(last + SUB_INACTIVITY_THRESHOLD_MS);
+  const hours = Math.max(0, Math.round((SUB_INACTIVITY_THRESHOLD_MS - elapsed) / (60 * 60 * 1000)));
+  return html`<div class="sensitive-banner">[!] mods have been inactive for 28+ days. this sub will become read-only in ~${hours}h (around ${willLockAt.toISOString().slice(0, 10)}). if you want to carry this community forward, <a href="/sub/create">create a successor sub</a> and post the link here now.</div>`;
+}
+
 function renderSubEdit(req, res, { db, auth }, subName) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
@@ -1466,32 +1498,128 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   if (!sub) {
     return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub. <a href="/">back</a></p>`));
   }
-  if (canModerate(db, subName, currentHandle) !== 'owner') {
+  const role = canModerate(db, subName, currentHandle);
+  if (!role) {
     return send(res, 403, errorPage(req, { db, auth }, {
-      title: 'owner only', message: 'editing the sub is restricted to its owner.',
+      title: 'mods only', message: 'managing this sub is restricted to its mod and co-mods.',
       links: html`<p><a href="/sub/${subName}">← back to //${subName}</a></p>`,
     }));
   }
   const flairs = parseFlairs(sub.flairs);
-  send(res, 200, pageView({ db, currentHandle, title: html`edit //${subName}` }, html`
-    <p><a href="/sub/${subName}">← back to //${subName}</a></p>
-    <form method="POST" action="/sub/${subName}/edit">
-      <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200" value="${sub.description ?? ''}">
-      ${flairEditorView({ flairs, flairsRequired: !!sub.flairs_required })}
-      <label class="threshold-row">
-        <input type="checkbox" name="sensitive" value="1" ${sub.sensitive ? 'checked' : ''}>
-        <span>sensitive content (banner advisory; not for porn — see rules)</span>
-      </label>
-      <fieldset class="sub-thresholds">
-        <legend class="muted">flag auto-hide threshold</legend>
+  const isOwner = role === 'owner';
+  const disabled = sub.disabled_at != null;
+
+  // Mod-management section: list co-mods, promote/demote/transfer controls
+  // for owner, self-demote for co-mods. Pseudonyms shown for legibility.
+  const coMods = listCoMods(db, subName);
+  const coModRows = coMods.map((h) => {
+    const ps = pseudonymFor(db, h);
+    const demoteForm = isOwner
+      ? html`<form method="POST" action="/sub/${subName}/mods" class="inline">
+          <input type="hidden" name="action" value="demote_mod">
+          <input type="hidden" name="target" value="${h}">
+          <button>demote</button>
+        </form>`
+      : (h === currentHandle
+          ? html`<form method="POST" action="/sub/${subName}/mods" class="inline">
+              <input type="hidden" name="action" value="self_demote">
+              <button>step down</button>
+            </form>`
+          : html``);
+    return html`<li><strong>${ps}</strong>${h === currentHandle ? html` <span class="muted">(you)</span>` : html``} ${demoteForm}</li>`;
+  });
+
+  // Promote form: owner picks any subscriber not already a mod. List the
+  // subscribers as a dropdown; reject in the handler if not subscribed.
+  let promoteForm = html``;
+  if (isOwner) {
+    const ownerHandle = sub.owner_handle;
+    const existingMods = new Set([ownerHandle, ...coMods]);
+    const candidates = db.prepare(
+      `SELECT s.user_handle, h.pseudonym FROM subscriptions s
+         JOIN handles h ON h.handle = s.user_handle
+        WHERE s.sub_name = ? ORDER BY h.pseudonym`
+    ).all(subName).filter((c) => !existingMods.has(c.user_handle));
+    promoteForm = candidates.length === 0
+      ? html`<p class="muted">no eligible subscribers to promote. members must subscribe to the sub first.</p>`
+      : html`<form method="POST" action="/sub/${subName}/mods" class="inline">
+          <input type="hidden" name="action" value="promote_mod">
+          <select name="target" required>
+            <option value="">— pick a subscriber —</option>
+            ${candidates.map((c) => html`<option value="${c.user_handle}">${c.pseudonym}</option>`)}
+          </select>
+          <button>promote to co-mod</button>
+        </form>`;
+  }
+
+  // Step-down section for owner. With co-mods → successor dropdown. Without
+  // → disable-sub button (read-only state, members migrate during the
+  // warning window or after via forking).
+  let stepDownSection = html``;
+  if (isOwner && !disabled) {
+    if (coMods.length > 0) {
+      stepDownSection = html`<fieldset class="sub-stepdown">
+        <legend class="muted">step down as mod</legend>
+        <p class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod.</p>
+        <form method="POST" action="/sub/${subName}/mods">
+          <input type="hidden" name="action" value="transfer_owner">
+          <select name="target" required>
+            <option value="">— pick a successor —</option>
+            ${coMods.map((h) => html`<option value="${h}">${pseudonymFor(db, h)}</option>`)}
+          </select>
+          <button>transfer & step down</button>
+        </form>
+      </fieldset>`;
+    } else {
+      stepDownSection = html`<fieldset class="sub-stepdown">
+        <legend class="muted">step down as mod</legend>
+        <p class="muted">no co-mods exist. stepping down here will <strong>disable the sub</strong> — content stays readable, but no new posts/comments/votes until a mod returns. there is no operator override; communities reactivate themselves or members migrate by creating a new sub.</p>
+        <form method="POST" action="/sub/${subName}/mods" onsubmit="return confirm('disable //${subName}? content stays readable; no new posts until reactivated.');">
+          <input type="hidden" name="action" value="disable_sub">
+          <button>disable sub</button>
+        </form>
+      </fieldset>`;
+    }
+  }
+
+  // Reactivate: any current mod can flip a disabled sub back to active.
+  const reactivateBlock = disabled
+    ? html`<div class="sensitive-banner">[!] this sub is read-only. <form method="POST" action="/sub/${subName}/mods" class="inline">
+        <input type="hidden" name="action" value="reactivate">
+        <button>reactivate</button>
+      </form></div>`
+    : html``;
+
+  // Owner-only edit form (description, flairs, sensitive, threshold). Hidden
+  // for co-mods — they manage their own role here, not the sub's settings.
+  const editForm = isOwner
+    ? html`<form method="POST" action="/sub/${subName}/edit">
+        <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200" value="${sub.description ?? ''}">
+        ${flairEditorView({ flairs, flairsRequired: !!sub.flairs_required })}
         <label class="threshold-row">
-          <span>distinct flaggers (≥ 3)</span>
-          <input type="number" name="flagThreshold" value="${sub.flag_threshold}" min="3" step="1" required>
+          <input type="checkbox" name="sensitive" value="1" ${sub.sensitive ? 'checked' : ''}>
+          <span>sensitive content (banner advisory; not for porn — see rules)</span>
         </label>
-      </fieldset>
-      <button>save</button>
-    </form>
-    <p class="muted">name and auto-uncollapse thresholds are locked at creation.</p>
+        <fieldset class="sub-thresholds">
+          <legend class="muted">flag auto-hide threshold</legend>
+          <label class="threshold-row">
+            <span>distinct flaggers (≥ 3)</span>
+            <input type="number" name="flagThreshold" value="${sub.flag_threshold}" min="3" step="1" required>
+          </label>
+        </fieldset>
+        <button>save</button>
+      </form>
+      <p class="muted">name is permanent. auto-uncollapse thresholds locked at creation.</p>`
+    : html`<p class="muted">only the sub's mod can edit description, flairs, sensitive flag, and thresholds. co-mods manage their own role here.</p>`;
+
+  send(res, 200, pageView({ db, currentHandle, title: html`manage //${subName}` }, html`
+    <p><a href="/sub/${subName}">← back to //${subName}</a></p>
+    ${reactivateBlock}
+    ${editForm}
+    <h3 class="section">// co-mods</h3>
+    ${coModRows.length > 0 ? html`<ul class="co-mod-list">${coModRows}</ul>` : html`<p class="muted">no co-mods yet.</p>`}
+    ${promoteForm}
+    ${stepDownSection}
   `));
 }
 
@@ -1542,6 +1670,112 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
     }));
   }
   redirect(res, `/sub/${subName}`);
+}
+
+// POST /sub/<name>/mods — mod-management actions: promote, demote (incl.
+// self), transfer, disable, reactivate. Form posts an `action` field
+// keyed to one of those; recordAction enforces role-based gating.
+async function handleSubMods(req, res, { db, auth }, subName) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to manage this sub.',
+    }));
+  }
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub.</p>`));
+  }
+  const role = canModerate(db, subName, currentHandle);
+  if (!role) {
+    return send(res, 403, errorPage(req, { db, auth }, {
+      title: 'mods only', message: 'managing this sub is restricted to its mod and co-mods.',
+    }));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const action = form.action ?? '';
+  const target = (form.target ?? '').trim();
+  const back = `/sub/${subName}/edit`;
+  const rejectWith = (msg) => send(res, 400, errorPage(req, { db, auth }, {
+    title: 'action failed', message: msg,
+    links: html`<p><a href="${back}">← back</a></p>`,
+  }));
+
+  try {
+    if (action === 'promote_mod') {
+      if (role !== 'owner') return rejectWith('only the mod can promote co-mods.');
+      if (!target || target.length !== 64) return rejectWith('pick a subscriber to promote.');
+      recordAction(db, {
+        subName, modHandle: currentHandle, action: 'promote_mod',
+        targetType: 'handle', targetId: target,
+      });
+    } else if (action === 'demote_mod') {
+      if (role !== 'owner') return rejectWith('only the mod can demote co-mods. (you can step down via the self-demote button.)');
+      if (!target) return rejectWith('missing target.');
+      recordAction(db, {
+        subName, modHandle: currentHandle, action: 'demote_mod',
+        targetType: 'handle', targetId: target,
+      });
+    } else if (action === 'self_demote') {
+      // Co-mod stepping down. recordAction's owner-only check has the
+      // self-demote carve-out that allows this without owner role.
+      recordAction(db, {
+        subName, modHandle: currentHandle, action: 'demote_mod',
+        targetType: 'handle', targetId: currentHandle,
+      });
+    } else if (action === 'transfer_owner') {
+      if (role !== 'owner') return rejectWith('only the mod can transfer the role.');
+      if (!target || target.length !== 64) return rejectWith('pick a successor from your co-mods.');
+      recordAction(db, {
+        subName, modHandle: currentHandle, action: 'transfer_owner',
+        targetType: 'handle', targetId: target,
+      });
+    } else if (action === 'disable_sub') {
+      if (role !== 'owner') return rejectWith('only the mod can disable the sub.');
+      if (listCoMods(db, subName).length > 0) {
+        return rejectWith('disable is only available when there are no co-mods. transfer to a co-mod instead.');
+      }
+      // Step-down + disable: clear owner_handle (so no mods remain — only
+      // way back is forking the community via a new sub) and set
+      // disabled_at, then synthesize a modlog row for transparency. One
+      // transaction so a failure rolls back cleanly. Action key reuses
+      // 'auto_disable_inactivity' — there's only one disabled state in
+      // the model, regardless of how it was reached. Reason explains.
+      const now = Date.now();
+      db.exec('BEGIN');
+      try {
+        db.prepare('UPDATE subs SET owner_handle = NULL, disabled_at = ? WHERE name = ?')
+          .run(now, subName);
+        db.prepare(
+          `INSERT INTO mod_actions
+             (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+           VALUES (?, ?, ?, 'auto_disable_inactivity', 'sub', ?, ?, ?)`
+        ).run(
+          randomBytes(8).toString('hex'),
+          subName, SYSTEM_HANDLE, subName,
+          `mod stepped down with no co-mods (acting handle: ${pseudonymFor(db, currentHandle)})`,
+          now,
+        );
+        db.exec('COMMIT');
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    } else if (action === 'reactivate') {
+      // Any current mod can reactivate. recordAction handles the gating.
+      recordAction(db, {
+        subName, modHandle: currentHandle, action: 'manual_reactivate',
+        targetType: 'sub', targetId: subName,
+        reason: null,
+      });
+    } else {
+      return rejectWith(`unknown action: ${action}`);
+    }
+  } catch (err) {
+    return rejectWith(err.message);
+  }
+  redirect(res, back);
 }
 
 async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }) {
@@ -3978,6 +4212,7 @@ function modlogActiveSummary(filters, pseudonyms, resolvedModHandle) {
 const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
+const SUB_MODS_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mods$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
 const PERSONAL_RSS_PATH_RE      = /^\/u\/([0-9a-f]{64})\/rss$/;
@@ -4228,6 +4463,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if ((m = path.match(SUB_EDIT_PATH_RE)) && method === 'POST') {
         return handleSubEdit(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_MODS_PATH_RE)) && method === 'POST') {
+        return handleSubMods(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'), url.searchParams);

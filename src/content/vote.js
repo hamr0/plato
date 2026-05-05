@@ -14,7 +14,7 @@
 //   updated transactionally on every change so the cache never drifts.
 
 import { randomBytes } from 'node:crypto';
-import { isBanned } from './mod.js';
+import { isBanned, isDisabled } from './mod.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
 
 const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -89,6 +89,9 @@ export function castVote(db, { targetType, targetId, voterHandle, direction, now
     : db.prepare('SELECT p.sub_name AS sub_name FROM posts p JOIN comments c ON c.post_id = p.id WHERE c.id = ?').get(targetId)?.sub_name;
   if (subName && isBanned(db, subName, voterHandle)) {
     throw new Error(`castVote: ${voterHandle} is banned from ${subName}`);
+  }
+  if (subName && isDisabled(db, subName)) {
+    throw new Error(`castVote: //${subName} is read-only`);
   }
 
   const isNew = isNewAccount(db, voterHandle, now);

@@ -7,7 +7,7 @@
 // Score caches per comment are updated by the vote module, not here.
 
 import { randomBytes } from 'node:crypto';
-import { isBanned } from './mod.js';
+import { isBanned, isDisabled } from './mod.js';
 
 const ID_BYTES = 8;
 
@@ -36,6 +36,9 @@ export function addComment(db, { postId, parentId = null, handle, body, now = Da
   }
   if (isBanned(db, post.sub_name, handle)) {
     throw new Error(`addComment: ${handle} is banned from ${post.sub_name}`);
+  }
+  if (isDisabled(db, post.sub_name)) {
+    throw new Error(`addComment: //${post.sub_name} is read-only`);
   }
 
   if (parentId) {

@@ -15,6 +15,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { SYSTEM_HANDLE } from './spamPatterns.js';
+import { isSubscribed } from './subscription.js';
 
 const ID_BYTES = 8;
 const newId = () => randomBytes(ID_BYTES).toString('hex');
@@ -24,14 +25,23 @@ export const MOD_ACTIONS = Object.freeze([
   'remove', 'unremove',
   'ban', 'unban',
   'promote_mod', 'demote_mod', 'transfer_owner',
+  'auto_disable_inactivity', 'manual_reactivate',
 ]);
 
-// Co-mods can act on content and bans. Owner-only actions are the ones
-// that change who holds the keys to the sub.
+// Owner-only actions change who holds the keys to the sub. Self-demote on
+// 'demote_mod' is the one exception (a co-mod can step down without owner
+// permission); recordAction handles that special case explicitly.
 const OWNER_ONLY = new Set(['promote_mod', 'demote_mod', 'transfer_owner']);
 
 const CONTENT_ACTIONS = new Set(['collapse', 'uncollapse', 'remove', 'unremove']);
 const BAN_ACTIONS     = new Set(['ban', 'unban']);
+const SUB_STATE_ACTIONS = new Set(['auto_disable_inactivity', 'manual_reactivate']);
+
+// 30 days is the inactivity threshold for auto-disable. Floor-locked: this
+// is a uniform property of plato, not an operator preference. PRD §Sub
+// Lifecycle. Forks who change this are forks.
+export const SUB_INACTIVITY_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
+export const SUB_INACTIVITY_WARNING_MS = 28 * 24 * 60 * 60 * 1000;
 
 export function canModerate(db, subName, handle) {
   if (!handle) return null;
@@ -85,6 +95,15 @@ function applyState(db, { action, targetType, targetId, subName, modHandle, reas
     return;
   }
   if (action === 'promote_mod') {
+    // Eligibility: target must be subscribed to the sub at promotion time.
+    // Subscription is plato's only "intent to engage" primitive; it's
+    // voluntary, public, reversible, and doesn't introduce a new
+    // membership concept (no sub stays subscribed-only at the read/write
+    // layer). After promotion, the mod role and the subscription are
+    // independent — unsubscribing later does not auto-revoke mod status.
+    if (!isSubscribed(db, targetId, subName)) {
+      throw new Error(`recordAction: promote_mod target must be subscribed to ${subName}`);
+    }
     db.prepare(
       `INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, 'co')
        ON CONFLICT(sub_name, handle) DO UPDATE SET role = 'co'`
@@ -94,6 +113,12 @@ function applyState(db, { action, targetType, targetId, subName, modHandle, reas
   if (action === 'demote_mod') {
     db.prepare(`DELETE FROM sub_mods WHERE sub_name = ? AND handle = ? AND role = 'co'`)
       .run(subName, targetId);
+    return;
+  }
+  if (action === 'auto_disable_inactivity' || action === 'manual_reactivate') {
+    const value = action === 'auto_disable_inactivity' ? now : null;
+    const result = db.prepare('UPDATE subs SET disabled_at = ? WHERE name = ?').run(value, subName);
+    if (result.changes === 0) throw new Error(`recordAction: sub ${subName} not found`);
     return;
   }
   if (action === 'transfer_owner') {
@@ -129,19 +154,51 @@ export function recordAction(db, {
   if ((BAN_ACTIONS.has(action) || OWNER_ONLY.has(action)) && targetType !== 'handle') {
     throw new Error(`recordAction: ${action} requires targetType handle`);
   }
+  if (SUB_STATE_ACTIONS.has(action) && targetType !== 'sub') {
+    throw new Error(`recordAction: ${action} requires targetType sub`);
+  }
   // Self-ban / self-unban is a footgun (locks the mod out of their own
   // sub) with no legitimate use. Reject defensively even if the UI hides
-  // the affordance. Other handle-targeted actions (promote/demote/transfer)
-  // are owner-only and already gated below; rejecting self there too
-  // since transferring ownership to yourself is a no-op.
-  if (targetType === 'handle' && targetId === modHandle) {
+  // the affordance. Self-demote on demote_mod is the one self-target case
+  // we explicitly allow — a co-mod stepping down. transfer_owner to self
+  // is rejected (no-op); promote_mod to self is rejected (already a mod).
+  if (
+    targetType === 'handle' &&
+    targetId === modHandle &&
+    action !== 'demote_mod'
+  ) {
     throw new Error(`recordAction: ${action} cannot target the acting mod`);
   }
 
-  const role = canModerate(db, subName, modHandle);
-  if (!role) throw new Error(`recordAction: ${modHandle} is not a mod of ${subName}`);
-  if (OWNER_ONLY.has(action) && role !== 'owner') {
-    throw new Error(`recordAction: ${action} is owner-only`);
+  // Disabled subs reject all mod actions except the explicit reactivate
+  // path. Auto-disable from cron is also allowed (the cron may need to
+  // re-record on edge cases) but in practice a sub that's already
+  // disabled isn't picked up by the inactivity check.
+  if (
+    action !== 'manual_reactivate' &&
+    action !== 'auto_disable_inactivity' &&
+    isDisabled(db, subName)
+  ) {
+    throw new Error(`recordAction: //${subName} is read-only`);
+  }
+
+  // System-driven action (cron). Skip the mod-role check.
+  if (action === 'auto_disable_inactivity') {
+    if (modHandle !== SYSTEM_HANDLE) {
+      throw new Error('recordAction: auto_disable_inactivity must be system-driven');
+    }
+  } else {
+    const role = canModerate(db, subName, modHandle);
+    if (!role) throw new Error(`recordAction: ${modHandle} is not a mod of ${subName}`);
+    // Owner-only enforcement, with one exception: a co-mod can demote
+    // themselves (step down). Demoting *another* co-mod still requires
+    // owner.
+    if (OWNER_ONLY.has(action) && role !== 'owner') {
+      const isSelfDemote = action === 'demote_mod' && targetId === modHandle;
+      if (!isSelfDemote) {
+        throw new Error(`recordAction: ${action} is owner-only`);
+      }
+    }
   }
 
   const id = newId();
@@ -290,4 +347,69 @@ export function isBanned(db, subName, handle) {
     .prepare('SELECT 1 FROM bans WHERE sub_name = ? AND handle = ?')
     .get(subName, handle);
   return !!row;
+}
+
+// Sub-state helpers (M5/B12).
+
+// True when the sub is in read-only state (entered via owner step-down
+// with no co-mods, or via 30-day cron auto-disable). Reads stay open
+// regardless; only write paths gate on this.
+export function isDisabled(db, subName) {
+  const row = db.prepare('SELECT disabled_at FROM subs WHERE name = ?').get(subName);
+  return !!(row && row.disabled_at != null);
+}
+
+// List handles of every mod (owner + co-mods) for a sub.
+export function modsOfSub(db, subName) {
+  const handles = new Set();
+  const sub = db.prepare('SELECT owner_handle FROM subs WHERE name = ?').get(subName);
+  if (sub?.owner_handle) handles.add(sub.owner_handle);
+  for (const r of db.prepare('SELECT handle FROM sub_mods WHERE sub_name = ?').all(subName)) {
+    handles.add(r.handle);
+  }
+  return [...handles];
+}
+
+// Co-mods only (excludes the owner). Used by the edit form's "co-mods"
+// section so the owner row doesn't appear under the Co-mods heading.
+export function listCoMods(db, subName) {
+  return db.prepare(
+    `SELECT handle FROM sub_mods WHERE sub_name = ? AND role = 'co' ORDER BY handle`
+  ).all(subName).map((r) => r.handle);
+}
+
+// Latest mod-presence timestamp across {posts, comments, mod_actions} for
+// any current mod of the sub. Returns unix-ms or null. The cron uses
+// (now - this) > SUB_INACTIVITY_THRESHOLD_MS to decide auto-disable.
+//
+// "Mod activity" deliberately includes participation (posts/comments by a
+// mod in their own sub) AND moderation (mod_actions rows). A healthy sub
+// where the mod is just chatting still counts; the timer doesn't punish
+// quiet sub for having no incidents.
+export function lastModActivity(db, subName) {
+  const mods = modsOfSub(db, subName);
+  if (mods.length === 0) return null;
+  const placeholders = mods.map(() => '?').join(',');
+  const row = db.prepare(`
+    SELECT MAX(t) AS latest FROM (
+      SELECT MAX(created_at) AS t FROM posts
+        WHERE sub_name = ? AND handle IN (${placeholders})
+      UNION ALL
+      SELECT MAX(c.created_at) AS t FROM comments c
+        JOIN posts p ON p.id = c.post_id
+        WHERE p.sub_name = ? AND c.handle IN (${placeholders})
+      UNION ALL
+      SELECT MAX(created_at) AS t FROM mod_actions
+        WHERE sub_name = ? AND mod_handle IN (${placeholders})
+    )
+  `).get(subName, ...mods, subName, ...mods, subName, ...mods);
+  return row?.latest ?? null;
+}
+
+// Subs currently in read-only state, newest-first. Used by the /subs
+// directory marker and other listings.
+export function listDisabledSubs(db) {
+  return db.prepare(
+    'SELECT name, disabled_at FROM subs WHERE disabled_at IS NOT NULL ORDER BY disabled_at DESC'
+  ).all();
 }
