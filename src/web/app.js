@@ -860,9 +860,11 @@ function buildFlairMap(db, posts) {
 }
 
 // Top-of-home active-subs block — vertical list of the 4 most-active subs
-// in the last 24h. Each row: //name — description    N posts · M subs.
-// Subscriber count is a placeholder (`—`) until M6 ships subscriptions.
-function activeSubsBlock({ subs, currentHandle }) {
+// in the last 24h. Each row: //name — description    N posts · M mem.
+// `mem` matches the /subs directory column header (subscribers count is
+// the "membership" signal exposed at instance level — actual subscriber
+// identities are private per PRD §Sub subscription mechanics).
+function activeSubsBlock({ subs, currentHandle, memCounts }) {
   const top = subs.slice(0, 4);
   const newSubLink = currentHandle
     ? html`<a class="new-sub" href="/sub/create">+ new sub</a>`
@@ -880,7 +882,7 @@ function activeSubsBlock({ subs, currentHandle }) {
         <a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
         ${s.sensitive ? html`<span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}
         <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
-        <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · — subs</span>
+        <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · <strong>${memCounts?.get(s.name) ?? 0}</strong> mem</span>
       </div>`)}
     </div>
     ${newSubLink ? html`<p class="active-subs-foot">${newSubLink}</p>` : html``}
@@ -1023,6 +1025,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
   const filters = parseHomeFilters(searchParams);
   const sinceMs = HOME_DATES[filters.date] ? Date.now() - HOME_DATES[filters.date] : null;
   const subsNav = listSubsForNav(db);
+  const navMemCounts = subscriberCounts(db, subsNav.map((s) => s.name));
   const postableSubs = listPostableSubs(db);
   const currentHandle = auth.handleFromRequest(req);
 
@@ -1088,7 +1091,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       canonical: `${siteMeta.baseUrl}/`,
     }, html`
       ${anonHintFor(currentHandle)}
-      ${activeSubsBlock({ subs: subsNav, currentHandle })}
+      ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts })}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
         ${postFormFor({ currentHandle, postableSubs })}
