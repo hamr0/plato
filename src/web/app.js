@@ -1701,8 +1701,13 @@ function renderSubEdit(req, res, { db, auth }, subName) {
       <p class="muted">name is permanent. auto-uncollapse thresholds locked at creation.</p>`
     : html`<p class="muted">only the sub's mod can edit description, flairs, sensitive flag, and thresholds. co-mods manage their own role here.</p>`;
 
+  // Role chip at the top so the limited options for co-mods don't read as
+  // "stuck" — makes explicit what the user is and why their action set
+  // looks the way it does.
+  const roleChip = html`<p class="role-chip muted">you are: <strong>${isOwner ? 'mod' : 'co-mod'}</strong> of //${subName}${isOwner ? html`` : html` · only the mod can promote / demote / transfer; your one mod-management action here is to step down as co-mod (you keep your account)`}</p>`;
   send(res, 200, pageView({ db, currentHandle, title: html`manage //${subName}` }, html`
     <p><a href="/sub/${subName}">← back to //${subName}</a></p>
+    ${roleChip}
     ${reactivateBlock}
     ${editForm}
     <h3 class="section">// co-mods</h3>
