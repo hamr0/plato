@@ -1153,6 +1153,20 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .co-mod-list > li > strong { margin-right: 0; }
 .co-mod-list > li > .inline-confirm { margin-left: 0; }
 
+/* Live character counter under any textarea[data-charcount]. Visible
+   surrogate for the maxlength attribute so users can see how much room
+   remains as they type / paste. Goes accent-warm at 90%, accent-warn
+   at the cap. */
+.textarea-wrap { position: relative; display: block; }
+.char-counter {
+  font-size: 0.72rem;
+  text-align: right;
+  margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.char-counter-near { color: var(--accent-warm); }
+.char-counter-full { color: var(--accent-warm); font-weight: 600; }
+
 /* Inline mod indicator before sub names for subs you mod / co-mod. */
 .mod-indicator {
   color: var(--accent);

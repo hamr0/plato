@@ -133,6 +133,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/flair.js?v=2" defer></script>
 <script src="/static/subscribe.js?v=2" defer></script>
 <script src="/static/rssvp.js?v=1" defer></script>
+<script src="/static/charcount.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -675,7 +676,10 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     ${subField}
     <input name="title" placeholder="post title" value="${dTitle}" required>
     ${flairField}
-    <textarea name="body" placeholder="markdown body" maxlength="${POST_BODY_MAX}" required>${dBody}</textarea>
+    <div class="textarea-wrap">
+      <textarea name="body" placeholder="markdown body" maxlength="${POST_BODY_MAX}" data-charcount required>${dBody}</textarea>
+      <div class="char-counter muted" data-for="body" aria-live="polite">${dBody.length} / ${POST_BODY_MAX}</div>
+    </div>
     <label class="post-form-row sensitive-row">
       <input type="checkbox" name="sensitive" value="1" ${(dSensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
       <span class="muted">${subSensitive
@@ -2071,7 +2075,10 @@ function commentNodeView(node, ctx, depth) {
     ? html`<details class="reply"><summary class="muted">reply</summary>
         <form method="POST" action="/sub/${ctx.subName}/post/${ctx.postId}/comment" class="reply-form">
           <input type="hidden" name="parent_id" value="${node.id}">
-          <textarea name="body" placeholder="markdown reply" maxlength="${COMMENT_BODY_MAX}" required></textarea>
+          <div class="textarea-wrap">
+            <textarea name="body" placeholder="markdown reply" maxlength="${COMMENT_BODY_MAX}" data-charcount required></textarea>
+            <div class="char-counter muted" data-for="body" aria-live="polite">0 / ${COMMENT_BODY_MAX}</div>
+          </div>
           <button>reply</button>
         </form>
       </details>`
@@ -2277,7 +2284,10 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
 
       <div class="composer-bar">
         <form method="POST" action="/sub/${subName}/post/${postId}/comment"${currentHandle ? html`` : html` data-guest="1"`}>
-          <textarea name="body" placeholder="join the conversation" maxlength="${COMMENT_BODY_MAX}" required></textarea>
+          <div class="textarea-wrap">
+            <textarea name="body" placeholder="join the conversation" maxlength="${COMMENT_BODY_MAX}" data-charcount required></textarea>
+            <div class="char-counter muted" data-for="body" aria-live="polite">0 / ${COMMENT_BODY_MAX}</div>
+          </div>
           <div class="guest-notice" hidden>saved — sign in above to post it. we'll submit it for you when you confirm.</div>
           <button>comment</button>
         </form>
@@ -2414,7 +2424,10 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     <h2 class="section">// edit post</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
       <label>body (markdown)</label>
-      <textarea name="body" maxlength="${POST_BODY_MAX}" required>${body}</textarea>
+      <div class="textarea-wrap">
+        <textarea name="body" maxlength="${POST_BODY_MAX}" data-charcount required>${body}</textarea>
+        <div class="char-counter muted" data-for="body" aria-live="polite">${body.length} / ${POST_BODY_MAX}</div>
+      </div>
       <label class="post-form-row sensitive-row">
         <input type="checkbox" name="sensitive" value="1" ${(post.sensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
         <span class="muted">${subSensitive
@@ -2461,7 +2474,10 @@ function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentI
     <h2 class="section">// edit comment</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/comment/${commentId}/edit" class="post-form">
       <label>body (markdown)</label>
-      <textarea name="body" maxlength="${COMMENT_BODY_MAX}" required>${comment.body}</textarea>
+      <div class="textarea-wrap">
+        <textarea name="body" maxlength="${COMMENT_BODY_MAX}" data-charcount required>${comment.body}</textarea>
+        <div class="char-counter muted" data-for="body" aria-live="polite">${comment.body.length} / ${COMMENT_BODY_MAX}</div>
+      </div>
       <div class="form-actions">
         <button>save</button>
         <a href="/sub/${subName}/post/${postId}#comment-${commentId}">cancel</a>
