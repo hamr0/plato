@@ -1150,6 +1150,21 @@ function renderAbout(req, res, { db, auth }) {
     <h3>if you don't trust this operator</h3>
     <p>that's fine — the forum is shaped so you don't have to. <a href="https://github.com/hamr0/plato"><strong>plato</strong></a> is the open-source codebase running this instance (Apache 2.0). clone the repo, copy <code>forum.db</code> + <code>posts/</code>, set a fresh <code>KNOWLESS_SECRET</code>, and run your own. handles re-derive per instance — same email yields different pseudonyms across forks — so leaving is a fresh start, not a sticky identity transplant.</p>
   </section>`;
+
+  // How plato works — short orientation for new mods and new members.
+  // Lives on /about so any visitor can find it without hunting through
+  // docs. Plain language; no jargon, no operator-isms. The intent: read
+  // this once, you understand the social contract.
+  const howItWorks = html`<section class="about-section">
+    <h3>how this place works</h3>
+    <p><strong>posting.</strong> anyone with an account can post in any sub. you don't need to be a "member" or get approved. accounts are made by entering an email and clicking a magic link — no password, no profile setup, the email itself is hashed away and never stored. you pick a sub from the list when you write.</p>
+    <p><strong>subs.</strong> a sub is a community around a topic. anyone signed in can <a href="/sub/create">create one</a>; the creator is its mod. each sub has rules in its description, optional flairs, and an auto-collapse threshold for flagged posts. there are no private subs and no membership lists — visibility is binary, public or doesn't exist.</p>
+    <p><strong>mods.</strong> each sub has exactly one <em>mod</em> (the creator) and any number of <em>co-mods</em> the mod has promoted from its subscribers. mods can collapse posts (soft-hide; reversible by community votes), remove posts (hard, for harassment / illegal content), ban users from their sub, and resolve flags. every mod action lands in the <a href="/modlog">public modlog</a> with the mod's pseudonym and reason — no shadowbans, no quiet removals.</p>
+    <p><strong>flags.</strong> if you see a problem, click the flag button. flags go into a queue every mod of that sub can see; the first mod to act handles it. enough distinct flags on the same target also auto-collapses it pending mod review.</p>
+    <p><strong>read-only subs.</strong> a sub becomes read-only — content viewable, no new posts/comments/votes — when its mod steps down without a successor, or when no mod has been active in it for 30 days (a 28-day warning surfaces in a banner before that). a current mod can flip it back to active anytime. if no mods remain, the sub stays read-only as a permanent record; the community migrates by creating a successor sub. the operator does not assign new mods or override sub state — communities decide their own fate.</p>
+    <p><strong>leaving.</strong> you can export your own contribution as an archive (M7, in progress). the archive is yours; importing it elsewhere or never importing it is your call.</p>
+  </section>`;
+
   send(res, 200, pageView({
     db, currentHandle,
     title: html`about`,
@@ -1159,6 +1174,7 @@ function renderAbout(req, res, { db, auth }) {
     <article class="about">
       <p>this is a <strong>plato</strong> instance, hosted by ${handle}.${feedback}</p>
       ${rules}
+      ${howItWorks}
       ${dataHandling}
       ${fork}
     </article>

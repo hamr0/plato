@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M5/B12: daily inactivity cron + about-page guide (commit 2 of 2)
+
+Closes the M5/B12 arc. Commit 1 shipped the data model, write-path enforcement, and UI; this commit ships the cron that exercises the 30-day rule and the docs/UX surface that makes it legible to mods and members.
+
+**Cron job:**
+- `bin/check-sub-inactivity.js` — daily script that walks every active sub, computes `lastModActivity` per sub (max across post/comment/mod_action by any current mod), and auto-disables any sub older than `SUB_INACTIVITY_THRESHOLD_MS` (30 days, floor-locked). Synthesizes a public modlog row (`action=auto_disable_inactivity`, `mod_handle=SYSTEM_HANDLE`) so the transition is visible alongside human mod actions. Subs with zero mods are skipped (different failure mode; cron isn't the right intervention). Idempotent — already-disabled subs are not re-processed. `--dry-run` lists what would be disabled without writing.
+- `runInactivitySweep` exported from `src/content/mod.js` so the sweep is testable without spawning a process.
+- Cron entry added to `docs/02-features/cron-jobs.md` with the install line, manual-verify command, and the explainer.
+
+**`/about` page additions:**
+- New "how this place works" section above the data-handling block, written in plain language for new mods and new members. Covers: posting (anyone can post in any sub, no membership), subs (any signed-in user can create one), mods (mod + co-mod model, public modlog), flags (shared mod queue, no fan-out), read-only subs (the M5/B12 lifecycle, including operator-out-of-sub-governance), and leaving (M7 archive export, in progress).
+- Read this once and the social contract is legible — no docs hunting required.
+
+**Doc updates (no behavior change):**
+- `docs/02-features/plato.context.md` gets a new "Sub state model" section describing the two-state lifecycle, entry/exit paths, warning surface, marker placement, and the `disabled_at` row in the per-sub settings table; plus a new "Mod model" section reflecting the M5/B12 decisions (one mod, subscriber-eligibility, self-demote, shared queue, no role badge in modlog).
+- `docs/02-features/operator-guide.md` adds an entry to the "What's locked in" list capturing the operators-don't-arbitrate-sub-governance posture (with the authority-coercion-defense framing) and updates the cron-block reference from 5 → 6 lines.
+- `README.md` headline gets a fourth bullet about read-only subs and the operator-out posture — the public-facing one-liner that mirrors the PRD's deepest commitment.
+
+5 new integration tests in `test/integration/sub-state.test.js` covering the cron sweep: no-disable when fresh, disable after 30d, any-mod-restarts-the-clock, skip-zero-mod-subs, idempotency. 569/569 total (was 564).
+
 ### Added — M5/B12: co-mod model + sub state lifecycle (commit 1 of 2; cron deferred)
 
 Plato's two-tier mod model is now usable end-to-end. Previously the data layer supported owner + co-mod roles (migration 002, sub_mods table) but there was no UI to actually create co-mods — they could only be added via direct SQL. This commit ships the management surface, plus the read-only state mechanism that closes off the operator-as-arbiter posture for sub governance.

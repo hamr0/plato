@@ -27,6 +27,7 @@ Mail uses `/usr/sbin/sendmail -t` so no extra package (`mail`, `mailx`, etc.) is
 | Daily @ 04:35 UTC | `bin/stats.js` | Appends one JSON line to `data/stats.log` with `{snapshot_at, users, subs, posts, comments}`. Append-only — never rewrites. `--dry-run` prints to stdout. |
 | Weekly Mon @ 06:00 UTC | `bin/stats-weekly.js` | Reads `data/stats.log`, groups by ISO week, keeps the latest snapshot per week, takes the most recent 4 weeks, renders a fixed-width table with WoW deltas, mails to `operator.email`. `--dry-run` prints to stdout. |
 | Quarterly, Jan/Apr/Jul/Oct 1st @ 06:00 UTC | `scripts/cron-refresh-disposable.sh` | Refreshes `disposable-domains.txt` from upstream (~5400 domains, MIT), restarts the service if the snapshot changed, mails the operator. |
+| Daily @ 05:15 UTC | `bin/check-sub-inactivity.js` | Walks every active sub; auto-disables any whose mods (owner + co-mods) have been silent for >30 days. Synthesizes a public modlog row (`action=auto_disable_inactivity`, `mod_handle=SYSTEM_HANDLE`). Subs with zero mods are skipped. `--dry-run` lists what would be disabled without writing. |
 
 ### Counter definitions
 
@@ -90,6 +91,10 @@ Add to **root crontab** (`sudo crontab -e`). All five lines, exactly as shown:
 
 # Quarterly Jan/Apr/Jul/Oct 1st 06:00 UTC: disposable-domains refresh
 0 6 1 1,4,7,10 *    /opt/plato/scripts/cron-refresh-disposable.sh
+
+# Daily 05:15 UTC: sub inactivity sweep — auto-disables subs whose mods
+# have been silent for 30+ days (see plato.context.md §Sub state model).
+15 5 * * *          cd /opt/plato && node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
 ```
 
 ### 3. Verify each job manually
@@ -113,6 +118,10 @@ node bin/stats-weekly.js --dry-run
 
 # Disposable-domains (rewrites disposable-domains.txt)
 ./scripts/refresh-disposable-domains.sh
+
+# Sub inactivity sweep (writes auto_disable_inactivity modlog rows + disabled_at)
+node bin/check-sub-inactivity.js --dry-run    # preview what would be disabled
+node bin/check-sub-inactivity.js               # actually run
 ```
 
 If any of these fails on a fresh install, the cron version will fail too — fix it now while you're watching, not at 04:30 next Monday.

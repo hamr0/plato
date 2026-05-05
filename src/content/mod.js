@@ -413,3 +413,48 @@ export function listDisabledSubs(db) {
     'SELECT name, disabled_at FROM subs WHERE disabled_at IS NOT NULL ORDER BY disabled_at DESC'
   ).all();
 }
+
+// Walk every active sub and auto-disable any whose mods have been silent
+// for SUB_INACTIVITY_THRESHOLD_MS. Returns the list of sub names that
+// transitioned to read-only this pass. Idempotent — re-running on a sub
+// that's already disabled is a no-op (the WHERE clause excludes them).
+//
+// Run by bin/check-sub-inactivity.js (system cron, daily). Pure-function
+// shape so tests can drive it with a fake `now` and assert without
+// touching a real cron daemon.
+export function runInactivitySweep(db, { now = Date.now() } = {}) {
+  const cutoff = now - SUB_INACTIVITY_THRESHOLD_MS;
+  const candidates = db.prepare(
+    'SELECT name FROM subs WHERE disabled_at IS NULL'
+  ).all();
+  const disabled = [];
+  for (const { name } of candidates) {
+    const last = lastModActivity(db, name);
+    // No mods at all (zero owner, zero co-mods) → not eligible for the
+    // inactivity timer; the sub is in a different failure mode (probably
+    // operator-created with no owner) and the cron isn't the right
+    // intervention. Leave it alone.
+    if (last == null) continue;
+    if (last >= cutoff) continue;
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE subs SET disabled_at = ? WHERE name = ? AND disabled_at IS NULL').run(now, name);
+      db.prepare(
+        `INSERT INTO mod_actions
+           (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+         VALUES (?, ?, ?, 'auto_disable_inactivity', 'sub', ?, ?, ?)`
+      ).run(
+        randomBytes(ID_BYTES).toString('hex'),
+        name, SYSTEM_HANDLE, name,
+        `30 days no mod activity (last seen ${new Date(last).toISOString()})`,
+        now,
+      );
+      db.exec('COMMIT');
+      disabled.push(name);
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+  return disabled;
+}

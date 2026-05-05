@@ -266,11 +266,11 @@ The `branding.colors` section of `config.json` overrides vote-arrow CSS variable
 
 System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` row attributed to `SYSTEM_HANDLE` (pseudonym `system`) in addition to the system flag. They surface in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog`, with the pattern source or blocked host carried in the `reason` column. Filter with `?mod=system` to isolate auto-actions.
 
-### Per-sub settings (set via `/sub/create` form; flairs / sensitive / flag-threshold also editable via owner-only `/sub/<name>/edit`)
+### Per-sub settings (set via `/sub/create` form; flairs / sensitive / flag-threshold / description also editable via owner-only `/sub/<name>/edit`)
 
 | Field | Floor | Default | Purpose |
 |---|---|---|---|
-| `name` | 3–30 chars, locked at creation | — | Lowercase alphanumeric + hyphen, no leading/trailing hyphen. |
+| `name` | 3–30 chars, locked at creation | — | Lowercase alphanumeric + hyphen, no leading/trailing hyphen. **Sub names are immutable** — renaming would break URLs, RSS feeds, archive scope keys, and modlog cross-references. PRD-locked. |
 | `description` | optional | `''` | One-line tagline shown in the home strip. Editable. |
 | `autoUncollapsePost` | **50** | 50 | Net upvotes since collapse to auto-uncollapse a soft-removed post. Locked at creation. |
 | `autoUncollapseComment` | **20** | 20 | Same, for comments. Locked at creation. |
@@ -278,8 +278,35 @@ System auto-actions (spam-regex hits, URLhaus host hits) write a `mod_actions` r
 | `flairs` | max 6 | `[]` | JSON array `[{slug, label, color}]`. Slug `[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?` (no leading/trailing hyphen, 1–20 chars, derived from label by the form), label ≤ 24 chars, color is 6-digit hex `^#[0-9a-f]{6}$` (8 preset swatches + free-form `<input type="color">` in the editor — both emit `#rrggbb`; rgb()/named/CSS-keyword forms rejected at validate time). Owner-curated. |
 | `flairsRequired` | requires ≥ 1 flair | `false` | When set, every new post in the sub must carry a flair. |
 | `sensitive` | — | `false` | Generic content-advisory flag. Two layers: per-sub (this row, owner-set) renders the amber banner across the whole sub + `[!]` in directories; per-post (author-set on create or within edit window, migration 012) renders the same banner above the individual post body and `[!]` next to the title in feeds. Either source triggers the advisory. Not for porn (banned by default rules); covers graphic violence, abuse discussions, intense political topics, etc. |
+| `disabled_at` | — | `NULL` | Read-only state (M5/B12, migration 016). NULL = active; non-null = unix-ms when the sub became read-only. Two entry paths: mod step-down with no co-mods (in-app), or 30-day mod inactivity (cron). Recovery: any current mod flips back via `/sub/<name>/edit`. If no mods remain, sub is permanently read-only — operators do not assign new mods or override sub state. See *Sub state model*. |
 
 Auto-uncollapse thresholds: the operator can raise either but never below the floor — defends against a small brigade overturning a soft-removal.
+
+### Sub state model (M5/B12)
+
+Two states only: **active** (`disabled_at IS NULL`) and **read-only** (`disabled_at` set).
+
+- **Active**: posts, comments, votes, flags, and mod actions all work normally. Subscribe/unsubscribe always works regardless of state.
+- **Read-only**: writes blocked at the content-module layer (`isDisabled` check in `post.js`, `comment.js`, `vote.js`, `flag.js`, and `mod.js#recordAction`). Reads stay open. The only mod action accepted is `manual_reactivate`, which flips `disabled_at = NULL` and writes a modlog row.
+
+Entry paths:
+- **Step-down with no co-mods** — owner clicks "disable sub" on `/sub/<name>/edit`. Clears `owner_handle` to NULL and sets `disabled_at`; the sub now has zero mods and stays permanently read-only (no operator override path). Members migrate by forking.
+- **30-day inactivity** — `bin/check-sub-inactivity.js` (daily cron) calls `runInactivitySweep` which auto-disables subs whose `lastModActivity` (max across post/comment/mod_action by any current mod) is older than `SUB_INACTIVITY_THRESHOLD_MS` (30 days, floor-locked). Synthesizes a modlog row with `mod_handle = SYSTEM_HANDLE` and `action = 'auto_disable_inactivity'`. Subs with zero mods are skipped — that's a different failure mode the cron isn't the right intervention for.
+
+Warning surface (active-state, no DB column):
+- 28 days since last mod activity → per-sub banner renders "this sub will become read-only in ~Nh; create a successor sub now" with explicit migration framing. Computed at request time from `lastModActivity(now) - SUB_INACTIVITY_WARNING_MS`.
+
+Recovery: any current mod (owner OR co-mod) opens `/sub/<name>/edit` and clicks "reactivate." Synthesizes a `manual_reactivate` modlog row. No cooldown — a sub can cycle active ↔ read-only freely.
+
+Marker: `/subs` directory shows `[read-only]` next to disabled-sub names. PRD-locked decision: marker lives on `/subs` (decision-time surface), NOT `/about` (instance-identity surface).
+
+### Mod model (M5/B12)
+
+- **One mod per sub** (`subs.owner_handle`). UI surfaces this as "mod"; code/schema keeps "owner" for precision.
+- **Many co-mods** (`sub_mods` table, role `'co'`). Promoted by mod from the sub's subscribers — eligibility = `isSubscribed(target, sub)` at promotion time. After promotion, mod role and subscription are independent.
+- **Self-demote** allowed for co-mods on `demote_mod` (carve-out from OWNER_ONLY check when `mod_handle === target_id`). Demoting *another* co-mod still requires owner.
+- **Step-down (mod)** = `transfer_owner` to a chosen co-mod (if any exist) or `disable_sub` (if none). Mod cannot just leave; sub always has either a successor or read-only state.
+- **Mod queue** is shared between mod and co-mods. No fan-out notifications when a flag arrives — pending actions are visible to anyone with mod role on the sub. The first to act records the row. Modlog rows do NOT carry a role badge — pseudonym is the actor identity, role at-time-of-action is intentionally not denormalized.
 
 ### Per-handle rules (locked)
 

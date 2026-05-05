@@ -9,7 +9,7 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 import { createSub } from '../../src/content/sub.js';
 import {
   recordAction, canModerate, isDisabled, listCoMods,
-  lastModActivity,
+  lastModActivity, runInactivitySweep, SUB_INACTIVITY_THRESHOLD_MS,
 } from '../../src/content/mod.js';
 import { finalizeDraft, submitDraft } from '../../src/content/post.js';
 import { addComment } from '../../src/content/comment.js';
@@ -270,4 +270,107 @@ test('transfer_owner: old mod becomes co-mod, new mod takes over', () => {
   });
   assert.equal(canModerate(db, 'lobby', SUBSCRIBER), 'owner');
   assert.equal(canModerate(db, 'lobby', OWNER), 'co');
+});
+
+// --- Inactivity cron sweep (M5/B12 commit 2) ---
+
+test('runInactivitySweep: no subs disabled when activity is recent', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'plato-state-'));
+  try {
+    const db = fresh();
+    const { draftId } = submitDraft(db, {
+      title: 't', body: 'b', subName: 'lobby', sensitive: false, flairSlug: null,
+    });
+    finalizeDraft(db, { draftId, handle: OWNER, postsDir: tmp });
+    // Sub has fresh mod activity (the post just now). Sweep should no-op.
+    const disabled = runInactivitySweep(db, { now: Date.now() });
+    assert.deepEqual(disabled, []);
+    assert.equal(isDisabled(db, 'lobby'), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('runInactivitySweep: disables subs with no mod activity for >30 days', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'plato-state-'));
+  try {
+    const db = fresh();
+    // Seed a post by the owner long ago (older than 30 days)
+    const longAgo = Date.now() - SUB_INACTIVITY_THRESHOLD_MS - 60_000;
+    const { draftId } = submitDraft(db, {
+      title: 't', body: 'b', subName: 'lobby', sensitive: false, flairSlug: null,
+      now: longAgo,
+    });
+    finalizeDraft(db, { draftId, handle: OWNER, postsDir: tmp, now: longAgo });
+    // Manually backdate the post (submitDraft might use 'now' for created_at;
+    // ensure the activity timestamp is genuinely old).
+    db.prepare('UPDATE posts SET created_at = ? WHERE sub_name = ?').run(longAgo, 'lobby');
+
+    const disabled = runInactivitySweep(db, { now: Date.now() });
+    assert.deepEqual(disabled, ['lobby']);
+    assert.equal(isDisabled(db, 'lobby'), true);
+
+    // Modlog row written with action=auto_disable_inactivity, target='sub'
+    const row = db.prepare(
+      `SELECT action, target_type, target_id, mod_handle, reason
+       FROM mod_actions WHERE sub_name = ? ORDER BY created_at DESC LIMIT 1`
+    ).get('lobby');
+    assert.equal(row.action, 'auto_disable_inactivity');
+    assert.equal(row.target_type, 'sub');
+    assert.equal(row.target_id, 'lobby');
+    assert.match(row.reason, /30 days no mod activity/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('runInactivitySweep: any mod activity (even by a co-mod) restarts the clock', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'plato-state-'));
+  try {
+    const db = fresh();
+    subscribe(db, SUBSCRIBER);
+    // Owner promotes co-mod long ago
+    const longAgo = Date.now() - SUB_INACTIVITY_THRESHOLD_MS - 60_000;
+    db.prepare(
+      `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, created_at)
+       VALUES (?, ?, ?, 'promote_mod', 'handle', ?, ?)`
+    ).run('a'.repeat(16), 'lobby', OWNER, SUBSCRIBER, longAgo);
+    db.prepare("INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, 'co')").run('lobby', SUBSCRIBER);
+
+    // Co-mod commented recently — restarts the clock
+    const { draftId } = submitDraft(db, {
+      title: 't', body: 'b', subName: 'lobby', sensitive: false, flairSlug: null, now: longAgo,
+    });
+    const { postId } = finalizeDraft(db, { draftId, handle: OWNER, postsDir: tmp, now: longAgo });
+    db.prepare('UPDATE posts SET created_at = ? WHERE id = ?').run(longAgo, postId);
+    addComment(db, { postId, handle: SUBSCRIBER, body: 'still here', now: Date.now() });
+
+    const disabled = runInactivitySweep(db, { now: Date.now() });
+    assert.deepEqual(disabled, []);
+    assert.equal(isDisabled(db, 'lobby'), false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('runInactivitySweep: skip subs with no mods at all (different failure mode)', () => {
+  const db = fresh();
+  // Strip the owner; sub has zero mods
+  db.prepare('UPDATE subs SET owner_handle = NULL WHERE name = ?').run('lobby');
+  const disabled = runInactivitySweep(db, { now: Date.now() });
+  assert.deepEqual(disabled, []);
+  assert.equal(isDisabled(db, 'lobby'), false);
+});
+
+test('runInactivitySweep: idempotent — running on an already-disabled sub is a no-op', () => {
+  const db = fresh();
+  db.prepare('UPDATE subs SET disabled_at = ? WHERE name = ?').run(Date.now(), 'lobby');
+  const disabled = runInactivitySweep(db, { now: Date.now() });
+  assert.deepEqual(disabled, []);
+  // Still disabled, no extra modlog row
+  assert.equal(isDisabled(db, 'lobby'), true);
+  const rowCount = db.prepare(
+    `SELECT COUNT(*) AS n FROM mod_actions WHERE sub_name = ? AND action = 'auto_disable_inactivity'`
+  ).get('lobby').n;
+  assert.equal(rowCount, 0);
 });
