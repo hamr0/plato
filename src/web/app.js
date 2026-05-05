@@ -15,6 +15,7 @@ import {
   listPostsAcrossSubs,
   SUB_SORTS,
   EDIT_WINDOW_MS as POST_EDIT_WINDOW_MS,
+  BODY_MAX as POST_BODY_MAX,
 } from '../content/post.js';
 import {
   createSub,
@@ -40,6 +41,7 @@ import {
   listRecentCommentsAcrossSubs,
   COMMENT_SORTS,
   EDIT_WINDOW_MS as COMMENT_EDIT_WINDOW_MS,
+  COMMENT_BODY_MAX,
 } from '../content/comment.js';
 import { castVote, getVote, newAccountHandles } from '../content/vote.js';
 import {
@@ -673,7 +675,7 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     ${subField}
     <input name="title" placeholder="post title" value="${dTitle}" required>
     ${flairField}
-    <textarea name="body" placeholder="markdown body" required>${dBody}</textarea>
+    <textarea name="body" placeholder="markdown body" maxlength="${POST_BODY_MAX}" required>${dBody}</textarea>
     <label class="post-form-row sensitive-row">
       <input type="checkbox" name="sensitive" value="1" ${(dSensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
       <span class="muted">${subSensitive
@@ -2052,7 +2054,7 @@ function commentNodeView(node, ctx, depth) {
     ? html`<details class="reply"><summary class="muted">reply</summary>
         <form method="POST" action="/sub/${ctx.subName}/post/${ctx.postId}/comment" class="reply-form">
           <input type="hidden" name="parent_id" value="${node.id}">
-          <textarea name="body" placeholder="markdown reply" required></textarea>
+          <textarea name="body" placeholder="markdown reply" maxlength="${COMMENT_BODY_MAX}" required></textarea>
           <button>reply</button>
         </form>
       </details>`
@@ -2258,7 +2260,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
 
       <div class="composer-bar">
         <form method="POST" action="/sub/${subName}/post/${postId}/comment"${currentHandle ? html`` : html` data-guest="1"`}>
-          <textarea name="body" placeholder="join the conversation" required></textarea>
+          <textarea name="body" placeholder="join the conversation" maxlength="${COMMENT_BODY_MAX}" required></textarea>
           <div class="guest-notice" hidden>saved — sign in above to post it. we'll submit it for you when you confirm.</div>
           <button>comment</button>
         </form>
@@ -2395,7 +2397,7 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     <h2 class="section">// edit post</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
       <label>body (markdown)</label>
-      <textarea name="body" required>${body}</textarea>
+      <textarea name="body" maxlength="${POST_BODY_MAX}" required>${body}</textarea>
       <label class="post-form-row sensitive-row">
         <input type="checkbox" name="sensitive" value="1" ${(post.sensitive || subSensitive) ? 'checked' : ''} ${subSensitive ? 'disabled' : ''}>
         <span class="muted">${subSensitive
@@ -2442,7 +2444,7 @@ function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentI
     <h2 class="section">// edit comment</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/comment/${commentId}/edit" class="post-form">
       <label>body (markdown)</label>
-      <textarea name="body" required>${comment.body}</textarea>
+      <textarea name="body" maxlength="${COMMENT_BODY_MAX}" required>${comment.body}</textarea>
       <div class="form-actions">
         <button>save</button>
         <a href="/sub/${subName}/post/${postId}#comment-${commentId}">cancel</a>
