@@ -128,6 +128,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
 <script src="/static/subscribe.js?v=1" defer></script>
+<script src="/static/rssvp.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -3003,39 +3004,6 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
       <form method="POST" action="/memlog/rss-regenerate" class="filter-form">
         <button class="filter-btn" title="invalidates both URLs and issues new ones">regenerate token</button>
       </form>
-      <script>
-        (function () {
-          // Click-to-copy on the rssvp URL buttons. Pure progressive
-          // enhancement — without JS, the URL text is still selectable
-          // and copyable the normal way (it sits inside <code>).
-          for (const btn of document.querySelectorAll('.rssvp-copy')) {
-            btn.addEventListener('click', async () => {
-              const url = btn.dataset.copy;
-              if (!url) return;
-              try {
-                await navigator.clipboard.writeText(url);
-                const prev = btn.dataset.prev ?? btn.querySelector('code').textContent;
-                btn.dataset.prev = prev;
-                btn.classList.add('rssvp-copied');
-                btn.querySelector('code').textContent = 'copied!';
-                setTimeout(() => {
-                  btn.classList.remove('rssvp-copied');
-                  btn.querySelector('code').textContent = prev;
-                }, 1200);
-              } catch (e) {
-                // Clipboard API can be denied (permissions, insecure
-                // context, very old browsers). Fall back: select the
-                // text inside the button so the user can ⌘/Ctrl-C.
-                const range = document.createRange();
-                range.selectNodeContents(btn.querySelector('code'));
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-              }
-            });
-          }
-        })();
-      </script>
     </details>`;
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <div class="memlog-page">
