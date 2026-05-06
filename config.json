@@ -3,13 +3,7 @@
     "forumName": "terribic",
     "tagline": "terrific or terrible",
     "hostedBy": "@terribic",
-    "feedbackEmail": "avoidaccess@msn.com",
-    "rules": [
-      "be civil, especially when disagreeing. no racism, sexism, ableism, homophobia, or transphobia.",
-      "no porn, no illegal content.",
-      "no ads, spam, scams, or doxxing.",
-      "mods are accountable; the modlog is public, and votes can reverse soft removes."
-    ]
+    "feedbackEmail": "avoidaccess@msn.com"
   },
   "operator": {
     "email": "avoidaccess@gmail.com",
