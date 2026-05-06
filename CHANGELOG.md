@@ -103,6 +103,51 @@ underlying mod model and sub-state lifecycle are unchanged.
   the picker. /about test extended for the "how this place works"
   block. 584/584.
 
+### Changed — third smoke pass (post-584)
+
+- **Manage page now lists the mod above co-mods.** `/sub/<name>/edit` gains
+  a `// mod` heading rendering the owner's pseudonym so a co-mod can see
+  who their mod actually is. Owner viewing their own manage page sees
+  themselves with a `(you)` suffix. Drops the previously-defensive
+  "owner unowned" branch — `disable_sub` is the only path that nulls
+  `owner_handle` and it's gated to zero-co-mod subs, so `canModerate`
+  returns null for everyone in that state and the access guard 403s
+  before the owner block renders. Dead code removed.
+- **Mod-can't-unsubscribe state unified across `/subs` and `/sub/<name>`.**
+  `subscribeForm` now takes `modRole` and renders a disabled,
+  struck-through `unsubscribe` button with an explanatory tooltip when
+  set, replacing the previous silent-omit on the sub-page header. Same
+  visual treatment as the `/subs` directory row, which already had the
+  pattern. The PRD lock (mod role implies subscribership; toggle locked
+  for mods) is unchanged in intent — only the surface treatment shifts
+  from "hidden" to "visible-but-disabled" so the lock is legible.
+- **28-day inactivity banner branches by role.** Mods/co-mods now see
+  `<strong>you mod this sub.</strong> any post, comment, or mod action
+  you take here resets the timer.`; non-mods keep the migration framing
+  pointing at `/sub/create`. Reason: the un-branched copy read as advice
+  to a member and mods skipped past it. `<strong>` lead phrase gets a
+  dotted underline (0.2em offset) via `.sensitive-banner strong` so the
+  actionable subject stands out.
+- **Composer comment button.** Bottom-of-post sticky composer's submit
+  button picked up `.mod-action-pill` so it visually matches the rest
+  of the primary action set (save / reactivate / promote). Pinned
+  bottom-right via `align-self: center` + `margin-left: auto` against
+  the textarea-wrap; idle composer stays single-row tall.
+- **`config.json` rules dropped.** The four lines previously duplicated in
+  `branding.rules` matched `DEFAULT_BRANDING_RULES` byte-for-byte;
+  removing the override lets the resolver's `undefined →
+  [...DEFAULT_BRANDING_RULES]` fallback handle it. Operator intent in
+  `config.json` is now legible: silence is `"rules": []`, custom is a
+  populated array, absence means defaults.
+- **9 new HTTP tests** in `test/integration/sub-state-ui.test.js` cover:
+  disabled-unsubscribe rendering on `/subs` for owner + co-mod;
+  sub-page header disabled-button vs live-form; banner copy variants
+  (owner / co-mod / non-mod); `// mod` heading + owner pseudonym on the
+  manage page (owner self-view + co-mod view of owner). New
+  `seedStaleModActivity` helper backdates pre-existing mod_actions and
+  inserts a stale anchor row so banner tests don't depend on real-time
+  inactivity. 593/593.
+
 ### Added — `/humans.txt` and `/.well-known/security.txt`
 
 Closes the tier-1+2 portion of `docs/04-process/privacy-seo.md` for plato. The headline OG / canonical / robots.txt / sitemap.xml work was already in place; this adds the two cheap signals the playbook recommends and notes as "optional but valuable" for privacy-positioned projects.
