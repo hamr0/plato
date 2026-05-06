@@ -336,3 +336,154 @@ test('POST promote_mod with unknown pseudonym is rejected (no silent miss)', asy
   });
   assert.equal(res.status, 400);
 });
+
+// --- Disabled-unsubscribe rendering for mods (mod-can't-unsubscribe-while-modding) ---
+
+function rowFor(body, subName) {
+  return body.split('</tr>').find((r) => r.includes(`/sub/${subName}"`)) ?? '';
+}
+
+test('GET /subs: mod sees a disabled struck-through unsubscribe button on a sub they own', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar } = await loginAndCreateSub(ctx, { email: 'us1@x.test', sub: 'workshop' });
+  const res = await jfetch(jar, ctx.baseUrl + '/subs');
+  const body = await res.text();
+  const workshopRow = rowFor(body, 'workshop');
+  assert.ok(workshopRow.includes('subscribe-cell'), 'workshop row has subscribe-cell');
+  assert.match(workshopRow, /<button class="subscribe-btn" type="button" disabled[^>]*>unsubscribe<\/button>/);
+  assert.doesNotMatch(workshopRow, /<form[^>]*\/subscribe/);
+});
+
+test('GET /subs: co-mod also sees the disabled unsubscribe button (modSet covers both roles)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { ownerHandle } = await loginAndCreateSub(ctx, { email: 'us2a@x.test', sub: 'studio2' });
+  const { jar: comodJar, handle: comodHandle } = await loginPlainUser(ctx, { email: 'us2b@x.test' });
+  ctx.db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)')
+    .run(comodHandle, 'studio2', Date.now());
+  recordAction(ctx.db, {
+    subName: 'studio2', modHandle: ownerHandle,
+    action: 'promote_mod', targetType: 'handle', targetId: comodHandle,
+  });
+  const res = await jfetch(comodJar, ctx.baseUrl + '/subs');
+  const body = await res.text();
+  const studioRow = rowFor(body, 'studio2');
+  assert.match(studioRow, /<button class="subscribe-btn" type="button" disabled[^>]*>unsubscribe<\/button>/);
+  assert.match(studioRow, /co-mod this sub/);
+});
+
+test('GET /sub/<name>: header subscribe form is replaced with disabled button for mods', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar } = await loginAndCreateSub(ctx, { email: 'us3@x.test', sub: 'atelier' });
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/atelier');
+  const body = await res.text();
+  const actionRow = body.match(/<div class="sub-action-row">[^]*?<\/div>/)?.[0] ?? '';
+  assert.match(actionRow, /<button class="subscribe-btn" type="button" disabled[^>]*>unsubscribe<\/button>/);
+  assert.doesNotMatch(actionRow, /<form[^>]*\/subscribe/);
+});
+
+test('GET /sub/<name>: header still shows live subscribe form for non-mod members', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  await loginAndCreateSub(ctx, { email: 'us4a@x.test', sub: 'gallery2' });
+  const { jar: userJar } = await loginPlainUser(ctx, { email: 'us4b@x.test' });
+  const res = await jfetch(userJar, ctx.baseUrl + '/sub/gallery2');
+  const body = await res.text();
+  const actionRow = body.match(/<div class="sub-action-row">[^]*?<\/div>/)?.[0] ?? '';
+  assert.match(actionRow, /<form[^>]*\/sub\/gallery2\/subscribe/);
+  assert.match(actionRow, /<button class="subscribe-btn" type="submit">subscribe<\/button>/);
+});
+
+// --- Role-aware inactivity warning banner copy ---
+
+// Force lastModActivity(subName) to land daysAgo days in the past:
+// backdate any existing fresh mod_actions in the sub (e.g. the
+// promote_mod we just ran for setup), then insert a stale anchor row in
+// case there's no prior activity at all. Action is a real value
+// (manual_reactivate) for schema validity; no state flip is intended.
+function seedStaleModActivity(db, subName, modHandle, daysAgo) {
+  const cap = Date.now() - Math.floor(daysAgo * 86400000);
+  db.prepare('UPDATE mod_actions SET created_at = ? WHERE sub_name = ? AND created_at > ?')
+    .run(cap, subName, cap);
+  const id = randomBytes(8).toString('hex');
+  db.prepare(
+    `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+     VALUES (?, ?, ?, 'manual_reactivate', 'sub', ?, ?, ?)`
+  ).run(id, subName, modHandle, subName, 'test seed', cap);
+}
+
+test('GET /sub/<name>: inactivity warning shows mod-actionable copy for owner', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar, ownerHandle } = await loginAndCreateSub(ctx, { email: 'iw1@x.test', sub: 'quiet' });
+  seedStaleModActivity(ctx.db, 'quiet', ownerHandle, 28.5);
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/quiet');
+  const body = await res.text();
+  assert.match(body, /mods have been inactive for 28\+ days/);
+  assert.match(body, /<strong>you mod this sub\.<\/strong>/);
+  assert.match(body, /resets the timer/);
+  assert.doesNotMatch(body, /create a successor sub/);
+});
+
+test('GET /sub/<name>: inactivity warning shows co-mod copy for co-mods', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { ownerHandle } = await loginAndCreateSub(ctx, { email: 'iw2a@x.test', sub: 'still' });
+  const { jar: comodJar, handle: comodHandle } = await loginPlainUser(ctx, { email: 'iw2b@x.test' });
+  ctx.db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)')
+    .run(comodHandle, 'still', Date.now());
+  recordAction(ctx.db, {
+    subName: 'still', modHandle: ownerHandle,
+    action: 'promote_mod', targetType: 'handle', targetId: comodHandle,
+  });
+  seedStaleModActivity(ctx.db, 'still', ownerHandle, 28.5);
+  const res = await jfetch(comodJar, ctx.baseUrl + '/sub/still');
+  const body = await res.text();
+  assert.match(body, /<strong>you co-mod this sub\.<\/strong>/);
+  assert.match(body, /resets the timer/);
+  assert.doesNotMatch(body, /create a successor sub/);
+});
+
+test('GET /sub/<name>: inactivity warning shows member migration copy for non-mods', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { ownerHandle } = await loginAndCreateSub(ctx, { email: 'iw3a@x.test', sub: 'hush' });
+  seedStaleModActivity(ctx.db, 'hush', ownerHandle, 28.5);
+  const { jar: memberJar } = await loginPlainUser(ctx, { email: 'iw3b@x.test' });
+  const res = await jfetch(memberJar, ctx.baseUrl + '/sub/hush');
+  const body = await res.text();
+  assert.match(body, /create a successor sub/);
+  assert.doesNotMatch(body, /you mod this sub|you co-mod this sub/);
+});
+
+// --- Manage page: // mod heading + owner pseudonym ---
+
+test('GET /sub/<name>/edit: renders "// mod" heading with owner pseudonym above co-mods', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar, ownerHandle } = await loginAndCreateSub(ctx, { email: 'mh1@x.test', sub: 'manage1' });
+  const ownerPseudo = ctx.db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(ownerHandle).pseudonym;
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/manage1/edit');
+  const body = await res.text();
+  // // mod heading appears before // co-mods
+  const modIdx = body.indexOf('// mod</h3>');
+  const comodIdx = body.indexOf('// co-mods</h3>');
+  assert.ok(modIdx > 0, 'mod heading present');
+  assert.ok(comodIdx > modIdx, 'co-mods heading appears after mod heading');
+  // Owner pseudonym in a strong tag inside .co-mod-list-owner
+  assert.match(body, new RegExp(`<p class="co-mod-list-owner"><strong>${ownerPseudo}</strong>`));
+  // Owner viewing themselves sees (you)
+  assert.match(body, /<strong>[^<]+<\/strong> <span class="muted">\(you\)<\/span>/);
+});
+
+test('GET /sub/<name>/edit: co-mod sees mod heading with owner pseudonym (not their own)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { ownerHandle } = await loginAndCreateSub(ctx, { email: 'mh2a@x.test', sub: 'manage2' });
+  const { jar: comodJar, handle: comodHandle } = await loginPlainUser(ctx, { email: 'mh2b@x.test' });
+  ctx.db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)')
+    .run(comodHandle, 'manage2', Date.now());
+  recordAction(ctx.db, {
+    subName: 'manage2', modHandle: ownerHandle,
+    action: 'promote_mod', targetType: 'handle', targetId: comodHandle,
+  });
+  const ownerPseudo = ctx.db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(ownerHandle).pseudonym;
+  const res = await jfetch(comodJar, ctx.baseUrl + '/sub/manage2/edit');
+  const body = await res.text();
+  const ownerBlock = body.match(/<p class="co-mod-list-owner">[^]*?<\/p>/)?.[0] ?? '';
+  assert.ok(ownerBlock.includes(`<strong>${ownerPseudo}</strong>`), 'owner pseudonym shown to co-mod');
+  assert.doesNotMatch(ownerBlock, /\(you\)/);
+});

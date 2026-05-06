@@ -859,7 +859,7 @@ button:hover { filter: brightness(1.1); }
 .comment-long > summary .read-more { color: var(--accent); }
 .comment-long[open] > summary { display: none; }
 .composer-bar .textarea-wrap { flex: 1; }
-.composer-bar button { white-space: nowrap; align-self: flex-start; margin-left: auto; }
+.composer-bar button { white-space: nowrap; align-self: center; margin-left: auto; }
 
 /* Page padding so the last comment isn't hidden behind the bar. Apply to
  * body when the bar is present — guarded by a sub-tree class on the post
@@ -1153,6 +1153,7 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 }
 .co-mod-list > li > strong { margin-right: 0; }
 .co-mod-list > li > .inline-confirm { margin-left: 0; }
+.co-mod-list-owner { padding: 0.3rem 0; margin: 0.4rem 0 0.8rem; }
 
 /* Live character counter under any textarea[data-charcount]. Visible
    surrogate for the maxlength attribute so users can see how much room
@@ -1323,6 +1324,7 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   font-size: 0.85rem;
   font-family: monospace;
 }
+.sensitive-banner strong { text-decoration: underline dotted; text-underline-offset: 0.2em; }
 .sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
 .new-account-mark { color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
@@ -1342,6 +1344,8 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   padding: 0; font: inherit; text-decoration: none;
 }
 .subscribe-btn:hover { text-decoration: underline dotted; color: var(--text); }
+.subscribe-btn:disabled { color: var(--text-dim); cursor: not-allowed; text-decoration: line-through; }
+.subscribe-btn:disabled:hover { color: var(--text-dim); text-decoration: line-through; }
 
 /* My-modlog inline revoke button. Renders only on rows where the
    current handle is the actor and the action's effect is still in

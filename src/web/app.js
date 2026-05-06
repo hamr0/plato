@@ -1294,6 +1294,9 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
   const subReturnTo = subQs({});
   const subscribeCell = (subName) => {
     if (!subscribedSet) return html``;
+    if (modSet.has(subName)) {
+      return html`<td class="subscribe-cell"><button class="subscribe-btn" type="button" disabled title="you mod or co-mod this sub — can't unsubscribe while modding">unsubscribe</button></td>`;
+    }
     const subbed = subscribedSet.has(subName);
     const action = subbed ? 'unsubscribe' : 'subscribe';
     return html`<td class="subscribe-cell"><form method="POST" action="/sub/${subName}/subscribe" class="subscribe-form">
@@ -1363,7 +1366,10 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
 // the static/subscribe.js script intercepts the submit, fetches the
 // POST in place, and flips the label without a full page reload (no
 // flicker, no scroll reset).
-function subscribeForm({ subName, currentHandle, db, returnTo }) {
+function subscribeForm({ subName, currentHandle, db, returnTo, modRole }) {
+  if (modRole) {
+    return html`<button class="subscribe-btn" type="button" disabled title="you ${modRole === 'owner' ? 'mod' : 'co-mod'} this sub — can't unsubscribe while modding">unsubscribe</button>`;
+  }
   const subbed = isSubscribed(db, currentHandle, subName);
   const action = subbed ? 'unsubscribe' : 'subscribe';
   return html`<form method="POST" action="/sub/${subName}/subscribe" class="subscribe-form">
@@ -1426,7 +1432,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle && !modRole ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
+      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo, modRole })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${subStateBanner({ db, sub, modRole })}
       ${anonHintFor(currentHandle)}
@@ -1570,7 +1576,10 @@ function subStateBanner({ db, sub, modRole }) {
   if (elapsed < SUB_INACTIVITY_WARNING_MS) return html``;
   const willLockAt = new Date(last + SUB_INACTIVITY_THRESHOLD_MS);
   const hours = Math.max(0, Math.round((SUB_INACTIVITY_THRESHOLD_MS - elapsed) / (60 * 60 * 1000)));
-  return html`<div class="sensitive-banner">[!] mods have been inactive for 28+ days. this sub will become read-only in ~${hours}h (around ${willLockAt.toISOString().slice(0, 10)}). if you want to carry this community forward, <a href="/sub/create">create a successor sub</a> and post the link here now.</div>`;
+  const tail = modRole
+    ? html`<strong>you ${modRole === 'owner' ? 'mod' : 'co-mod'} this sub.</strong> any post, comment, or mod action you take here resets the timer.`
+    : html`if you want to carry this community forward, <a href="/sub/create">create a successor sub</a> and post the link here now.`;
+  return html`<div class="sensitive-banner">[!] mods have been inactive for 28+ days. this sub will become read-only in ~${hours}h (around ${willLockAt.toISOString().slice(0, 10)}). ${tail}</div>`;
 }
 
 function renderSubEdit(req, res, { db, auth }, subName) {
@@ -1723,6 +1732,8 @@ function renderSubEdit(req, res, { db, auth }, subName) {
     ${roleChip}
     ${reactivateBlock}
     ${editForm}
+    <h3 class="section">// mod</h3>
+    <p class="co-mod-list-owner"><strong>${pseudonymFor(db, sub.owner_handle)}</strong>${sub.owner_handle === currentHandle ? html` <span class="muted">(you)</span>` : html``}</p>
     <h3 class="section">// co-mods</h3>
     ${coModRows.length > 0 ? html`<ul class="co-mod-list">${coModRows}</ul>` : html`<p class="muted">no co-mods yet.</p>`}
     ${promoteForm}
