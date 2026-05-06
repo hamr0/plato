@@ -48,6 +48,7 @@ ul.posts { list-style: none; padding: 0; }
 ul.posts > li { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
 ul.posts > li .meta { color: var(--text-dim); font-size: 0.85rem; }
 .comment { border-left: 2px solid var(--border); padding: 0.4rem 0.8rem; margin: 0.6rem 0; }
+.comment .comment { margin-left: 0.6rem; }
 .comment .meta { color: var(--text-dim); font-size: 0.85rem; }
 .comment.removed > .body { color: var(--text-dim); font-style: italic; }
 .comment.collapsed > .body { display: none; }
@@ -68,14 +69,14 @@ function escapeHtml(s) {
     .replace(/'/g, '&apos;');
 }
 
-function htmlPage(title, body) {
+function htmlPage({ title, cssHref, body }) {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${title === 'index' ? '' : '../'}archive.css">
+<link rel="stylesheet" href="${escapeHtml(cssHref)}">
 </head>
 <body>
 ${body}
@@ -109,17 +110,17 @@ function renderPostHtml({ post, postBody, comments, pseudonyms, subName }) {
     if (!byPostId.has(c.parent_comment_id || null)) byPostId.set(c.parent_comment_id || null, []);
     byPostId.get(c.parent_comment_id || null).push(c);
   }
-  function renderComment(c, depth) {
+  function renderComment(c) {
     const cps = pseudonyms.get(c.handle) ?? c.handle.slice(0, 8);
     const cls = ['comment'];
     if (c.removed_at != null) cls.push('removed');
     if (c.collapsed_at != null) cls.push('collapsed');
     const meta = `<div class="meta">${escapeHtml(cps)} · ${fmtTimestamp(c.created_at)} · score ${c.score}${c.edited_at ? ' · edited' : ''}${c.removed_at ? ' · [mod removed]' : ''}${c.collapsed_at ? ' · [mod collapsed]' : ''}</div>`;
     const body = c.removed_at ? '<div class="body">[content removed]</div>' : `<div class="body">${renderMarkdown(c.body)}</div>`;
-    const children = (byPostId.get(c.id) ?? []).map((kid) => renderComment(kid, depth + 1)).join('');
-    return `<div class="${cls.join(' ')}" style="margin-left:${depth * 0.6}rem">${meta}${body}${children}</div>`;
+    const children = (byPostId.get(c.id) ?? []).map((kid) => renderComment(kid)).join('');
+    return `<div class="${cls.join(' ')}">${meta}${body}${children}</div>`;
   }
-  const tree = (byPostId.get(null) ?? []).map((c) => renderComment(c, 0)).join('');
+  const tree = (byPostId.get(null) ?? []).map((c) => renderComment(c)).join('');
 
   return `<p><a href="../index.html">← index</a></p>
 <h1>${escapeHtml(post.title)}</h1>
@@ -149,21 +150,28 @@ function renderIndexHtml({ sub, posts, pseudonyms, instance }) {
     })
     .join('\n');
 
+  const sourceLine = instance.base_url
+    ? `exported from <a href="${escapeHtml(instance.base_url)}">${escapeHtml(instance.forum_name)}</a> · ${posts.length} posts · format v1`
+    : `exported from ${escapeHtml(instance.forum_name)} · ${posts.length} posts · format v1`;
+
   return `<h1>//${escapeHtml(sub.name)} archive</h1>
 <p class="muted">${escapeHtml(sub.description || '')}</p>
-<p class="muted">exported from <a href="${escapeHtml(instance.base_url)}">${escapeHtml(instance.forum_name)}</a> · ${posts.length} posts · format v1</p>
+<p class="muted">${sourceLine}</p>
 <p class="muted">offline static reader. no javascript. read-only. see README.md for the schema.</p>
 <h2 class="section">// posts</h2>
 <ul class="posts">${items}</ul>`;
 }
 
 function buildReadme({ sub, instance, exportedAtIso, counts }) {
+  const source = instance.base_url
+    ? `${instance.forum_name} (${instance.base_url})`
+    : instance.forum_name;
   return `# //${sub.name} archive
 
 This is a plato per-sub archive (\`kind: "sub"\`).
 
 - **Sub**: //${sub.name}
-- **Source instance**: ${instance.forum_name} (${instance.base_url})
+- **Source instance**: ${source}
 - **Exported at**: ${exportedAtIso}
 - **Format version**: 1
 - **Counts**: ${counts.posts} posts, ${counts.comments} comments, ${counts.mod_actions} mod actions
@@ -341,12 +349,16 @@ export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVer
     commentsByPost.get(c.post_id).push(c);
   }
 
-  const indexHtml = htmlPage('index', renderIndexHtml({
-    sub,
-    posts: postsForIndex,
-    pseudonyms,
-    instance: { forum_name: branding.forumName, base_url: branding.baseUrl ?? '' },
-  }));
+  const indexHtml = htmlPage({
+    title: `//${sub.name} archive`,
+    cssHref: 'archive.css',
+    body: renderIndexHtml({
+      sub,
+      posts: postsForIndex,
+      pseudonyms,
+      instance: { forum_name: branding.forumName, base_url: branding.baseUrl ?? '' },
+    }),
+  });
 
   const exportedAtIso = exportedAt.toISOString();
   const counts = { posts: posts.length, comments: comments.length, mod_actions: modActions.length, subs: 1 };
@@ -359,25 +371,23 @@ export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVer
 
   // ---- Assemble file entries ----
   const files = [];
-  // Markdown sources first (deterministic order).
+  // Markdown sources first (deterministic order). If a post's .md file is
+  // missing from disk, throw — worker will retry, and a persistent failure
+  // surfaces as a terminal-failed job rather than a silent broken archive.
   for (const p of posts) {
-    let md;
-    try {
-      md = readFileSync(resolve(postsDir, p.file_path.replace(/^posts\//, '')), 'utf8');
-    } catch {
-      // Fall back to a synthetic frontmatter block if the file vanished
-      // from disk (shouldn't happen in practice; the export is still
-      // self-consistent for the JSON path).
-      md = `---\ntitle: ${JSON.stringify(p.title)}\nhandle: ${p.handle}\nsub_name: ${p.sub_name}\ncreated_at: ${p.created_at}\n---\n\n[body missing on disk]\n`;
-    }
+    const md = readFileSync(resolve(postsDir, p.file_path.replace(/^posts\//, '')), 'utf8');
     files.push({ path: `posts/${p.id}.md`, body: md });
-    const renderedHtml = htmlPage(p.title, renderPostHtml({
-      post: p,
-      postBody: md.replace(/^---[\s\S]*?---\n+/, ''),
-      comments: commentsByPost.get(p.id) ?? [],
-      pseudonyms,
-      subName: sub.name,
-    }));
+    const renderedHtml = htmlPage({
+      title: `${p.title} — //${sub.name}`,
+      cssHref: '../archive.css',
+      body: renderPostHtml({
+        post: p,
+        postBody: md.replace(/^---[\s\S]*?---\n+/, ''),
+        comments: commentsByPost.get(p.id) ?? [],
+        pseudonyms,
+        subName: sub.name,
+      }),
+    });
     files.push({ path: `posts/${p.id}.html`, body: renderedHtml });
   }
   files.push({ path: 'posts.json', body: postsJson });

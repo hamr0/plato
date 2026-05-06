@@ -380,6 +380,23 @@ test('buildSubArchiveBytes: throws on missing sub', () => {
   }), /sub no-such-sub not found/);
 });
 
+test('buildSubArchiveBytes: throws on missing post .md so worker can retry', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-'));
+  try {
+    seedSubFixture(db, postsDir, 'studio');
+    // Wipe the postsDir between seeding and exporting to simulate a
+    // disk-level failure mid-deploy.
+    rmSync(postsDir, { recursive: true, force: true });
+    mkdirSync(postsDir);
+    assert.throws(() => buildSubArchiveBytes(db, 'studio', {
+      postsDir, branding: { forumName: 't', baseUrl: '' }, platoVersion: '0.1.0',
+    }), /ENOENT/);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('archiveFilenameFor: shape', () => {
   const f = archiveFilenameFor('lobby', new Date('2026-05-06T12:00:00Z'));
   assert.equal(f, 'plato-export-lobby-2026-05-06.tar.gz');
