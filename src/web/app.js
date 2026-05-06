@@ -79,6 +79,7 @@ import {
   SLA_MS as EXPORT_SLA_MS,
 } from '../archive/queue.js';
 import { canExportSub, subExportEligibility } from '../archive/gate.js';
+import { getOrCreateInstanceKeypair } from '../archive/signing.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -1202,6 +1203,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
 function renderAbout(req, res, { db, auth }) {
   const currentHandle = auth.handleFromRequest(req);
   const handle = branding.hostedBy ?? `@${branding.forumName}`;
+  const instanceKey = getOrCreateInstanceKeypair(db);
   const feedback = branding.feedbackEmail
     ? html` <a href="mailto:${branding.feedbackEmail}">questions or feedback</a>.`
     : html``;
@@ -1223,6 +1225,13 @@ function renderAbout(req, res, { db, auth }) {
       <li><strong>moderation is auditable.</strong> every mod action lands in a public <a href="/modlog">modlog</a>. no shadowbans, no quiet removals.</li>
     </ul>
   </section>`;
+  const signing = html`<section class="about-section">
+    <h3>archive signing</h3>
+    <p>every export this instance produces is signed with an Ed25519 keypair belonging to this server. the public half lives at <a href="/.well-known/plato-pubkey">/.well-known/plato-pubkey</a> and its fingerprint is:</p>
+    <pre><code>${instanceKey.fingerprint}</code></pre>
+    <p>each archive ships with a sibling <code>.tar.gz.sig</code> file containing the detached signature; the manifest's <code>instance.pubkey_fingerprint</code> field carries the same value. an importer fetches the pubkey from this URL, confirms the fingerprint matches, then verifies the signature over the gzipped bytes.</p>
+  </section>`;
+
   const fork = html`<section class="about-section">
     <h3>if you don't trust this operator</h3>
     <p>that's fine — the forum is shaped so you don't have to. <a href="https://github.com/hamr0/plato"><strong>plato</strong></a> is the open-source codebase running this instance (Apache 2.0). clone the repo, copy <code>forum.db</code> + <code>posts/</code>, set a fresh <code>KNOWLESS_SECRET</code>, and run your own. handles re-derive per instance — same email yields different pseudonyms across forks — so leaving is a fresh start, not a sticky identity transplant.</p>
@@ -1253,6 +1262,7 @@ function renderAbout(req, res, { db, auth }) {
       ${rules}
       ${howItWorks}
       ${dataHandling}
+      ${signing}
       ${fork}
     </article>
   `));
@@ -3253,6 +3263,59 @@ function handleExportDownload(res, { db, exportsDir }, token) {
   res.end(buf);
 }
 
+// GET /export/<token>.tar.gz.sig — sibling detached Ed25519 signature
+// over the gzipped archive bytes (M7/B4). Same token-bearer posture as
+// the .tar.gz route: the token IS the credential. 404s if the sig file
+// is absent (e.g., archive predates B4 or was pruned).
+function handleExportSignatureDownload(res, { db, exportsDir }, token) {
+  const job = findCompletedJobByToken(db, token);
+  if (!job) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('not found or expired');
+  }
+  const sigName = `${job.archive_filename}.sig`;
+  const path = resolve(exportsDir, sigName);
+  if (!existsSync(path)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('signature missing on disk');
+  }
+  const buf = readFileSync(path);
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': `attachment; filename="${sigName}"`,
+    'Cache-Control': 'private, no-store',
+    'Content-Length': String(buf.length),
+  });
+  res.end(buf);
+}
+
+// GET /.well-known/plato-pubkey — public-key advertisement for the
+// instance Ed25519 archive-signing key (M7/B4). Lazy-creates the keypair
+// on first hit (so an instance that hasn't yet exported anything still
+// has a discoverable pubkey). JSON-shaped because importers compare the
+// `fingerprint` against the manifest's claim and use `public_key_hex` to
+// verify the detached `.tar.gz.sig`. PEM is intentionally not the wire
+// format — Ed25519 SPKI parsing is awkward in shell tools, hex is not.
+function renderPubkey(res, { db }) {
+  const kp = getOrCreateInstanceKeypair(db);
+  const body = JSON.stringify({
+    algorithm: kp.algorithm,
+    public_key_hex: Buffer.from(kp.publicKey).toString('hex'),
+    fingerprint: kp.fingerprint,
+    created_at: new Date(kp.createdAt).toISOString(),
+    instance: {
+      forum_name: branding.forumName,
+      base_url: siteMeta.baseUrl,
+    },
+  }, null, 2);
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+    'Content-Length': String(Buffer.byteLength(body, 'utf8')),
+  });
+  res.end(body);
+}
+
 // Resolve the handle a mod action affects and emit a memlog notification.
 // Owner-only sub-management actions (promote/demote/transfer) don't notify;
 // those land in the public modlog for affected co-mods to see directly.
@@ -4586,6 +4649,7 @@ const SUB_MODS_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mods$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_EXPORT_REQUEST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/export-request$/;
 const EXPORT_DOWNLOAD_PATH_RE   = /^\/export\/([0-9a-f]{64})\.tar\.gz$/;
+const EXPORT_SIG_DOWNLOAD_PATH_RE = /^\/export\/([0-9a-f]{64})\.tar\.gz\.sig$/;
 const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
 const PERSONAL_RSS_PATH_RE      = /^\/u\/([0-9a-f]{64})\/rss$/;
 const PERSONAL_SUBS_RSS_PATH_RE = /^\/u\/([0-9a-f]{64})\/subs\.rss$/;
@@ -4760,6 +4824,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/humans.txt' && method === 'GET') return renderHumans(res);
       if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
+      if (path === '/.well-known/plato-pubkey' && method === 'GET') return renderPubkey(res, { db });
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
       if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
       if (path === '/auth/callback') return auth.callback(req, res);
@@ -4807,6 +4872,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       }
       if ((m = path.match(EXPORT_DOWNLOAD_PATH_RE)) && method === 'GET') {
         return handleExportDownload(res, { db, exportsDir }, m[1]);
+      }
+      if ((m = path.match(EXPORT_SIG_DOWNLOAD_PATH_RE)) && method === 'GET') {
+        return handleExportSignatureDownload(res, { db, exportsDir }, m[1]);
       }
       if ((m = path.match(SUB_RSS_PATH_RE)) && method === 'GET') {
         return renderSubRss(res, { db, postsDir }, m[1]);

@@ -510,6 +510,46 @@ test('archiveFilenameFor: shape', () => {
   assert.equal(f, 'plato-export-lobby-2026-05-06.tar.gz');
 });
 
+test('buildSubArchiveBytes: pubkeyFingerprint defaults to null in manifest', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-'));
+  try {
+    seedSubFixture(db, postsDir, 'studio');
+    const tar = buildSubArchiveBytes(db, 'studio', {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+    });
+    const entries = readTar(tar);
+    const manifest = JSON.parse(entryByPath(entries, 'manifest.json').body.toString('utf8'));
+    assert.equal(manifest.instance.pubkey_fingerprint, null);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
+test('buildSubArchiveBytes: pubkeyFingerprint when supplied lands in manifest.instance', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-'));
+  try {
+    seedSubFixture(db, postsDir, 'studio');
+    const fp = 'sha256:' + 'ab'.repeat(32);
+    const tar = buildSubArchiveBytes(db, 'studio', {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+      pubkeyFingerprint: fp,
+    });
+    const entries = readTar(tar);
+    const manifest = JSON.parse(entryByPath(entries, 'manifest.json').body.toString('utf8'));
+    assert.equal(manifest.instance.pubkey_fingerprint, fp);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildSubArchiveBytes: gzipped tarball round-trips through gunzip', async () => {
   const { gzipSync, gunzipSync } = await import('node:zlib');
   const db = memDb();

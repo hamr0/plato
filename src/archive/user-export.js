@@ -218,7 +218,7 @@ The canonical spec lives at \`docs/02-features/archive-format.md\` in the plato 
 //   exportedAt        — Date instance (defaults to now)
 //
 // Throws if the handle has no row in `handles`.
-export function buildUserArchiveBytes(db, handle, { postsDir, branding, platoVersion, exportedAt = new Date() }) {
+export function buildUserArchiveBytes(db, handle, { postsDir, branding, platoVersion, exportedAt = new Date(), pubkeyFingerprint = null }) {
   const handleRow = db.prepare('SELECT * FROM handles WHERE handle = ?').get(handle);
   if (!handleRow) throw new Error(`buildUserArchiveBytes: handle ${handle.slice(0, 8)}… not found`);
   const pseudonym = handleRow.pseudonym;
@@ -410,7 +410,7 @@ export function buildUserArchiveBytes(db, handle, { postsDir, branding, platoVer
     instance: {
       forum_name: branding.forumName,
       base_url: branding.baseUrl ?? '',
-      pubkey_fingerprint: null,
+      pubkey_fingerprint: pubkeyFingerprint,
     },
     exportedAt: exportedAtIso,
     platoVersion,

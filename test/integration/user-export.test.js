@@ -141,6 +141,27 @@ test('buildUserArchiveBytes: produces a valid tarball with all expected files', 
   }
 });
 
+test('buildUserArchiveBytes: pubkeyFingerprint when supplied lands in manifest.instance', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-'));
+  try {
+    seedUserFixture(db, postsDir);
+    const fp = 'sha256:' + 'cd'.repeat(32);
+    const tar = buildUserArchiveBytes(db, ALICE, {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+      pubkeyFingerprint: fp,
+    });
+    const entries = readTar(tar);
+    const manifest = JSON.parse(entryByPath(entries, 'manifest.json').body.toString('utf8'));
+    assert.equal(manifest.instance.pubkey_fingerprint, fp);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildUserArchiveBytes: manifest has kind=user and scope.handle_attribution = pseudonym', () => {
   const db = memDb();
   const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-'));

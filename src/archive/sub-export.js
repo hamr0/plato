@@ -224,9 +224,14 @@ The canonical spec lives at \`docs/02-features/archive-format.md\` in the plato 
 //   branding          — { forumName, baseUrl, ... }
 //   platoVersion      — string from package.json
 //   exportedAt        — Date instance (defaults to now)
+//   pubkeyFingerprint — string or null. When non-null, lands in
+//                       manifest.instance.pubkey_fingerprint so an
+//                       importer can match it against the source
+//                       instance's /.well-known/plato-pubkey before
+//                       verifying the detached .tar.gz.sig (M7/B4).
 //
 // Throws if the sub doesn't exist.
-export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVersion, exportedAt = new Date() }) {
+export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVersion, exportedAt = new Date(), pubkeyFingerprint = null }) {
   const sub = db.prepare('SELECT * FROM subs WHERE name = ?').get(subName);
   if (!sub) throw new Error(`buildSubArchiveBytes: sub ${subName} not found`);
 
@@ -410,7 +415,7 @@ export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVer
     instance: {
       forum_name: branding.forumName,
       base_url: branding.baseUrl ?? '',
-      pubkey_fingerprint: null,
+      pubkey_fingerprint: pubkeyFingerprint,
     },
     exportedAt: exportedAtIso,
     platoVersion,

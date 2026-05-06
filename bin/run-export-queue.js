@@ -31,6 +31,7 @@ import {
 import { recordNotification } from '../src/content/notification.js';
 import { buildSubArchiveBytes, archiveFilenameFor } from '../src/archive/sub-export.js';
 import { buildUserArchiveBytes, userArchiveFilenameFor } from '../src/archive/user-export.js';
+import { getOrCreateInstanceKeypair, signBytes } from '../src/archive/signing.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -52,6 +53,11 @@ const platoVersion = readPackageVersion();
 const branding = readBranding();
 
 const db = openDb(FORUM_DB);
+
+// Lazy-load (or create on first call) the instance Ed25519 keypair. Every
+// archive built this tick carries the fingerprint in its manifest and a
+// detached .tar.gz.sig signed with the privkey. M7/B4.
+const instanceKey = getOrCreateInstanceKeypair(db);
 
 // House-keeping: prune expired download artifacts before doing new work.
 const expiredFiles = pruneExpiredJobs(db);
@@ -104,11 +110,13 @@ try {
   if (job.kind === 'sub') {
     tarBytes = buildSubArchiveBytes(db, job.scope, {
       postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
+      pubkeyFingerprint: instanceKey.fingerprint,
     });
     filename = archiveFilenameFor(job.scope, exportedAt);
   } else if (job.kind === 'user') {
     tarBytes = buildUserArchiveBytes(db, job.scope, {
       postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
+      pubkeyFingerprint: instanceKey.fingerprint,
     });
     filename = userArchiveFilenameFor(job.scope, exportedAt);
   } else {
@@ -117,6 +125,10 @@ try {
   const gz = gzipSync(tarBytes);
   mkdirSync(EXPORTS_DIR, { recursive: true });
   writeFileSync(resolve(EXPORTS_DIR, filename), gz);
+  // Detached signature over the gzipped bytes. Sibling file, same name
+  // + .sig. Spec: docs/02-features/archive-format.md (Signing).
+  const sig = signBytes(instanceKey.privateKey, gz);
+  writeFileSync(resolve(EXPORTS_DIR, `${filename}.sig`), sig);
   const token = newDownloadToken();
   completeJob(db, job.id, {
     archiveFilename: filename,
