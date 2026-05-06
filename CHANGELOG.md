@@ -55,6 +55,54 @@ underlying mod model and sub-state lifecycle are unchanged.
   `test/integration/sub-state.test.js`. Self-flag also has an integration
   test in `test/integration/flag.test.js`. 573/573.
 
+### Changed — second smoke pass (post-573)
+
+- **Active-subs block sorts by recency first.** `listSubsForNav`
+  changed `ORDER BY post_count DESC, name ASC` to
+  `ORDER BY MAX(p.created_at) DESC, post_count DESC, name ASC` so a
+  freshly-created sub with one new post bubbles above older subs with
+  higher volume. Fixes the "I just posted in lobby and it's not in the
+  top 4" smoke report.
+- **Transfer button reworded.** "transfer & step down" implied two
+  sequential operations but it's actually a single atomic transaction.
+  Renamed to **"transfer mod role"** on both trigger and submit; the
+  inline explanation spells out that you become a co-mod automatically
+  and can step down as co-mod afterwards if you also want to leave.
+- **All inline-confirm submit buttons now wear `.mod-action-pill`.**
+  yes-demote, yes-step-down, yes-disable-sub, transfer-mod-role,
+  reactivate, and save all share the rounded-blue look so the
+  mod-management surface reads as one consistent action family.
+- **`friendlyError(message)` helper** strips the
+  `<funcName>:` prefix from any mechanism throw and rewrites the
+  cross-action read-only-sub case ("//<sub> is read-only — no new
+  posts, comments, votes, or flags until a mod reactivates it").
+  Wired into vote, comment, and flag handlers (post handler already
+  had its own `friendlyPostError` translator). No more raw
+  `castVote: //x is read-only` surfacing to users.
+- **Post-retry view** now uses `friendlyPostError` (no more raw
+  `finalizeDraft: <64hex> is banned from <sub>`), exposes the full
+  sub dropdown when the rejection is sub-specific (banned, read-only,
+  flair) so the draft can be re-targeted, and adds an inline **"copy
+  your draft"** pill in the error banner backed by
+  `/static/uxbits.js`. Same script handles the bfcache restore: on
+  `pageshow.persisted=true`, closes any `[open]` `inline-confirm`
+  `<details>` so mod-management forms read as fresh after a
+  back-navigation. Cancel links inside each inline-confirm form do
+  the same on a click.
+- **Role chip on `/sub/<name>/edit`.** After a successful transfer,
+  the previous mod becomes a co-mod and the manage page collapses to
+  "step down" as the only action. That's the design but reads as
+  stuck without context. New chip at the top reads `you are: <role>
+  of //<sub>` and, for co-mods, explains why the action set is
+  scoped — "only the mod can promote / demote / transfer; your one
+  mod-management action here is to step down as co-mod."
+- **Test gap-fill** in `test/integration/sub-state-ui.test.js`: HTTP
+  coverage for action-row label flips, disable_sub end-to-end,
+  subscribe-on-read-only-sub, /subs `[read-only]` chip, banner copy
+  variants, self-flag UI hide, and pseudonym→handle resolution in
+  the picker. /about test extended for the "how this place works"
+  block. 584/584.
+
 ### Added — `/humans.txt` and `/.well-known/security.txt`
 
 Closes the tier-1+2 portion of `docs/04-process/privacy-seo.md` for plato. The headline OG / canonical / robots.txt / sitemap.xml work was already in place; this adds the two cheap signals the playbook recommends and notes as "optional but valuable" for privacy-positioned projects.
