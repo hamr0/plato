@@ -316,9 +316,19 @@ A small, conservative set of content is rejected at the relay before it reaches 
 
 ### Exit as the real check
 
-If a community decides the mod is bad, the export-and-fork mechanism is the answer. Any member can export the full sub archive (all posts, all comments, all metadata, member pseudonym list with their consent). A new instance can be spun up with the same archive in one command. Members who want to follow re-subscribe with their email. Old instance keeps running for whoever wants to stay.
+If a community decides the mod is bad, the export-and-fork mechanism is the answer. Eligible members can request a full sub archive (all posts, all comments, all public metadata; vote tallies only, never per-voter handles; subscriber lists are NOT included). A new instance can be spun up with the same archive in one command. Members who want to follow re-subscribe with their email. Old instance keeps running for whoever wants to stay.
 
-This is not theoretical. The export must be one-click and complete, tested before launch, documented in user-facing copy. Without working exit, all the other moderation talk is decoration.
+This is not theoretical. The export must be reliable, complete, tested before launch, and documented in user-facing copy. Without working exit, all the other moderation talk is decoration.
+
+**Locked posture (M7/B2-b):**
+
+- **Sub-export eligibility.** A sub archive may be requested by (a) the sub's mod or co-mods, or (b) any user who has been *continuously* subscribed for ≥60 days. "Continuous" means the current unbroken span — unsubscribe-then-resubscribe restarts the clock. The 60-day gate is the hardest-to-game friction we can ask for without policy fragmentation; it filters drive-by forks from members exercising their portability rights. Activity (posts/comments/votes) is intentionally NOT a gate — lurkers are real members.
+- **Personal-export eligibility.** Any logged-in user can request a personal archive of their own contributions (posts, comments, votes-cast, subscriptions, mod actions taken/received) at any time, no tenure gate. Your own data is yours from day one.
+- **Async + queued + off-peak.** Both kinds of export are produced in the background by `bin/run-export-queue.js`, default off-peak window 01:00–06:00 server time. One job per worker tick, sequential — no concurrency. Operator-tunable via `EXPORT_OFFPEAK_START` / `EXPORT_OFFPEAK_END` (hour 0–23) or fully disable with `EXPORT_OFFPEAK_DISABLE=1`.
+- **SLA + retry policy.** Sub-export jobs have a 7-day production SLA from request; personal-export 3 days. If a job hasn't reached `completed_at` within its SLA window, it is terminal-failed by the worker's pre-tick sweep. Within the SLA window, each attempt may retry up to 3 times before terminal-fail. The user may re-request after a failure.
+- **Download window (TTL).** 3 days for both kinds, measured from `completed_at`. Picked for disk-pressure, not policy. After expiry the row + on-disk file are pruned.
+- **Token-bearer download.** `GET /export/<token>.tar.gz` is unauthenticated — the 64-hex `download_token` IS the credential, identical posture to `/u/<token>/rss`. The user can paste the URL anywhere they want the archive sent. The 3-day TTL bounds leak exposure.
+- **Memlog notification.** When a job completes or terminal-fails, the requester gets an `export_ready` or `export_failed` row in their personal `/memlog`. Success rows link directly through the bearer token; failure rows carry the reason in the snippet and prompt the user to re-request.
 
 ## Spam Defenses
 

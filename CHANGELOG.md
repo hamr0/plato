@@ -6,6 +6,74 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7/B2-b: HTTP routes, UX, memlog wiring, personal export
+
+The B2-a offline core (queue, builder, worker, tar) is now reachable
+from the browser. Both kinds of archive — per-sub and per-user — can
+be requested through forms, watched on `/memlog`, and downloaded via
+bearer-token URLs.
+
+- **Sub-export eligibility (PRD §Exit as the real check, locked).**
+  `canExportSub(handle, sub)` returns true if the handle moderates the
+  sub OR has been *continuously* subscribed for ≥60 days. "Continuous"
+  is inherent to the schema: unsubscribe is a hard `DELETE`, so
+  resubscribing inserts a fresh `created_at` and the clock restarts.
+  Activity is intentionally NOT a gate — lurkers are real members.
+- **Personal-export eligibility.** Any logged-in user, any time, no
+  tenure. Their own data is theirs from day one.
+- **Per-kind production SLA + download TTL.** SLA from request →
+  terminal-fail: **sub 7d, user 3d**. Download TTL from completion:
+  **3d for both** (chosen for disk-pressure, not policy). The worker's
+  pre-tick `markStaleAsFailed` sweep terminal-fails any pending row
+  past its kind's SLA window. Retry policy unchanged: 3 attempts then
+  terminal-fail.
+- **`POST /sub/<name>/export-request`** — gated by `canExportSub`,
+  idempotent (re-submits collapse onto the existing pending row),
+  redirects to `/memlog?export=queued`. Anon → 401, ineligible → 403,
+  missing sub → 404.
+- **`POST /export-request`** — personal archive request. Auth-only,
+  no tenure check.
+- **`GET /export/<token>.tar.gz`** — token-bearer streaming download.
+  No auth check. The 64-hex `download_token` IS the credential — same
+  posture as `/u/<token>/rss` from M6/B6. Headers:
+  `Content-Type: application/gzip`, `Content-Disposition: attachment`,
+  `Cache-Control: private, no-store`. 404 on missing/expired token,
+  malformed token, or file removed from disk.
+- **Sub-page action pill (`/sub/<name>` header, 5 visual states).**
+  Anon → live "request archive" link to `/login?next=…`. Logged-in
+  non-subscriber → disabled "subscribe to //<name> for 60 days to
+  request an archive". Subscriber <60d → disabled "you can request
+  this archive on YYYY-MM-DD". Mod or 60d+ subscriber → live form.
+  Pending job → disabled "archive queued". Recent completed-not-
+  expired job → disabled "archive ready in your memlog (expires
+  YYYY-MM-DD)". The pill uses a new `.export-btn` class (sibling to
+  `.subscribe-btn`) so future CSS evolution can diverge without
+  touching subscribe.
+- **`/memlog` personal-export block** — collapsible `<details>` with
+  the same 3-state pill (live → queued → ready). The `?export=queued`
+  query-param surfaces an inline confirmation after a fresh request.
+- **`src/archive/user-export.js`** — per-user (cross-instance) archive
+  builder. Files: `posts.json`, `comments.json`, `votes_cast.json`
+  (the user's *own* votes only; never other voters' handles),
+  `subscriptions.json`, `subs_moderated.json`,
+  `mod_actions_received.json`, `mod_actions_taken.json`, plus the
+  static reader (`index.html`, `archive.css`), `README.md`, and the
+  per-post `.md` + `.html` for every post the user authored. Manifest's
+  `scope.handle_attribution` carries the public *pseudonym*, never
+  the secret handle. Filename uses an 8-char handle prefix:
+  `plato-export-user-<handle8>-<date>.tar.gz`.
+- **Memlog notification kinds: `export_ready` and `export_failed`.**
+  The worker emits a row when a job completes or terminal-fails. Ready
+  rows link directly through the bearer token (`/memlog/go/<id>` →
+  302 → `/export/<token>.tar.gz`); failure rows show the reason in
+  the snippet. New `archives` filter chip narrows `/memlog` to both.
+- **53 new tests** (623 → 679 across the B2-b chain): per-kind TTL/SLA
+  + SLA sweep (queue), 60-day continuous-tenure gate (gate), 5 sub-
+  export route paths + 5-state pill rendering (export-routes), user-
+  export builder + cross-handle leakage check + manifest scope shape +
+  HTTP route + /memlog pill (user-export), memlog `export_ready` /
+  `export_failed` rendering + filter chip.
+
 ### Added — M7/B2-a: async export-job queue + per-sub archive builder
 
 Offline core of the per-sub export feature. No HTTP routes or UI yet —
