@@ -2352,7 +2352,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
             <div class="char-counter muted" data-for="body" aria-live="polite">0 / ${COMMENT_BODY_MAX}</div>
           </div>
           <div class="guest-notice" hidden>saved — sign in above to post it. we'll submit it for you when you confirm.</div>
-          <button>comment</button>
+          <button class="mod-action-pill">comment</button>
         </form>
       </div>
     `)

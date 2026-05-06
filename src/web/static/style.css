@@ -858,7 +858,8 @@ button:hover { filter: brightness(1.1); }
 .comment-long > summary::-webkit-details-marker { display: none; }
 .comment-long > summary .read-more { color: var(--accent); }
 .comment-long[open] > summary { display: none; }
-.composer-bar button { white-space: nowrap; }
+.composer-bar .textarea-wrap { flex: 1; }
+.composer-bar button { white-space: nowrap; align-self: flex-start; margin-left: auto; }
 
 /* Page padding so the last comment isn't hidden behind the bar. Apply to
  * body when the bar is present — guarded by a sub-tree class on the post
