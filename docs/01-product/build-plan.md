@@ -291,6 +291,14 @@ Lowercase + ASCII to fit plato voice and the validator (which rejects non-ASCII 
 ### M7: Identity + export/import
 Per-sub export (folder of markdown + JSON, archive.sig, server-pubkey.pem, archive.ots). Per-user export. Import flow on a fresh instance. Archive signing (one Ed25519 keypair instance-wide). OpenTimestamps daily anchor.
 
+- **B1 — archive manifest format — SHIPPED.** Canonical spec at `docs/02-features/archive-format.md`. Manifest module at `src/archive/manifest.js` provides `buildManifest`, `validateManifest`, `findFile`, `verifyFile`, `sha256Hex`. Two `kind` values (`sub` / `user`); per-file SHA-256s; format_version frozen at 1.
+- **B2-a — async export-job queue + per-sub builder — SHIPPED.** Migration 018 added `export_jobs` (state encoded in three timestamps + retry_count; unique partial index on (kind, scope, requested_by) WHERE pending dedupes double-clicks). `src/archive/queue.js` for the state machine (3-attempt retry; 7-day download TTL). `src/archive/tar.js` is a minimal POSIX USTAR writer (no new dep). `src/archive/sub-export.js` builds the full per-sub archive Buffer: posts/<id>.md + posts/<id>.html + posts.json + comments.json + modlog.json + votes.json (tally-only, never per-voter) + subs.json + index.html + archive.css + README.md + manifest.json. `bin/run-export-queue.js` is the off-peak worker (system cron, default window 01:00–06:00 server time, env-overridable). +27 tests. No HTTP routes / UI yet — those land in B2-b.
+- **B2-b — request route + download route + memlog wiring + sub-page button.** Next.
+- **B3 — per-user export.** Position-C scope (user's posts + comments + ancestors + descendants).
+- **B4 — Ed25519 archive signing.** `/.well-known/plato-pubkey`, fingerprint on /about, populates `manifest.json.instance.pubkey_fingerprint`.
+- **B5 — import flow.** Verify signature, rehydrate posts/comments under newly-derived pseudonyms.
+- **B6 — OpenTimestamps anchor.**
+
 ### M8: Production polish
 docker-compose for self-host. Full-text search (SQLite FTS5 single-instance, Postgres tsvector multi-instance — pick one, document the swap). Dark mode (CSS variables, prefers-color-scheme). Mobile-responsive layout pass. Deploy guide. GitHub Actions CI. Migration story (POC → v1, but also "v1 → fork → v1 elsewhere" via the export/import).
 

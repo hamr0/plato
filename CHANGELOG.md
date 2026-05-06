@@ -6,6 +6,73 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7/B2-a: async export-job queue + per-sub archive builder
+
+Offline core of the per-sub export feature. No HTTP routes or UI yet —
+those land in B2-b. Builds on M7/B1's manifest format.
+
+- **Migration 018** introduces `export_jobs(id, kind, scope, requested_by,
+  requested_at, started_at, completed_at, failed_at, retry_count,
+  error_message, archive_filename, archive_size_bytes, download_token,
+  expires_at)`. State machine: pending → in-progress → succeeded | failed
+  (terminal). Unique partial index on `(kind, scope, requested_by) WHERE
+  pending` dedupes double-clicks on "request export". Token lookup +
+  expiry indexes for the upcoming download route.
+- **`src/archive/queue.js`** — pure-function helpers: `enqueueSubExport`
+  (idempotent for pending), `claimNextPendingJob` (transactional pop),
+  `completeJob` / `failJob` (3-attempt retry, terminal-fail with error
+  message preserved), `findCompletedJobByToken`, `findLatestJob`,
+  `pruneExpiredJobs`. 7-day download TTL.
+- **`src/archive/tar.js`** — minimal POSIX USTAR writer (~80 LOC, zero
+  new dependencies). Builds in-memory `Buffer`; sufficient for hobby-
+  scale archives.
+- **`src/archive/sub-export.js`** — `buildSubArchiveBytes(db, subName,
+  …)` returns a tar `Buffer` containing every file the canonical archive
+  spec lists: posts/<id>.md (read from postsDir, byte-exact), posts/
+  <id>.html (rendered through the existing `marked` pipeline), posts.json
+  / comments.json / modlog.json / votes.json (tally-only — never per-
+  voter handles) / subs.json, an index.html static reader, README.md,
+  archive.css, and manifest.json (last, so it can checksum every file
+  before it). On a missing post .md the builder throws so the worker
+  retries instead of producing a quietly-broken archive.
+- **`bin/run-export-queue.js`** — system-cron worker (suggested wiring:
+  `*/15 * * * *`). Picks one pending job per tick, builds + gzips +
+  writes to `./exports/`, completes the row with a 64-hex token.
+  Off-peak gating defaults to **01:00–06:00 server time**, overridable
+  via `EXPORT_OFFPEAK_START` / `EXPORT_OFFPEAK_END` (hour 0–23) or
+  disabled with `EXPORT_OFFPEAK_DISABLE=1`. Prunes expired download
+  artifacts at the start of each tick.
+- **Privacy posture preserved end-to-end.** `votes.json` carries only
+  `{up, down, score}` per `(target_type, target_id)` key; voter handles
+  never appear in the archive. Verified by an explicit test asserting
+  the rendered JSON does not contain the seeded voter handle bytes.
+- **Static reader polish.** `index.html` titles as `//<sub> archive`;
+  per-post pages title as `<post title> — //<sub>`. Empty
+  `branding.baseUrl` no longer renders an empty `<a href="">` link or
+  trailing `()` parens — the source line drops gracefully. Comment
+  indent is CSS-driven (`.comment .comment { margin-left: 0.6rem }`)
+  rather than per-comment inline `style="margin-left: depth * 0.6rem"`,
+  fixing both the float-precision artifact (`1.7999999999999998rem`) and
+  the compounding nested-margin bug (depth 3 was 3.6rem, should be
+  1.8rem).
+- **27 new tests** (619 → 620 with one polish-pass addition): tar
+  writer (round-trip, padding, EOF marker, error paths), queue state
+  machine (enqueue idempotency, claim ordering, completeJob, failJob
+  requeue/terminal, dedupe-slot release after terminal fail, token
+  lookup, prune), and per-sub builder (file layout, manifest hashes
+  match bodies, posts/comments/modlog shapes, votes tally-only, .md
+  byte-exact preservation, missing-sub error, missing-md error
+  propagation, filename helper, gzip round-trip).
+
+Smoke-verified end-to-end against the live forum.db: enqueue → worker
+claim → builder → tarball → gzip → extract → static reader renders;
+retry path fires (requeue × 2, terminal fail × 1, error message
+preserved on the row).
+
+Operator note: set `branding.baseUrl` in `config.json` to the public
+URL so exported archives self-describe their origin in the README and
+index.html. Falls back to plain text when unset.
+
 ### Changed — M5/B12 smoke-pass UX polish
 
 Follow-up to M5/B12 after the first smoke run. All behavior locks; the

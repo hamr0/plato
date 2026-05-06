@@ -185,6 +185,7 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | `bans` | (sub_name, handle) composite PK |
 | `notifications` | per-user memlog; recipient_handle, kind, target ref, read_at (migration 013) |
 | `subscriptions` | (user_handle, sub_name) composite PK + index on `sub_name`; private per-user, never publicly listed (migration 014, M6/B2) |
+| `export_jobs` | per-sub archive request queue; state encoded in three timestamps + retry_count; unique partial index dedupes pending duplicates per (kind, scope, requested_by); 64-hex `download_token`, 7-day `expires_at` (migration 018, M7/B2-a) |
 | `schema_migrations` | id PRIMARY KEY |
 
 Posts are stored as markdown files on disk at `posts/<date>-<id>.md` with frontmatter. The DB row is the index, regenerable from the file tree (so a backup of `posts/` + `forum.db` is sufficient; losing the DB is recoverable).
@@ -316,6 +317,7 @@ Marker: `/subs` directory shows `[read-only]` next to disabled-sub names. PRD-lo
 - **Role chip on `/sub/<name>/edit`.** Renders `you are: mod` or `you are: co-mod of //<sub>` at the top of the manage page so the (intentionally) limited action set for co-mods doesn't read as broken state.
 - **Active-subs block** (`listSubsForNav`) sorts by `MAX(p.created_at) DESC, post_count DESC, name ASC`. Recency-first so a freshly-created sub bubbles above older high-volume ones; volume is the tie-breaker.
 - **`/static/uxbits.js`** is the shared progressive-enhancement script that handles (a) `data-copy-target="<input-name>"` clipboard buttons (used by the post-retry "copy your draft" pill) and (b) closing any `[open]` `inline-confirm` `<details>` on bfcache restore so mod-management forms aren't stuck-open after back-navigation.
+- **Per-sub archive export is async + queued.** A user requests an archive; the request inserts a row in `export_jobs` (M7/B2-a, migration 018). The off-peak worker `bin/run-export-queue.js` (operator wires to system cron, default `*/15 * * * *`) picks one pending job per tick during the 01:00–06:00 server-time window, builds the tarball via `src/archive/sub-export.js` (canonical layout per `docs/02-features/archive-format.md`), gzips it, writes to `./exports/`, and stamps the row with a 64-hex `download_token` + 7-day `expires_at`. Retry policy: 3 attempts, then terminal-fail with the error preserved on the row; user re-requests. Off-peak window overridable via `EXPORT_OFFPEAK_START` / `EXPORT_OFFPEAK_END` (hour 0–23) or disabled with `EXPORT_OFFPEAK_DISABLE=1`. `votes.json` carries tallies only — voter handles never appear in the archive. HTTP request/download routes + memlog notification land in M7/B2-b.
 
 ### Per-handle rules (locked)
 
