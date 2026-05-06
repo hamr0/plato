@@ -8,6 +8,11 @@
 // counts are fine (the /subs directory shows them); individual
 // memberships are visible only to the subscribing user.
 
+// 60-day continuous-subscription gate for sub export (M7/B2-b). The
+// resubscribe restart is automatic: unsubscribe is a hard DELETE, so
+// re-subscribing inserts a fresh created_at and the clock starts over.
+export const SUB_EXPORT_TENURE_MS = 60 * 24 * 60 * 60 * 1000;
+
 export function subscribe(db, { handle, subName, now = Date.now() }) {
   if (!handle) throw new Error('subscribe: handle is required');
   if (!subName) throw new Error('subscribe: subName is required');
@@ -33,6 +38,35 @@ export function isSubscribed(db, handle, subName) {
     'SELECT 1 FROM subscriptions WHERE user_handle = ? AND sub_name = ?'
   ).get(handle, subName);
   return row != null;
+}
+
+// Returns the timestamp the handle's *current* subscription to subName
+// began, or null if not subscribed. Because unsubscribe hard-deletes the
+// row, re-subscribing produces a fresh created_at — exactly the
+// "continuous-since" semantics the export gate needs.
+export function subscribedSince(db, handle, subName) {
+  if (!handle || !subName) return null;
+  const row = db.prepare(
+    'SELECT created_at FROM subscriptions WHERE user_handle = ? AND sub_name = ?'
+  ).get(handle, subName);
+  return row?.created_at ?? null;
+}
+
+// Has the handle been continuously subscribed to subName for at least
+// SUB_EXPORT_TENURE_MS? Used as the eligibility check for sub-export
+// requests (alongside mod-or-co-mod, which short-circuits this).
+export function hasSubExportTenure(db, handle, subName, { now = Date.now() } = {}) {
+  const since = subscribedSince(db, handle, subName);
+  if (since == null) return false;
+  return now - since >= SUB_EXPORT_TENURE_MS;
+}
+
+// The earliest time the handle becomes export-eligible for subName, or
+// null if not subscribed. UI uses this to render the disabled-with-date
+// tooltip ("you can request this archive on YYYY-MM-DD").
+export function subExportEligibleAt(db, handle, subName) {
+  const since = subscribedSince(db, handle, subName);
+  return since == null ? null : since + SUB_EXPORT_TENURE_MS;
 }
 
 // Set of sub names the handle is subscribed to. Used by /subs?filter=mine

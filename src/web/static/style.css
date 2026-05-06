@@ -1347,6 +1347,18 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .subscribe-btn:disabled { color: var(--text-dim); cursor: not-allowed; text-decoration: line-through; }
 .subscribe-btn:disabled:hover { color: var(--text-dim); text-decoration: line-through; }
 
+/* Sub-export "request archive" pill (M7/B2-b). Same visual language as
+   .subscribe-btn — a quiet inline pill, struck-through when disabled. A
+   distinct class lets future CSS diverge without touching subscribe. */
+.export-form { display: inline; margin: 0; padding: 0; }
+.export-btn {
+  background: none; border: none; color: var(--accent); cursor: pointer;
+  padding: 0; font: inherit; text-decoration: none;
+}
+.export-btn:hover { text-decoration: underline dotted; color: var(--text); }
+.export-btn:disabled { color: var(--text-dim); cursor: not-allowed; text-decoration: line-through; }
+.export-btn:disabled:hover { color: var(--text-dim); text-decoration: line-through; }
+
 /* My-modlog inline revoke button. Renders only on rows where the
    current handle is the actor and the action's effect is still in
    place. POSTs to /sub/<sub>/mod with the inverse action. */

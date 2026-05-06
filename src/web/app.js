@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { html, render, raw } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
@@ -71,6 +73,12 @@ import {
 import {
   getOrCreateRssToken, regenerateRssToken, handleByRssToken,
 } from '../content/rss-token.js';
+import {
+  enqueueSubExport, enqueueUserExport, findCompletedJobByToken, findLatestJob,
+  DOWNLOAD_TTL_MS as EXPORT_DOWNLOAD_TTL_MS,
+  SLA_MS as EXPORT_SLA_MS,
+} from '../archive/queue.js';
+import { canExportSub, subExportEligibility } from '../archive/gate.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -1379,6 +1387,54 @@ function subscribeForm({ subName, currentHandle, db, returnTo, modRole }) {
   </form>`;
 }
 
+// Five-state action pill for the sub-page header: "request archive".
+// (M7/B2-b §UX). Active job state (pending/recent-completed) takes
+// priority over eligibility — once you've requested, the pill reflects
+// that request rather than re-asking. Anonymous users see a live pill
+// that funnels through /login (option-2 from the planning thread).
+function subExportPill({ db, subName, currentHandle, returnTo }) {
+  // Active job overrides eligibility — once requested, show that state.
+  if (currentHandle) {
+    const latest = findLatestJob(db, { kind: 'sub', scope: subName, requestedBy: currentHandle });
+    if (latest && !latest.failed_at) {
+      if (latest.completed_at && latest.expires_at && latest.expires_at > Date.now()) {
+        const expDate = formatYmd(latest.expires_at);
+        return html`<button class="export-btn" type="button" disabled title="archive ready in your memlog (expires ${expDate})">archive ready</button>`;
+      }
+      // pending or in-progress
+      return html`<button class="export-btn" type="button" disabled title="archive queued — you'll get a memlog when ready">archive queued</button>`;
+    }
+  }
+
+  const eligibility = subExportEligibility(db, currentHandle, subName);
+  if (eligibility.state === 'anon') {
+    // Discoverable: pill is live, click → /login with return_to so the
+    // user lands back on the sub page after auth.
+    const next = encodeURIComponent(returnTo || `/sub/${subName}`);
+    return html`<a class="export-btn" href="/login?next=${next}" title="log in to request an archive">request archive</a>`;
+  }
+  if (eligibility.state === 'mod' || eligibility.state === 'eligible') {
+    return html`<form method="POST" action="/sub/${subName}/export-request" class="export-form">
+      <input type="hidden" name="return_to" value="${returnTo}">
+      <button class="export-btn" type="submit" title="queue an archive of this sub — you'll get a memlog when ready">request archive</button>
+    </form>`;
+  }
+  if (eligibility.state === 'tenure-pending') {
+    const date = formatYmd(eligibility.eligibleAt);
+    return html`<button class="export-btn" type="button" disabled title="you can request this archive on ${date} (60-day continuous-subscription gate)">request archive</button>`;
+  }
+  // not-subscribed
+  return html`<button class="export-btn" type="button" disabled title="subscribe to //${subName} for 60 days to request an archive">request archive</button>`;
+}
+
+function formatYmd(ms) {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchParams) {
   const sub = getSubByName(db, subName);
   if (!sub) {
@@ -1432,7 +1488,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
       feed: { href: `/sub/${encodeURIComponent(subName)}/rss`, title: `${branding.forumName} //${subName}` },
     }, html`
-      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo, modRole })}` : html``}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
+      <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo, modRole })}` : html``} · ${subExportPill({ db, subName, currentHandle, returnTo })}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${subStateBanner({ db, sub, modRole })}
       ${anonHintFor(currentHandle)}
@@ -3131,6 +3187,72 @@ async function handleSubscribe(req, res, { db, auth }, subName) {
   redirect(res, safeReturn);
 }
 
+// POST /sub/<name>/export-request — enqueue a per-sub archive job. Auth
+// required, gated by canExportSub (mod or 60-day continuous subscriber).
+// Idempotent: if a pending or in-progress job already exists for this
+// (sub, requester) the existing row is returned and the user is redirected
+// to memlog the same way. Completed jobs older than the download TTL are
+// already pruned, so the dedupe slot is naturally free.
+async function handleSubExportRequest(req, res, { db, auth }, subName) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, quickPage(req, { db, auth }, 'login required',
+      html`<p class="muted">log in to request an archive.</p>`));
+  }
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found',
+      html`<p class="muted">no such sub.</p>`));
+  }
+  if (!canExportSub(db, handle, subName)) {
+    return send(res, 403, quickPage(req, { db, auth }, 'not eligible',
+      html`<p class="muted">you must be a moderator or have been continuously subscribed to //${subName} for 60 days to request an archive.</p>`));
+  }
+  enqueueSubExport(db, { subName, requestedBy: handle });
+  redirect(res, '/memlog?export=queued');
+}
+
+// POST /export-request — enqueue a personal (per-user) archive job. Auth
+// required; no tenure gate (your own data is yours from day one).
+// Idempotent: a second call while a pending/in-progress job exists is a
+// no-op redirect.
+async function handleUserExportRequest(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, quickPage(req, { db, auth }, 'login required',
+      html`<p class="muted">log in to request your personal archive.</p>`));
+  }
+  enqueueUserExport(db, { requestedBy: handle });
+  redirect(res, '/memlog?export=queued');
+}
+
+// GET /export/<token>.tar.gz — token-bearer download. The token IS the
+// credential — no auth check. Same posture as /u/<token>/rss. 404s on
+// missing/expired/non-completed tokens, and on the on-disk file having
+// been removed (operator pruned manually, or the file was never written
+// successfully despite a row existing — the latter shouldn't happen but
+// is defended against because the cost of a stuck row is high).
+function handleExportDownload(res, { db, exportsDir }, token) {
+  const job = findCompletedJobByToken(db, token);
+  if (!job) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('not found or expired');
+  }
+  const path = resolve(exportsDir, job.archive_filename);
+  if (!existsSync(path)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('archive missing on disk');
+  }
+  const buf = readFileSync(path);
+  res.writeHead(200, {
+    'Content-Type': 'application/gzip',
+    'Content-Disposition': `attachment; filename="${job.archive_filename}"`,
+    'Cache-Control': 'private, no-store',
+    'Content-Length': String(buf.length),
+  });
+  res.end(buf);
+}
+
 // Resolve the handle a mod action affects and emit a memlog notification.
 // Owner-only sub-management actions (promote/demote/transfer) don't notify;
 // those land in the public modlog for affected co-mods to see directly.
@@ -3279,9 +3401,10 @@ async function handleModlogResolve(req, res, { db, auth }) {
 // all-read respects the active filter so users can clear one kind without
 // losing visibility on others.
 const MEMLOG_KIND_FILTERS = [
-  { slug: 'comments',    kinds: ['comment_on_post'],   label: 'comments' },
-  { slug: 'replies',     kinds: ['reply_to_comment'],  label: 'replies' },
-  { slug: 'mod-actions', kinds: ['mod_action'],        label: 'mod actions' },
+  { slug: 'comments',    kinds: ['comment_on_post'],            label: 'comments' },
+  { slug: 'replies',     kinds: ['reply_to_comment'],           label: 'replies' },
+  { slug: 'mod-actions', kinds: ['mod_action'],                 label: 'mod actions' },
+  { slug: 'archives',    kinds: ['export_ready', 'export_failed'], label: 'archives' },
 ];
 
 const MEMLOG_MODES = ['notifications', 'activity', 'all'];
@@ -3322,6 +3445,17 @@ function memlogTargetLink(db, n) {
   if (n.target_type === 'handle' && n.sub_name) {
     return `/sub/${n.sub_name}/modlog`;
   }
+  if (n.target_type === 'export') {
+    // export_ready: link directly to the bearer-token download URL.
+    // export_failed: no link — the snippet carries the reason.
+    if (n.kind !== 'export_ready') return null;
+    const row = db.prepare(
+      `SELECT download_token, expires_at FROM export_jobs
+        WHERE id = ? AND completed_at IS NOT NULL AND expires_at > ?`
+    ).get(n.target_id, Date.now());
+    if (!row?.download_token) return null;
+    return `/export/${row.download_token}.tar.gz`;
+  }
   return null;
 }
 
@@ -3329,6 +3463,8 @@ const MEMLOG_KIND_LABELS = {
   comment_on_post:  'comment on post',
   reply_to_comment: 'reply',
   mod_action:       'mod action',
+  export_ready:     'archive ready',
+  export_failed:    'archive failed',
   my_post:          'my post',
   my_comment:       'my comment',
 };
@@ -3451,6 +3587,11 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
         <button class="filter-btn" title="invalidates both URLs and issues new ones">regenerate token</button>
       </form>
     </details>`;
+  // Personal-export pill: a "request your archive" action available to
+  // every logged-in user (no tenure gate — your data is yours from day
+  // one). State machine mirrors the sub-export pill: pending/queued
+  // disables the button; recent-completed shows expiry.
+  const exportBlock = personalExportBlock({ db, handle, queuedHint: searchParams?.get('export') === 'queued' });
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <div class="memlog-page">
       <p><a href="/">← home</a></p>
@@ -3459,9 +3600,40 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
       <p class="muted">${intro}</p>
       ${filterBar}
       ${body}
+      ${exportBlock}
       ${feedsBlock}
     </div>
   `));
+}
+
+// Personal-export request UI on /memlog. Reflects the latest user-export
+// job's state if any, otherwise renders a live "request archive" pill.
+function personalExportBlock({ db, handle, queuedHint }) {
+  const latest = findLatestJob(db, { kind: 'user', scope: handle, requestedBy: handle });
+  let pill;
+  let blurb = 'one tarball with everything you authored on this instance: posts, comments, votes you cast, your subscriptions, and the public modlog actions you took or received. produced overnight in off-peak hours; you\'ll get a memlog notification when it\'s ready (3-day SLA, then a 3-day download window).';
+  if (latest && !latest.failed_at) {
+    if (latest.completed_at && latest.expires_at && latest.expires_at > Date.now()) {
+      const expDate = formatYmd(latest.expires_at);
+      pill = html`<button class="export-btn" type="button" disabled title="archive ready (expires ${expDate})">archive ready</button>`;
+    } else {
+      pill = html`<button class="export-btn" type="button" disabled title="archive queued — you'll get a memlog when ready">archive queued</button>`;
+    }
+  } else {
+    pill = html`<form method="POST" action="/export-request" class="export-form">
+      <button class="export-btn" type="submit" title="queue your personal archive">request archive</button>
+    </form>`;
+  }
+  const queued = queuedHint
+    ? html`<p class="muted">archive queued. you'll get a memlog notification when it's ready.</p>`
+    : html``;
+  return html`
+    <details class="memlog-export">
+      <summary><span class="rssvp-mark">personal archive</span></summary>
+      <p class="muted">${blurb}</p>
+      ${queued}
+      <p>${pill}</p>
+    </details>`;
 }
 
 async function handleMemlogRssRegenerate(req, res, { db, auth }) {
@@ -4412,6 +4584,8 @@ const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_MODS_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mods$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
+const SUB_EXPORT_REQUEST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/export-request$/;
+const EXPORT_DOWNLOAD_PATH_RE   = /^\/export\/([0-9a-f]{64})\.tar\.gz$/;
 const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
 const PERSONAL_RSS_PATH_RE      = /^\/u\/([0-9a-f]{64})\/rss$/;
 const PERSONAL_SUBS_RSS_PATH_RE = /^\/u\/([0-9a-f]{64})\/subs\.rss$/;
@@ -4541,7 +4715,7 @@ function resolveFeedPageSize(override) {
   return override;
 }
 
-export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined }) {
+export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -4624,6 +4798,15 @@ export function createApp({ db, auth, disposableDomains, postsDir, baseUrl, rate
       }
       if ((m = path.match(SUB_SUBSCRIBE_PATH_RE)) && method === 'POST') {
         return handleSubscribe(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_EXPORT_REQUEST_PATH_RE)) && method === 'POST') {
+        return handleSubExportRequest(req, res, { db, auth }, m[1]);
+      }
+      if (path === '/export-request' && method === 'POST') {
+        return handleUserExportRequest(req, res, { db, auth });
+      }
+      if ((m = path.match(EXPORT_DOWNLOAD_PATH_RE)) && method === 'GET') {
+        return handleExportDownload(res, { db, exportsDir }, m[1]);
       }
       if ((m = path.match(SUB_RSS_PATH_RE)) && method === 'GET') {
         return renderSubRss(res, { db, postsDir }, m[1]);

@@ -14,9 +14,10 @@ import { gunzipSync } from 'node:zlib';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 import {
-  enqueueSubExport, claimNextPendingJob, completeJob, failJob,
+  enqueueSubExport, enqueueUserExport, claimNextPendingJob,
+  completeJob, failJob, markStaleAsFailed,
   findCompletedJobByToken, findLatestJob, pruneExpiredJobs, newDownloadToken,
-  MAX_ATTEMPTS, DOWNLOAD_TTL_MS,
+  MAX_ATTEMPTS, DOWNLOAD_TTL_MS, SLA_MS,
 } from '../../src/archive/queue.js';
 import { buildSubArchiveBytes, archiveFilenameFor } from '../../src/archive/sub-export.js';
 import { validateManifest, sha256Hex } from '../../src/archive/manifest.js';
@@ -110,7 +111,7 @@ test('completeJob: sets completion fields + expires_at', () => {
   assert.equal(row.completed_at, ts(3));
   assert.equal(row.archive_size_bytes, 12345);
   assert.equal(row.download_token, token);
-  assert.equal(row.expires_at, ts(3) + DOWNLOAD_TTL_MS);
+  assert.equal(row.expires_at, ts(3) + DOWNLOAD_TTL_MS.sub);
 });
 
 test('completeJob: rejects malformed token', () => {
@@ -172,7 +173,7 @@ test('findCompletedJobByToken: matches only completed and unexpired', () => {
   // Within window
   assert.ok(findCompletedJobByToken(db, token, { now: ts(3) + 1000 }));
   // Past expiry
-  assert.equal(findCompletedJobByToken(db, token, { now: ts(3) + DOWNLOAD_TTL_MS + 1 }), null);
+  assert.equal(findCompletedJobByToken(db, token, { now: ts(3) + DOWNLOAD_TTL_MS.sub + 1 }), null);
   // Bad token
   assert.equal(findCompletedJobByToken(db, 'not-a-token', { now: ts(3) }), null);
 });
@@ -201,9 +202,116 @@ test('pruneExpiredJobs: deletes expired rows + reports filenames', () => {
   // Before expiry — no prune.
   assert.deepEqual(pruneExpiredJobs(db, { now: ts(3) + 1000 }), []);
   // Past expiry — pruned, filename returned.
-  const filenames = pruneExpiredJobs(db, { now: ts(3) + DOWNLOAD_TTL_MS + 1 });
+  const filenames = pruneExpiredJobs(db, { now: ts(3) + DOWNLOAD_TTL_MS.sub + 1 });
   assert.deepEqual(filenames, ['expired.tar.gz']);
   assert.equal(db.prepare('SELECT COUNT(*) AS c FROM export_jobs').get().c, 0);
+});
+
+// --- enqueueUserExport ---
+
+test('enqueueUserExport: creates pending row, scope == requestedBy', () => {
+  const db = memDb();
+  const j = enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  assert.equal(j.kind, 'user');
+  assert.equal(j.scope, 'h1');
+  assert.equal(j.requested_by, 'h1');
+  assert.equal(j.started_at, null);
+});
+
+test('enqueueUserExport: idempotent while a job is pending', () => {
+  const db = memDb();
+  const a = enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  const b = enqueueUserExport(db, { requestedBy: 'h1', now: ts(2) });
+  assert.equal(a.id, b.id);
+});
+
+test('enqueueUserExport: different users get different rows', () => {
+  const db = memDb();
+  const a = enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  const b = enqueueUserExport(db, { requestedBy: 'h2', now: ts(2) });
+  assert.notEqual(a.id, b.id);
+});
+
+test('enqueueUserExport: completed job releases dedupe slot', () => {
+  const db = memDb();
+  enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  completeJob(db, job.id, {
+    archiveFilename: 'plato-export-user-h1-2026-05-06.tar.gz',
+    archiveSizeBytes: 1, downloadToken: newDownloadToken(), now: ts(3),
+  });
+  const fresh = enqueueUserExport(db, { requestedBy: 'h1', now: ts(4) });
+  assert.notEqual(fresh.id, job.id, 'new row created after completion');
+});
+
+// --- Per-kind TTL ---
+
+test('completeJob: user kind uses user TTL', () => {
+  const db = memDb();
+  enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  completeJob(db, job.id, {
+    archiveFilename: 'u.tar.gz', archiveSizeBytes: 1, downloadToken: newDownloadToken(), now: ts(3),
+  });
+  const row = db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(job.id);
+  assert.equal(row.expires_at, ts(3) + DOWNLOAD_TTL_MS.user);
+});
+
+// --- markStaleAsFailed (SLA sweep) ---
+
+test('markStaleAsFailed: terminal-fails sub jobs older than 7d', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(0) });
+  const swept = markStaleAsFailed(db, { now: ts(0) + SLA_MS.sub + 1 });
+  assert.equal(swept.length, 1);
+  assert.match(swept[0].error_message, /exceeded SLA window \(sub: 7d\)/);
+  const row = db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(swept[0].id);
+  assert.notEqual(row.failed_at, null);
+});
+
+test('markStaleAsFailed: terminal-fails user jobs older than 3d (shorter SLA)', () => {
+  const db = memDb();
+  enqueueUserExport(db, { requestedBy: 'h1', now: ts(0) });
+  // Past user SLA but not yet past sub SLA — only user is swept.
+  const swept = markStaleAsFailed(db, { now: ts(0) + SLA_MS.user + 1 });
+  assert.equal(swept.length, 1);
+  assert.equal(swept[0].kind, 'user');
+  assert.match(swept[0].error_message, /exceeded SLA window \(user: 3d\)/);
+});
+
+test('markStaleAsFailed: leaves recent pending jobs untouched', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(0) });
+  const swept = markStaleAsFailed(db, { now: ts(0) + SLA_MS.sub - 1000 });
+  assert.equal(swept.length, 0);
+  const row = db.prepare('SELECT failed_at FROM export_jobs').get();
+  assert.equal(row.failed_at, null);
+});
+
+test('markStaleAsFailed: ignores already-completed and already-failed rows', () => {
+  const db = memDb();
+  // One completed
+  enqueueSubExport(db, { subName: 'a', requestedBy: 'h1', now: ts(0) });
+  let job = claimNextPendingJob(db, { now: ts(1) });
+  completeJob(db, job.id, {
+    archiveFilename: 'a.tar.gz', archiveSizeBytes: 1, downloadToken: newDownloadToken(), now: ts(2),
+  });
+  // One pending, fresh
+  enqueueSubExport(db, { subName: 'b', requestedBy: 'h1', now: ts(SLA_MS.sub / 1000 - 100) });
+  // Sweep at "way past SLA for the completed one, but completed rows are immune".
+  const swept = markStaleAsFailed(db, { now: ts(0) + SLA_MS.sub + 10 * 24 * 3600 * 1000 });
+  // b is past SLA → swept; a is completed → untouched.
+  assert.equal(swept.length, 1);
+  assert.equal(swept[0].scope, 'b');
+});
+
+test('markStaleAsFailed: a mid-flight job (started_at set, retry < MAX) is also swept if past SLA', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(0) });
+  // Worker claimed it at ts(1) — now past SLA without ever completing.
+  claimNextPendingJob(db, { now: ts(1) });
+  const swept = markStaleAsFailed(db, { now: ts(0) + SLA_MS.sub + 1 });
+  assert.equal(swept.length, 1, 'started-but-stuck jobs are still terminal-failed by SLA sweep');
 });
 
 // --- Per-sub builder ---

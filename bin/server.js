@@ -14,6 +14,7 @@ const PORT = Number(process.env.PORT ?? 8080);
 const BASE_URL = process.env.KNOWLESS_BASE_URL ?? `http://localhost:${PORT}`;
 const DB_PATH = process.env.DB_PATH ?? resolve(ROOT, 'forum.db');
 const POSTS_DIR = resolve(ROOT, 'posts');
+const EXPORTS_DIR = process.env.EXPORTS_DIR ?? resolve(ROOT, 'exports');
 const DISPOSABLE_PATH = resolve(ROOT, 'disposable-domains.txt');
 const CONFIG_PATH = process.env.PLATO_CONFIG ?? resolve(ROOT, 'config.json');
 const SPAM_PATTERNS_PATH = process.env.PLATO_SPAM_PATTERNS ?? resolve(ROOT, 'spam-patterns.txt');
@@ -43,7 +44,7 @@ const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
 
 const handler = createApp({
   db, auth, disposableDomains,
-  postsDir: POSTS_DIR, baseUrl: BASE_URL,
+  postsDir: POSTS_DIR, exportsDir: EXPORTS_DIR, baseUrl: BASE_URL,
   rateLimits: operatorConfig.rateLimits ?? {},
   spamPatternsFile: operatorConfig.spamPatternsFile ?? SPAM_PATTERNS_PATH,
   linkCaps: operatorConfig.linkCaps ?? {},

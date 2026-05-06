@@ -1,4 +1,4 @@
-// Async export-job queue (M7/B2-a).
+// Async export-job queue (M7/B2-a, extended in B2-b).
 //
 // Pure-function transactional helpers around the export_jobs table.
 // Workers (bin/run-export-queue.js) and request handlers (M7/B2-b) both
@@ -14,13 +14,47 @@
 // re-queued (started_at cleared) so the next worker tick picks it up. On
 // the MAX_ATTEMPTS-th failure the row transitions to failed (terminal).
 // User retries by re-requesting (new row).
+//
+// Per-kind windows (B2-b):
+//   sub  : SLA 7 days from request, download TTL 3 days from completion
+//   user : SLA 3 days from request, download TTL 3 days from completion
+// SLA = how long the job may sit pending/in-progress before terminal-fail
+// (regardless of retry count). TTL = how long the completed download URL
+// works before the row + on-disk file are pruned.
 
 import { randomBytes } from 'node:crypto';
 
 const ID_BYTES = 8;        // → 16-hex job id
 const TOKEN_BYTES = 32;    // → 64-hex download token
 export const MAX_ATTEMPTS = 3;
-export const DOWNLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Per-kind download TTL. Both kinds are 3 days — sub archives can be
+// large and personal archives are PII-shaped, so neither benefits from
+// a longer retention. Keeping them as a map (not a single constant) so
+// future divergence is a one-line change, not a refactor.
+export const DOWNLOAD_TTL_MS = Object.freeze({
+  sub:  3 * ONE_DAY_MS,
+  user: 3 * ONE_DAY_MS,
+});
+
+// Per-kind production SLA. If a job hasn't reached completed_at within
+// SLA_MS of requested_at it's terminal-failed by the worker's pre-tick
+// sweep, regardless of retry_count. Sub gets the longer window because
+// the archive can be large and the queue may sit through several
+// off-peak windows.
+export const SLA_MS = Object.freeze({
+  sub:  7 * ONE_DAY_MS,
+  user: 3 * ONE_DAY_MS,
+});
+
+const KINDS = Object.freeze(['sub', 'user']);
+
+function assertHandle(label, value) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${label}: requestedBy required`);
+  }
+}
 
 // Enqueue (or return the existing pending) per-sub export for `requestedBy`.
 // Returns the job row. Idempotent: a second call while a job is pending or
@@ -31,9 +65,7 @@ export function enqueueSubExport(db, { subName, requestedBy, now = Date.now() })
   if (typeof subName !== 'string' || subName.length === 0) {
     throw new Error('enqueueSubExport: subName required');
   }
-  if (typeof requestedBy !== 'string' || requestedBy.length === 0) {
-    throw new Error('enqueueSubExport: requestedBy required');
-  }
+  assertHandle('enqueueSubExport', requestedBy);
   const existing = db.prepare(
     `SELECT * FROM export_jobs
       WHERE kind = 'sub' AND scope = ? AND requested_by = ?
@@ -46,6 +78,27 @@ export function enqueueSubExport(db, { subName, requestedBy, now = Date.now() })
     `INSERT INTO export_jobs (id, kind, scope, requested_by, requested_at)
      VALUES (?, 'sub', ?, ?, ?)`
   ).run(id, subName, requestedBy, now);
+  return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
+}
+
+// Enqueue (or return existing pending) per-user export. scope == requestedBy
+// so the unique partial dedupe index naturally caps one pending job per
+// user. No tenure gate at this layer — the caller (route handler) decides
+// whether the user is allowed to ask.
+export function enqueueUserExport(db, { requestedBy, now = Date.now() }) {
+  assertHandle('enqueueUserExport', requestedBy);
+  const existing = db.prepare(
+    `SELECT * FROM export_jobs
+      WHERE kind = 'user' AND scope = ? AND requested_by = ?
+        AND completed_at IS NULL AND failed_at IS NULL`
+  ).get(requestedBy, requestedBy);
+  if (existing) return existing;
+
+  const id = randomBytes(ID_BYTES).toString('hex');
+  db.prepare(
+    `INSERT INTO export_jobs (id, kind, scope, requested_by, requested_at)
+     VALUES (?, 'user', ?, ?, ?)`
+  ).run(id, requestedBy, requestedBy, now);
   return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
 }
 
@@ -80,8 +133,8 @@ export function claimNextPendingJob(db, { now = Date.now() } = {}) {
 }
 
 // Mark job as completed. Caller passes the on-disk filename, byte size,
-// and the freshly-generated download token. expires_at is computed here
-// from `now` so timing tests can drive it.
+// and the freshly-generated download token. expires_at uses the kind's
+// TTL (looked up from the row, so the worker doesn't have to thread it).
 export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, downloadToken, now = Date.now() }) {
   if (typeof archiveFilename !== 'string' || archiveFilename.length === 0) {
     throw new Error('completeJob: archiveFilename required');
@@ -92,12 +145,16 @@ export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, down
   if (typeof downloadToken !== 'string' || !/^[0-9a-f]{64}$/.test(downloadToken)) {
     throw new Error('completeJob: downloadToken must be 64-char hex');
   }
+  const row = db.prepare('SELECT kind FROM export_jobs WHERE id = ?').get(jobId);
+  if (!row) throw new Error(`completeJob: job ${jobId} not found`);
+  const ttl = DOWNLOAD_TTL_MS[row.kind];
+  if (ttl == null) throw new Error(`completeJob: unknown kind ${row.kind}`);
   db.prepare(
     `UPDATE export_jobs
         SET completed_at = ?, archive_filename = ?, archive_size_bytes = ?,
             download_token = ?, expires_at = ?
       WHERE id = ?`
-  ).run(now, archiveFilename, archiveSizeBytes, downloadToken, now + DOWNLOAD_TTL_MS, jobId);
+  ).run(now, archiveFilename, archiveSizeBytes, downloadToken, now + ttl, jobId);
 }
 
 // Record a failure. If retry_count < MAX_ATTEMPTS, re-queue the job (clear
@@ -120,6 +177,34 @@ export function failJob(db, jobId, { errorMessage, now = Date.now() }) {
       WHERE id = ?`
   ).run(now, errorMessage ?? null, jobId);
   return 'failed';
+}
+
+// Sweep: terminal-fail any pending job whose requested_at is older than
+// SLA_MS[kind]. Caller (worker) runs this before claimNextPendingJob so
+// stale jobs don't sit in the queue forever even when retries keep
+// succeeding-and-failing inside the SLA window. Returns the rows that
+// were just terminal-failed (so the caller can emit memlog
+// notifications); empty array if nothing was swept.
+export function markStaleAsFailed(db, { now = Date.now() } = {}) {
+  const swept = [];
+  for (const kind of KINDS) {
+    const cutoff = now - SLA_MS[kind];
+    const stale = db.prepare(
+      `SELECT * FROM export_jobs
+        WHERE kind = ? AND requested_at < ?
+          AND completed_at IS NULL AND failed_at IS NULL`
+    ).all(kind, cutoff);
+    if (stale.length === 0) continue;
+    const reason = `exceeded SLA window (${kind}: ${SLA_MS[kind] / ONE_DAY_MS}d)`;
+    const update = db.prepare(
+      `UPDATE export_jobs SET failed_at = ?, error_message = ? WHERE id = ?`
+    );
+    for (const row of stale) {
+      update.run(now, reason, row.id);
+      swept.push({ ...row, failed_at: now, error_message: reason });
+    }
+  }
+  return swept;
 }
 
 // Token-based lookup for the download route. Returns the row if the token

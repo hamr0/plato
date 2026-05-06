@@ -25,9 +25,12 @@ import { writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { openDb } from '../src/db/index.js';
 import {
-  claimNextPendingJob, completeJob, failJob, pruneExpiredJobs, newDownloadToken,
+  claimNextPendingJob, completeJob, failJob, pruneExpiredJobs,
+  markStaleAsFailed, newDownloadToken,
 } from '../src/archive/queue.js';
+import { recordNotification } from '../src/content/notification.js';
 import { buildSubArchiveBytes, archiveFilenameFor } from '../src/archive/sub-export.js';
+import { buildUserArchiveBytes, userArchiveFilenameFor } from '../src/archive/user-export.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -60,6 +63,25 @@ for (const f of expiredFiles) {
 }
 if (expiredFiles.length > 0) console.log(`[export-queue] pruned ${expiredFiles.length} expired archive(s)`);
 
+// SLA sweep: terminal-fail jobs that have sat past their per-kind SLA
+// window. Runs every tick so a job stuck in retry/queue forever doesn't
+// linger. Each swept row gets an export_failed memlog notification so
+// the user knows to re-request.
+const swept = markStaleAsFailed(db);
+for (const row of swept) {
+  recordNotification(db, {
+    recipientHandle: row.requested_by,
+    kind: 'export_failed',
+    subName: row.kind === 'sub' ? row.scope : null,
+    targetType: 'export',
+    targetId: row.id,
+    snippet: row.error_message ?? 'archive could not be produced',
+  });
+}
+if (swept.length > 0) {
+  console.log(`[export-queue] SLA-swept ${swept.length} stale job(s)`);
+}
+
 const job = claimNextPendingJob(db);
 if (!job) {
   console.log('[export-queue] no pending jobs.');
@@ -77,16 +99,22 @@ if (dryRun) {
 console.log(`[export-queue] start job=${job.id} kind=${job.kind} scope=${job.scope} attempt=${job.retry_count}/3`);
 
 try {
-  if (job.kind !== 'sub') throw new Error(`unsupported job kind: ${job.kind}`);
   const exportedAt = new Date();
-  const tarBytes = buildSubArchiveBytes(db, job.scope, {
-    postsDir: POSTS_DIR,
-    branding,
-    platoVersion,
-    exportedAt,
-  });
+  let tarBytes; let filename;
+  if (job.kind === 'sub') {
+    tarBytes = buildSubArchiveBytes(db, job.scope, {
+      postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
+    });
+    filename = archiveFilenameFor(job.scope, exportedAt);
+  } else if (job.kind === 'user') {
+    tarBytes = buildUserArchiveBytes(db, job.scope, {
+      postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
+    });
+    filename = userArchiveFilenameFor(job.scope, exportedAt);
+  } else {
+    throw new Error(`unsupported job kind: ${job.kind}`);
+  }
   const gz = gzipSync(tarBytes);
-  const filename = archiveFilenameFor(job.scope, exportedAt);
   mkdirSync(EXPORTS_DIR, { recursive: true });
   writeFileSync(resolve(EXPORTS_DIR, filename), gz);
   const token = newDownloadToken();
@@ -95,9 +123,36 @@ try {
     archiveSizeBytes: gz.length,
     downloadToken: token,
   });
-  console.log(`[export-queue] done job=${job.id} file=${filename} size=${gz.length} token=${token.slice(0, 8)}…`);
+  // Memlog: tell the requester the archive is ready, with snippet shape
+  // "expires <YYYY-MM-DD>". The download URL is resolved by the memlog
+  // renderer via the job's download_token (not stored on the notification
+  // itself, so a future token rotation would invalidate cleanly).
+  const completed = db.prepare('SELECT expires_at FROM export_jobs WHERE id = ?').get(job.id);
+  const expiry = new Date(completed.expires_at).toISOString().slice(0, 10);
+  recordNotification(db, {
+    recipientHandle: job.requested_by,
+    kind: 'export_ready',
+    subName: job.kind === 'sub' ? job.scope : null,
+    targetType: 'export',
+    targetId: job.id,
+    snippet: job.kind === 'sub'
+      ? `archive of //${job.scope} ready · expires ${expiry}`
+      : `your personal archive is ready · expires ${expiry}`,
+  });
+  console.log(`[export-queue] done job=${job.id} kind=${job.kind} file=${filename} size=${gz.length} token=${token.slice(0, 8)}…`);
 } catch (err) {
   const result = failJob(db, job.id, { errorMessage: err.message });
+  if (result === 'failed') {
+    // Terminal: notify the user that retries are exhausted.
+    recordNotification(db, {
+      recipientHandle: job.requested_by,
+      kind: 'export_failed',
+      subName: job.kind === 'sub' ? job.scope : null,
+      targetType: 'export',
+      targetId: job.id,
+      snippet: `archive request failed after 3 attempts: ${err.message}. you can request a new one anytime.`,
+    });
+  }
   console.error(`[export-queue] ${result} job=${job.id} attempt=${job.retry_count}: ${err.message}`);
   process.exit(1);
 }

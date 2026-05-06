@@ -1,10 +1,14 @@
 // Per-user notifications — memlog (M6/B0).
 //
-// Three kinds of events generate rows:
+// Five kinds of events generate rows:
 //   comment_on_post   — top-level comment on a post you authored
 //   reply_to_comment  — reply to a comment you authored
 //   mod_action        — your content or handle was acted on by a mod
 //                       (sub-keyed action; reason carried in snippet)
+//   export_ready      — an archive you requested has finished building
+//                       (M7/B2-b; target_id = job id; snippet = expiry date)
+//   export_failed     — an archive you requested terminal-failed after
+//                       MAX_ATTEMPTS or hit its SLA window
 //
 // Vote events are deliberately not recorded. Score is the visible signal;
 // per-vote pings are an engagement-bait surface plato refuses.
@@ -17,6 +21,8 @@ export const NOTIFICATION_KINDS = Object.freeze([
   'comment_on_post',
   'reply_to_comment',
   'mod_action',
+  'export_ready',
+  'export_failed',
 ]);
 
 export const NOTIFICATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
