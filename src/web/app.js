@@ -470,7 +470,7 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
      JOIN posts p ON p.sub_name = s.name AND p.created_at >= ?
      WHERE s.name != 'general'
      GROUP BY s.name, s.description, s.sensitive
-     ORDER BY post_count DESC, s.name ASC`
+     ORDER BY MAX(p.created_at) DESC, post_count DESC, s.name ASC`
   ).all(sinceMs);
 }
 
@@ -689,6 +689,19 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     </label>
     <button>post</button>
   </form>`;
+}
+
+// Generic friendly-error rewriter for any mechanism-layer throw that
+// surfaces to the user. Strips the "<funcName>:" prefix and translates
+// the read-only-sub case (the most common cross-action rejection).
+// Used by vote, comment, flag, and the post-retry view.
+function friendlyError(message) {
+  if (!message) return 'something went wrong.';
+  const m = message.match(/^[a-zA-Z]+:\s*\/\/([a-z0-9-]+) is read-only$/);
+  if (m) {
+    return `//${m[1]} is read-only — no new posts, comments, votes, or flags until a mod reactivates it.`;
+  }
+  return message.replace(/^[a-zA-Z]+:\s*/, '');
 }
 
 // Translate raw mechanism-layer errors to user-facing copy. Strips the
@@ -1594,7 +1607,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
             <input type="hidden" name="action" value="demote_mod">
             <input type="hidden" name="target" value="${h}">
             <span class="muted">demote ${ps}? they keep their account but lose mod tools.</span>
-            <button>yes, demote</button>
+            <button class="mod-action-pill">yes, demote</button>
             <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
           </form>
         </details>`
@@ -1604,7 +1617,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
               <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form">
                 <input type="hidden" name="action" value="self_demote">
                 <span class="muted">step down as co-mod of //${subName}? you keep your account but lose mod tools here.</span>
-                <button>yes, step down</button>
+                <button class="mod-action-pill">yes, step down</button>
                 <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
               </form>
             </details>`
@@ -1642,15 +1655,15 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   if (isOwner && !disabled) {
     if (coMods.length > 0) {
       stepDownSection = html`<details class="inline-confirm sub-stepdown-toggle">
-        <summary class="action-link">step down as mod</summary>
+        <summary class="action-link">transfer mod role</summary>
         <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form" autocomplete="off">
           <input type="hidden" name="action" value="transfer_owner">
-          <span class="muted">transfer the role to one of your co-mods. you become a co-mod yourself; they take over as mod. logged publicly in the modlog.</span>
+          <span class="muted">pick a co-mod to take over. one atomic action: you automatically become a co-mod and they become mod. if you also want to leave the sub entirely, step down as co-mod afterwards from your row in the list. logged publicly.</span>
           <input name="target" list="successor-list-${subName}" placeholder="pseudonym of co-mod" autocomplete="off" required>
           <datalist id="successor-list-${subName}">
             ${coMods.map((h) => html`<option value="${pseudonymFor(db, h)}"></option>`)}
           </datalist>
-          <button>transfer & step down</button>
+          <button class="mod-action-pill">transfer mod role</button>
           <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
         </form>
       </details>`;
@@ -1663,7 +1676,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
           <form method="POST" action="/sub/${subName}/mods" class="inline-confirm-form">
             <input type="hidden" name="action" value="disable_sub">
             <span class="muted">disable //${subName}? content stays readable; no new posts until a mod reactivates. there is no operator override.</span>
-            <button>yes, disable sub</button>
+            <button class="mod-action-pill">yes, disable sub</button>
             <a class="muted inline-confirm-cancel" href="/sub/${subName}/edit">cancel</a>
           </form>
         </details>
@@ -2375,9 +2388,10 @@ async function handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatte
   try {
     result = addComment(db, { postId, parentId: parentId || null, handle, body: commentBody });
   } catch (err) {
-    if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
+    const friendly = friendlyError(err.message);
+    if (wantsJson(req)) return sendJson(res, 400, { error: friendly });
     return send(res, 400, errorPage(req, { db, auth }, {
-      title: 'comment failed', message: err.message,
+      title: 'comment failed', message: friendly,
       links: html`<p><a href="/sub/${subName}/post/${postId}">← back to the post</a></p>`,
     }));
   }
@@ -2572,8 +2586,9 @@ async function handleVote(req, res, { db, auth }) {
   try {
     result = castVote(db, { targetType, targetId, voterHandle: handle, direction });
   } catch (err) {
-    if (wantsJson(req)) return sendJson(res, 400, { error: err.message });
-    return send(res, 400, quickPage(req, { db, auth }, 'vote failed', html`<p class="muted">${err.message}</p>`));
+    const friendly = friendlyError(err.message);
+    if (wantsJson(req)) return sendJson(res, 400, { error: friendly });
+    return send(res, 400, quickPage(req, { db, auth }, 'vote failed', html`<p class="muted">${friendly}</p>`));
   }
   if (wantsJson(req)) return sendJson(res, 200, result);
   // Native form path: redirect back to where the user came from. Whitelist
@@ -3073,7 +3088,7 @@ async function handleFlag(req, res, { db, auth }) {
     // UNIQUE collision = same user re-flagging the same target. Treat as
     // success-ish (their concern is registered) so the redirect is clean.
     if (!/UNIQUE/.test(err.message)) {
-      return send(res, 400, quickPage(req, { db, auth }, 'flag failed', html`<p class="muted">${err.message}</p>`));
+      return send(res, 400, quickPage(req, { db, auth }, 'flag failed', html`<p class="muted">${friendlyError(err.message)}</p>`));
     }
   }
   const safeReturn = safeLocalRedirect(returnTo, '/');
