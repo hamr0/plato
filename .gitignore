@@ -5,6 +5,7 @@ node_modules/
 *.db-shm
 *.db-wal
 posts/
+exports/
 .claude/
 .barebrowse/
 data/
