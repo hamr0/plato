@@ -105,6 +105,8 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | POST | `/sub/<name>/export-request` | enqueue a per-sub archive job. Auth-required (401 anon); gated by `canExportSub` — mod or 60-day continuous subscriber, else 403. Idempotent: repeated submits collapse onto the existing pending row. Redirects to `/memlog?export=queued`. M7/B2-b. |
 | POST | `/export-request` | enqueue a personal (per-user) archive job. Auth-required only; no tenure gate. Idempotent. Redirects to `/memlog?export=queued`. M7/B2-b. |
 | GET | `/export/<token>.tar.gz` | token-bearer streaming download. **No auth check** — the 64-hex `download_token` IS the credential (same posture as `/u/<token>/rss`). Headers: `Content-Type: application/gzip`, `Content-Disposition: attachment`, `Cache-Control: private, no-store`. 404 on missing/expired token, malformed token, or file removed from disk. M7/B2-b. |
+| GET | `/export/<token>.tar.gz.sig` | token-bearer detached Ed25519 signature (raw 64 bytes) over the gzipped archive. Same token-bearer posture as the `.tar.gz` route. 404 if the sig file is missing on disk (e.g. archive predates B4). M7/B4. |
+| GET | `/.well-known/plato-pubkey` | JSON: `{algorithm, public_key_hex, fingerprint, created_at, instance:{forum_name,base_url}}`. Lazy-creates the instance keypair on first hit. `Cache-Control: public, max-age=300`. M7/B4. |
 | POST | `/draft` | submit a draft post (logged-in: inlines finalize) |
 | GET | `/draft/<id>/finalize` | finalize after magic-link click |
 | GET | `/post/<id>` | canonical post permalink |
@@ -189,6 +191,7 @@ Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables
 | `notifications` | per-user memlog; recipient_handle, kind, target ref, read_at (migration 013) |
 | `subscriptions` | (user_handle, sub_name) composite PK + index on `sub_name`; private per-user, never publicly listed (migration 014, M6/B2) |
 | `export_jobs` | archive request queue (sub + user kinds); state encoded in three timestamps + retry_count; unique partial index dedupes pending duplicates per (kind, scope, requested_by); 64-hex `download_token`. Per-kind windows (M7/B2-b): production SLA from request → terminal-fail = sub 7d / user 3d; download TTL from completion = 3d both kinds. Worker pre-tick `markStaleAsFailed` sweep enforces the SLA (migration 018) |
+| `instance_keypair` | single-row Ed25519 archive-signing keypair: `id` PK with `CHECK (id = 1)`, `algorithm` (`'ed25519'`-only), 32-byte raw `private_key` + `public_key` BLOBs, `fingerprint` (sha256 of pubkey bytes, `"sha256:<64-hex>"` form), `created_at`. Lazy-generated on first need via `getOrCreateInstanceKeypair`. Never rotated in v1 (migration 019, M7/B4) |
 | `schema_migrations` | id PRIMARY KEY |
 
 Posts are stored as markdown files on disk at `posts/<date>-<id>.md` with frontmatter. The DB row is the index, regenerable from the file tree (so a backup of `posts/` + `forum.db` is sufficient; losing the DB is recoverable).
@@ -326,6 +329,7 @@ Marker: `/subs` directory shows `[read-only]` next to disabled-sub names. PRD-lo
   - **Worker.** `bin/run-export-queue.js` (operator cron, default `*/15 * * * *`) picks one pending job per tick during the 01:00–06:00 server-time window, runs the `markStaleAsFailed` sweep first, then claims, builds, gzips, writes to `./exports/`, stamps the row with a 64-hex `download_token` + per-kind `expires_at`. Per-kind windows: production SLA from request = sub 7d / user 3d; download TTL from completion = 3d both kinds. Retry policy: 3 attempts then terminal-fail (still capped by the SLA sweep). Off-peak window overridable via `EXPORT_OFFPEAK_START` / `EXPORT_OFFPEAK_END` (hour 0–23) or disabled with `EXPORT_OFFPEAK_DISABLE=1`.
   - **Download.** `GET /export/<token>.tar.gz` is unauthenticated — token IS the credential, same posture as `/u/<token>/rss`. 3-day TTL bounds leak exposure.
   - **Memlog wiring.** Worker emits `export_ready` (links through bearer token via `/memlog/go/<id>`) or `export_failed` (snippet carries the reason; user re-requests) on completion / terminal-fail. Filter chip `archives` narrows `/memlog` to both kinds.
+  - **Signing (M7/B4).** Worker writes a sibling `<archive>.tar.gz.sig` (raw 64-byte Ed25519 over the gzipped tarball bytes) and threads `pubkeyFingerprint` into the manifest's `instance.pubkey_fingerprint`. Keypair is single-row in the `instance_keypair` table (migration 019), lazy-created via `getOrCreateInstanceKeypair`, never rotated. Pubkey is advertised at `/.well-known/plato-pubkey`; fingerprint also surfaces on `/about`. Verification = fetch pubkey, confirm fingerprint matches manifest, verify sig against gzipped bytes.
 
 ### Per-handle rules (locked)
 
@@ -440,7 +444,7 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 - Backups: `cp forum.db forum.db.bak` and rsync `posts/`. SQLite WAL means you can copy the live file (`.backup` is safer for hot copies).
 - Logging: stdout. Pipe to `journalctl` via systemd or your favorite log shipper.
 - Monitoring: hit `/` and check 200; failures are loud. No metrics endpoint yet.
-- Secrets: `KNOWLESS_SECRET` is the entire identity of the forum. Losing it doesn't break anything (handles still work — they were derived once and stored). Leaking it lets someone forge handles, so treat like a session-signing key.
+- Secrets: `KNOWLESS_SECRET` is the entire identity of the forum. Losing it doesn't break anything (handles still work — they were derived once and stored). Leaking it lets someone forge handles, so treat like a session-signing key. The Ed25519 archive-signing privkey lives in the DB's `instance_keypair` table (M7/B4); leaking it lets someone forge archives that match this instance's pubkey, so back up `forum.db` securely and don't ship it to anyone you don't trust.
 
 ## Gotchas
 

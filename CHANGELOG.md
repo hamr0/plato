@@ -6,6 +6,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7/B4: Ed25519 archive signing
+
+Every archive this instance produces is now cryptographically attributable.
+A detached Ed25519 signature ships next to the gzipped tarball, the public
+key is discoverable at a well-known URL, and the manifest carries the
+fingerprint so importers can match archive ↔ instance ↔ key in one step.
+
+- **Instance keypair, lazy + persistent.** Migration 019 adds a single-row
+  `instance_keypair` table (`CHECK (id = 1)`). The keypair is generated on
+  first call to `getOrCreateInstanceKeypair(db)` — either at worker boot,
+  on first `/.well-known/plato-pubkey` hit, or on first `/about` render —
+  and reused forever after. Privkey lives in the DB, honoring plato's
+  "one process, one SQLite file" rule. Operators back it up by backing
+  up `forum.db`; never rotated in v1.
+- **`src/archive/signing.js`** — pure module: `generateInstanceKeypair`,
+  `getOrCreateInstanceKeypair`, `signBytes`, `verifyBytes`,
+  `fingerprintFromPublicKey`. Built on `node:crypto` Ed25519 primitives;
+  no new deps. Fingerprint format is `"sha256:" + sha256(raw 32-byte
+  pubkey).hex()`.
+- **Worker signs on completion.** `bin/run-export-queue.js` loads the
+  keypair once at boot, threads `pubkeyFingerprint` into both
+  `buildSubArchiveBytes` and `buildUserArchiveBytes` (so manifest's
+  `instance.pubkey_fingerprint` is populated, not null), and after
+  gzipping the tar, writes a sibling `<archive>.tar.gz.sig` containing
+  the raw 64-byte signature over the gzipped bytes.
+- **`GET /.well-known/plato-pubkey`** — JSON response shape:
+  `{algorithm, public_key_hex, fingerprint, created_at, instance:{forum_name, base_url}}`.
+  `Cache-Control: public, max-age=300`. Lazy-creates the keypair on
+  first hit (so a never-exported instance still has a discoverable
+  pubkey).
+- **`GET /export/<token>.tar.gz.sig`** — sibling download route.
+  Token-bearer, same posture as the `.tar.gz` route (token IS the
+  credential, no auth check). 404s if the sig file is missing on disk
+  (e.g. archive predates B4).
+- **`/about` surfaces the fingerprint** with a link to
+  `/.well-known/plato-pubkey` and a one-paragraph explanation of the
+  verification flow.
+- **Spec lock.** `docs/02-features/archive-format.md` moves M7/B4 out
+  of "Future layers" into a "Signing" section: signed bytes = the
+  gzipped tarball, format is raw 64 bytes, manifest's
+  `pubkey_fingerprint` matches `/.well-known`, importers refuse on
+  fingerprint mismatch by default. Verification recipe is explicit so
+  third-party tools can check archives without a plato install.
+- **+21 tests** (signing module unit + builder fingerprint plumbing +
+  three new HTTP routes end-to-end). 700/700 green.
+
 ### Added — M7/B2-b: HTTP routes, UX, memlog wiring, personal export
 
 The B2-a offline core (queue, builder, worker, tar) is now reachable

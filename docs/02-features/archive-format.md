@@ -4,7 +4,7 @@ This is the canonical specification for plato's export/import archive format. Ev
 
 The audience is both humans and AI assistants. If you are an AI helping a user reconstruct or transform an archive, this document gives you the schema; you do not need to guess.
 
-> **Status:** v1, M7/B1. Identity / signing / OpenTimestamps anchoring are deferred to M7/B4 and M7/B6 — see *Future layers* at the end of this doc. Adding them does not change the shapes defined here.
+> **Status:** v1, M7/B1 (shape) + M7/B4 (signing). OpenTimestamps anchoring is deferred to M7/B6 — see *Future layers* at the end of this doc. Adding it does not change the shapes defined here.
 
 ## Purpose
 
@@ -64,7 +64,7 @@ The canonical inventory and the entry point for any importer. JSON, UTF-8, no co
   "instance": {
     "forum_name": "example forum",              // string, branding.forumName
     "base_url": "https://example.com",          // canonical instance URL
-    "pubkey_fingerprint": null                  // populated in M7/B4; null in v1
+    "pubkey_fingerprint": "sha256:<64-hex>"     // M7/B4 — null on archives built before B4
   },
   "counts": {
     "posts": 142,
@@ -287,11 +287,50 @@ These are not required by the format. They illustrate what the schema enables.
 - **SQL re-import.** The four JSON files (`posts.json`, `comments.json`, `modlog.json`, `votes.json`) plus `subs.json` map directly to plato's DB schema. An importer reads them, re-derives handles under its own master secret, and inserts.
 - **Plain text.** `cat posts/*.md` after stripping frontmatter gives a plaintext concatenation in filename order.
 
+## Signing (M7/B4)
+
+A plato archive ships with a detached Ed25519 signature alongside the tarball.
+
+```
+plato-export-<scope>-<YYYY-MM-DD>.tar.gz       # the archive
+plato-export-<scope>-<YYYY-MM-DD>.tar.gz.sig   # the signature, raw 64 bytes
+```
+
+**Signed bytes:** the gzipped tarball, byte-for-byte. The signature is over the file as written to disk — not its decompressed contents, not the manifest. A bit-flip anywhere in the archive invalidates the signature.
+
+**Format:** raw 64-byte Ed25519 signature (RFC 8032). No PEM, no armor, no JSON. Verifiable with any standard Ed25519 tool: Node's `crypto.verify('ed25519', ...)`, libsodium, `openssl pkeyutl -verify` after wrapping the pubkey in SPKI, etc.
+
+**Key advertisement:** `GET /.well-known/plato-pubkey` returns JSON:
+
+```json
+{
+  "algorithm": "ed25519",
+  "public_key_hex": "<64-hex>",
+  "fingerprint": "sha256:<64-hex>",
+  "created_at": "2026-05-06T03:42:00.000Z",
+  "instance": {
+    "forum_name": "example forum",
+    "base_url": "https://example.com"
+  }
+}
+```
+
+The `fingerprint` is `"sha256:" + sha256(raw_32_byte_pubkey).hex()` — the same value that appears in `manifest.json.instance.pubkey_fingerprint`.
+
+**Verification recipe:**
+
+1. Read `manifest.json` from the archive; note `instance.pubkey_fingerprint` and `instance.base_url`.
+2. `GET <base_url>/.well-known/plato-pubkey`. Confirm its `fingerprint` equals the manifest's claim. If not, refuse — the archive does not match the instance it names.
+3. Verify the 64-byte `.tar.gz.sig` against the gzipped archive bytes using `public_key_hex`.
+
+**Key lifecycle:** one Ed25519 keypair per plato instance, generated lazily on first signing or first `/.well-known/plato-pubkey` hit, never rotated in v1. The privkey lives in the instance's SQLite database (single-row `instance_keypair` table); the operator backs it up exactly the way they back up `forum.db`.
+
+**No fingerprint, no signature:** an archive whose `manifest.json.instance.pubkey_fingerprint` is `null` was built before B4 was wired (or by a fork that strips signing). Importers may accept it under a `--unsigned-ok` flag; the default is to refuse.
+
 ## Future layers (deferred)
 
 Not part of v1. Documented here so the format is forward-compatible.
 
-- **M7/B4 — signing.** A detached Ed25519 signature `<archive-name>.tar.gz.sig` will accompany the tarball. The signed bytes are the tarball's bytes (not its file contents). A `pubkey_fingerprint` field in `manifest.json.instance` will be populated; the corresponding public key surfaces at `/.well-known/plato-pubkey` on the source instance. Verification is independent: the v1 archive shape does not need to know that signing exists.
 - **M7/B6 — OpenTimestamps anchor.** The hash anchored to Bitcoin is at the operator's discretion: per-archive (single anchor proves the whole bundle existed before timestamp T) or per-file via the manifest's `files[].sha256` (more granular, more anchors to manage). The format accommodates either; the manifest's per-file hashes already exist for diagnostics, so adding per-file anchoring later is purely additive.
 
 The choice of granularity (per-archive vs per-md vs per-post) is deferred and does not affect this spec.
@@ -299,5 +338,5 @@ The choice of granularity (per-archive vs per-md vs per-post) is deferred and do
 ---
 
 **Format version:** 1
-**Spec last updated:** 2026-05-05 (M7/B1)
+**Spec last updated:** 2026-05-06 (M7/B4 — signing wired)
 **Authoritative source:** this file. The in-archive `README.md` is generated from it; if the two ever disagree, this file wins.
