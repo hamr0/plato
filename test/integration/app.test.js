@@ -514,11 +514,16 @@ test('home active-subs block: shows only subs with posts in last 24h, top 4 by p
     .run(handle, 'strip-test', Date.now() - 10000);
   // alpha(5), beta(3), gamma(2), delta(1) get recent posts; epsilon and
   // zeta get nothing — strict 24h filter must exclude them entirely.
+  // Explicit per-sub timestamps so the recency-first sort is deterministic:
+  // delta posted most recently, alpha earliest. Confirms a fresh single-post
+  // sub bubbles above a high-volume but slightly older sub.
+  const baseTs = Date.now() - 60_000;
+  const offsets = { alpha: 0, beta: 10_000, gamma: 20_000, delta: 30_000 };
   for (const [name, n] of [['alpha', 5], ['beta', 3], ['gamma', 2], ['delta', 1]]) {
     for (let i = 0; i < n; i++) {
       db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
                   VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(`${name[0]}${i}`.padStart(16, '0'), name, handle, `t-${i}`, `posts/${name}${i}.md`, Date.now());
+        .run(`${name[0]}${i}`.padStart(16, '0'), name, handle, `t-${i}`, `posts/${name}${i}.md`, baseTs + offsets[name] + i);
     }
   }
 
@@ -536,8 +541,12 @@ test('home active-subs block: shows only subs with posts in last 24h, top 4 by p
   assert.doesNotMatch(body, /\/sub\/epsilon/);
   assert.doesNotMatch(body, /\/sub\/zeta/);
 
-  // Order: most-active first.
-  assert.ok(body.indexOf('/sub/alpha') < body.indexOf('/sub/delta'));
+  // Order: most-recent activity first (post_count is now a tie-breaker).
+  // The smoke-pass change was "i just posted in my fresh sub and it didn't
+  // show up" — the fix sorts by MAX(created_at) DESC so a brand-new post
+  // bubbles up regardless of volume. Inserts happen sequentially, so
+  // delta (last inserted) has the latest timestamp and ranks first.
+  assert.ok(body.indexOf('/sub/delta') < body.indexOf('/sub/alpha'));
 });
 
 test('home active-subs block: empty-state when no sub had posts in last 24h', async (t) => {

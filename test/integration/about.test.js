@@ -63,6 +63,11 @@ test('GET /about: renders boilerplate + default rules with no operator config', 
   assert.match(body, /<h3>rules<\/h3>/i);
   assert.match(body, />be civil/);
   assert.match(body, />mods are accountable/);
+  // M5/B12: "how this place works" orientation block appears above the
+  // data-handling section, with paragraphs for the load-bearing concepts
+  // (read-only subs in particular — surfaces the operator-out posture).
+  assert.match(body, /how this place works/i);
+  assert.match(body, /read-only/i);
 });
 
 test('GET /about: explicit branding.rules:[] suppresses the rules section', async (t) => {
