@@ -352,10 +352,10 @@ destination's secret differs from the source's.
   (or `null` for unsigned archives). These handles have no email
   derivation path on the destination — nobody can ever log in as them.
 - **Pseudonyms** are preserved verbatim *unless* they collide with an
-  existing pseudonym on the destination. On collision the lexical part
-  is wrapped in brackets: `clever-tiger` → `[clever]-tiger`. Suffix
-  unchanged. Further collisions get numeric disambiguators
-  (`[clever]-tiger-2`).
+  existing pseudonym on the destination. On collision the **whole
+  pseudonym** is wrapped in brackets (M7 followup lock): `clever-tiger`
+  → `[clever-tiger]`. Further collisions get numeric disambiguators
+  (`[clever-tiger]-2`).
 
 ### Sub on import
 

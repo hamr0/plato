@@ -6,6 +6,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7 followup: sub-archive import surfaces in public modlog
+
+Parallel to the export-side modlog row shipped earlier this session.
+Closes the modlog symmetry — the destination instance now records
+the import as a native action alongside the historical
+`[imported]`-tagged rows from the archive.
+
+- **Migration 022** adds `'import'` to the `mod_actions` action
+  CHECK enum (rebuild pattern as 017 / 021).
+- **`recordSubImport(db, { subName, importedBy, now })`** in
+  `src/content/mod.js` mirrors `recordSubExport`. Wired into
+  `importSubArchive` after the imported sub + handles + posts +
+  comments + (archived) mod_actions all land.
+- **Native row, no `[imported]` tag.** The import act happened on
+  this instance, not in the archive being imported, so
+  `imported_from_fingerprint` stays NULL. Together with the
+  archive's historical `[imported]`-tagged rows, the destination
+  modlog tells the full migration story for the sub.
+- **Renderer label**: `MOD_ACTION_LABELS.import = 'sub imported'`.
+- +1 test in `test/integration/import-queue.test.js`
+  (762 → 763 green).
+
+### Changed — M7 followup: pseudonym collision wraps the WHOLE pseudonym
+
+Lock change: `clever-tiger` → `[clever-tiger]` (was
+`[clever]-tiger`). The full-bracket form reads cleanly as a single
+annotated token rather than ambiguous half-decoration that could be
+misread as the user being literally named `clever`. Bracket marks
+"this name traveled" without inventing a new word, and now does so
+without splitting the original handle visually.
+
+- **`pseudonymForImport`** in `src/archive/import.js` simplified —
+  the lexical-split regex is gone; we just bracket the whole
+  pseudonym. Numeric disambiguation: `[clever-tiger]-2`,
+  `[clever-tiger]-3`, etc.
+- PRD §Cross-instance imports updated to lock the full-bracket
+  form; archive-format.md updated; operator-guide + plato.context
+  updated. Existing tests updated for the new shape.
+
 ### Added — M7 followup: sub-archive export surfaces in public modlog
 
 Sub-exports leaving the instance are public-facing transparency
