@@ -1016,8 +1016,19 @@ body:has(.composer-bar) { padding-bottom: 5rem; }
 .memlog-page table.modlog td:nth-child(4) { width: 7rem; }   /* from */
 .memlog-page table.modlog th:nth-child(5),
 .memlog-page table.modlog td:nth-child(5) { width: 8rem; }   /* where */
+/* Snippet column absorbs the leftover row width AND wraps onto
+ * multiple lines so long failure reasons (e.g. "already imported as
+ * //x on YYYY-MM-DD. you can request a new one anytime.") read
+ * fully instead of truncating with an ellipsis. The other columns
+ * keep their nowrap so timestamp + chip widths stay rigid. */
 .memlog-page table.modlog th:nth-child(6),
-.memlog-page table.modlog td:nth-child(6) { width: auto; }   /* snippet — absorbs the rest */
+.memlog-page table.modlog td:nth-child(6) {
+  width: auto;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+}
 
 .comment-header {
   display: flex;
