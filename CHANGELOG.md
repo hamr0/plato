@@ -6,6 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Polish — [i] chip on sub index header + listing surfaces; titleHtml split; manage-sub layout
+
+Round of small fixes after the C-render lock and pagination shipped:
+
+- **`[i]` chip surfaces** beyond the inner sub-scoped pages: now renders
+  on the sub index page brand row, in the home active-subs strip, and
+  in the /subs directory rows. `listSubsForNav` and `listAllSubs`
+  queries now select `imported_from_url` + `imported_at` so the chip
+  helper has the data.
+- **Chip styling**: bare `[i]` glyph in `--text-dim` (gray), no border,
+  no padding. Distinct from the amber `--accent-warm` `[!]` sensitive
+  marker so the two carry different meanings unambiguously.
+- **`pageView` titleHtml split**: an earlier attempt embedded the chip
+  inside the `title` param. That broke `<title>` (which is RCDATA — the
+  `<span>` rendered as visible text in the browser tab) and `og:title`
+  meta (the chip's own `title="..."` attribute closed the meta's
+  `content="..."` early). Added an optional `titleHtml` param: plain
+  `title` (string) flows into `<title>` + `og:title`; `titleHtml`
+  (raw HTML) flows into the body brand-row h1. Backwards compatible —
+  every existing caller keeps its current render.
+- **`/sub/<name>/edit` flag-threshold row**: `distinct flaggers (≥ 3)`
+  was wrapping because the label column was fixed at 8.5rem. Bumped
+  to 11rem + `white-space: nowrap`. Same `.threshold-row` is shared
+  with `/sub/create`; both benefit.
+
+770 green; CSS-only and additive render changes.
+
 ### Added — personal-archive reader: filter chips + pagination
 
 The offline static reader now scales to large archives without a single
