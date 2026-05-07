@@ -4,7 +4,7 @@ This is the canonical specification for plato's export/import archive format. Ev
 
 The audience is both humans and AI assistants. If you are an AI helping a user reconstruct or transform an archive, this document gives you the schema; you do not need to guess.
 
-> **Status:** v1, M7/B1 (shape) + M7/B4 (signing). OpenTimestamps anchoring is deferred to M7/B6 — see *Future layers* at the end of this doc. Adding it does not change the shapes defined here.
+> **Status:** v1, M7/B1 (shape) + M7/B4 (signing) + M7/B5 (import). OpenTimestamps anchoring is deferred to M7/B6 — see *Future layers* at the end of this doc. Adding it does not change the shapes defined here.
 
 ## Purpose
 
@@ -327,6 +327,84 @@ The `fingerprint` is `"sha256:" + sha256(raw_32_byte_pubkey).hex()` — the same
 
 **No fingerprint, no signature:** an archive whose `manifest.json.instance.pubkey_fingerprint` is `null` was built before B4 was wired (or by a fork that strips signing). Importers may accept it under a `--unsigned-ok` flag; the default is to refuse.
 
+## Import (M7/B5)
+
+Only `kind: "sub"` archives are importable into a destination plato
+instance; `kind: "user"` archives are personal-viewing only and ship
+with a static `index.html` reader for that purpose.
+
+The import model is **URL-fetch**: a logged-in user on the destination
+instance pastes the URL of an exported archive into `/sub/create?mode=import`,
+the destination's worker fetches the bytes itself via HTTPS, no upload
+path exists. The trust anchor is the URL — TLS handles transit
+integrity, the per-file SHA-256s in the manifest catch corruption, and
+the importer's choice of URL is the authenticity claim.
+
+### Identity on import
+
+Pseudonyms travel with the archive but cannot be claimed on the
+destination — there is no "log in as the original alice" path because
+handles are HMAC-derived under a per-instance master secret and the
+destination's secret differs from the source's.
+
+- **Handles** are inserted on the destination as synthetic rows with
+  `imported_from_fingerprint = manifest.instance.pubkey_fingerprint`
+  (or `null` for unsigned archives). These handles have no email
+  derivation path on the destination — nobody can ever log in as them.
+- **Pseudonyms** are preserved verbatim *unless* they collide with an
+  existing pseudonym on the destination. On collision the lexical part
+  is wrapped in brackets: `clever-tiger` → `[clever]-tiger`. Suffix
+  unchanged. Further collisions get numeric disambiguators
+  (`[clever]-tiger-2`).
+
+### Sub on import
+
+- Importer becomes the new sub's mod (transferable later through
+  normal mod-management).
+- `subs.imported_from_url`, `imported_from_fingerprint`, `imported_at`,
+  `imported_at_source` are set so the destination can render an
+  imported-sub banner.
+- Original `owner_handle` from the archive is preserved as historical
+  attribution in `mod_actions` rows (which carry the original mod's
+  synthetic handle), but the live `subs.owner_handle` points to the
+  importing user.
+
+### Modlog on import
+
+- Every `mod_actions` row from the archive gets
+  `imported_from_fingerprint` set on insert; renderers prepend an
+  `[imported]` tag to the action label everywhere the modlog appears.
+- Native moderation continues normally on the imported sub — new mod
+  actions don't carry the imported tag.
+
+### Posts, comments, votes
+
+- Posts insert with original 16-hex IDs, timestamps, scores, flair,
+  sensitive flag, and soft/hard mod state. Markdown bodies copied from
+  the archive into the destination's `posts/` tree.
+- Comments insert with original IDs and `parent_comment_id` threading.
+- Votes are NOT individually reconstructed (per-voter tallies are not
+  in the archive — privacy lock from §votes.json above). The archive's
+  `posts.score` / `comments.score` totals are the historical baseline;
+  new votes on the destination add to those totals.
+
+### Idempotence
+
+Same source archive (`manifest.scope.sub` + `manifest.exported_at`)
+can only succeed once on a given destination instance, enforced by a
+UNIQUE partial index on `import_jobs`. Re-runs surface "already
+imported as <name>" without creating duplicates.
+
+### Refusal cases
+
+- `manifest.kind === 'user'` — refuse outright.
+- Destination sub name already exists (and no `renameTo` provided).
+- PK collision on imported post or comment ID (astronomical odds).
+- Per-file SHA-256 mismatch against the manifest.
+- Network failures, oversized archives (default cap 500MB), non-200
+  responses, non-tarball content-types — all retry up to 3 attempts,
+  then SLA-sweep at 3 days.
+
 ## Future layers (deferred)
 
 Not part of v1. Documented here so the format is forward-compatible.
@@ -338,5 +416,5 @@ The choice of granularity (per-archive vs per-md vs per-post) is deferred and do
 ---
 
 **Format version:** 1
-**Spec last updated:** 2026-05-06 (M7/B4 — signing wired)
+**Spec last updated:** 2026-05-07 (M7/B5 — sub-import shipped)
 **Authoritative source:** this file. The in-archive `README.md` is generated from it; if the two ever disagree, this file wins.

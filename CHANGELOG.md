@@ -6,6 +6,79 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7/B5: sub-import (URL-fetch model)
+
+The fork-and-go promise made loud in the PRD's §Exit as the real check
+becomes mechanical: a community can leave one plato instance and arrive
+on another with all posts, comments, votes, and modlog history intact.
+The trust anchor is the URL itself — forum-B fetches the bytes from the
+URL the user pastes; if you trust the URL enough to paste it, you trust
+the bytes. No uploads, no chain-of-custody, no operator-only gate.
+
+- **Schema (migration 020).** New `import_jobs` table mirrors
+  `export_jobs`'s shape (pending → in-progress → succeeded | failed via
+  three timestamps + retry_count); idempotence index on
+  `(source_scope_sub, source_exported_at) WHERE completed_at IS NOT NULL`
+  so the same source archive only succeeds once. New columns:
+  `subs.imported_from_url|fingerprint|at|at_source` for the imported
+  badge; `handles.imported_from_fingerprint` for synthetic
+  non-claimable rows; `mod_actions.imported_from_fingerprint` for the
+  `[imported]` modlog tag.
+- **`src/archive/extract.js`.** POSIX USTAR reader, mirror of `tar.js`'s
+  writer. Validates header checksums, rejects path traversal,
+  dispatches `Map<path, Buffer>`. Hobby-scale, single-pass.
+- **`src/archive/import.js`.** Pure builder: parse + verify per-file
+  SHA-256 against the manifest, refuse `kind=user` archives outright,
+  insert handles under their original 64-hex with archived pseudonyms
+  (preserved verbatim unless they collide on the destination's UNIQUE
+  pseudonym constraint, in which case the lexical part is wrapped in
+  brackets — `clever-tiger` → `[clever]-tiger`; further collisions get
+  numeric disambiguators), insert the sub with the importing user as
+  owner, insert posts (preserving original IDs / timestamps / scores /
+  flair / sensitive / soft-state), copy `posts/<id>.md` to disk, insert
+  comments threaded by `parent_comment_id`, insert mod_actions tagged
+  `imported_from_fingerprint`. Refuses on destination sub-name conflict
+  unless `renameTo` is provided.
+- **`src/archive/import-queue.js`.** State-machine helpers parallel to
+  the export queue: `enqueueSubImport`, `claimNextPendingImport`,
+  `completeImport`, `failImport`, `markStaleImportsAsFailed`,
+  `findCompletedImportBySource`, `findLatestImportJob`. SLA = 3 days.
+- **`bin/run-import-queue.js`.** Off-peak worker (env `IMPORT_OFFPEAK_*`
+  mirroring export env). Per tick: size-capped streamed fetch (env
+  `IMPORT_MAX_BYTES` default 500MB; 120s timeout via `AbortController`);
+  gunzip; `parseAndVerifyArchive`; idempotence check via
+  `findCompletedImportBySource`; transactional `importSubArchive`;
+  memlog notification (`import_ready` linking to
+  `/sub/<imported_sub_name>`, or `import_failed` carrying the reason
+  in the snippet).
+- **HTTP surface.** `GET /sub/create` becomes a two-tab page —
+  `?mode=create` (default) renders the existing create form,
+  `?mode=import` renders the import form (URL field + optional "import
+  as" rename). `POST /sub/import` validates auth + URL + rename name,
+  enqueues, redirects to `/memlog?import=queued`. Idempotent on
+  `(source_url, requested_by)` while pending.
+- **Modlog rendering.** Every mod action with non-null
+  `imported_from_fingerprint` now renders with an `[imported]` tag
+  prefix (new `modActionCell()` helper used in all three modlog views:
+  `/sub/<name>/modlog`, `/modlog` audit mode, `/modlog` inbox mode).
+  Existing `listModActions*` SQL extended to select the column so the
+  flag is available everywhere it's rendered.
+- **Imported-sub banner.** `/sub/<name>` now renders an
+  `.imported-banner` chrome row above the sub-state banner whenever
+  `imported_from_url` is non-null: source host (linked), import date,
+  importer pseudonym. Visually quieter than `.sensitive-banner` —
+  informational, not warning.
+- **CSS.** New `.imported-banner`, `.imported-tag`, `.sub-create-tabs`
+  classes — every color references existing `--*` variables (no new
+  hex literals; forks rebrand without touching B5).
+- **+33 tests** (700 → 733): import-queue state machine + builder
+  end-to-end + tar reader + pseudonym bracket-wrap; HTTP routes
+  (auth gates, URL validation, idempotence, both tabs); imported
+  banner + `[imported]` modlog tag rendering.
+- **§Permanently out** locks (already in PRD before code lands):
+  cross-instance import of personal (kind=user) archives, file
+  uploads anywhere in the import flow.
+
 ### Added — M7/B4: Ed25519 archive signing
 
 Every archive this instance produces is now cryptographically attributable.
