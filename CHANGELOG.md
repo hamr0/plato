@@ -6,6 +6,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7/B6: OpenTimestamps anchor (operator-opt-in)
+
+Closes the trust loop on archives. B4's Ed25519 signature proves
+"these bytes weren't tampered with after the source signed them";
+B6's OpenTimestamps proof anchors the archive's hash to a Bitcoin
+block, so anyone with a Bitcoin node can prove "this archive existed
+no later than block N's timestamp" without trusting plato or the
+source operator. Useful precisely when the source instance is dead
+and someone disputes when the content existed.
+
+- **Zero new npm dependencies.** plato keeps its "five runtime deps"
+  posture intact. Operators who want OTS install the official
+  `opentimestamps-client` Python CLI once (`apt install
+  opentimestamps-client` or `pipx install opentimestamps-client`)
+  and wire two cron lines (one for stamp at export time is automatic
+  from the export worker; one for daily upgrades against
+  `bin/run-ots-upgrade.js`).
+- **Pattern lifted from gitdone**
+  (`~/PycharmProjects/gitdone/app/src/ots.js` +
+  `app/bin/ots-upgrade.js`). Plato's `src/archive/timestamp.js` is
+  the same shape: `spawn('ots', ['stamp', file])` for stamping,
+  `spawn('ots', ['upgrade', proof])` for daily upgrades. Both are
+  ENOENT-tolerant — if the binary is missing, they return
+  `{ error: 'ots not found' }` and the export worker logs + proceeds.
+  Stamping is best-effort polish, never load-bearing.
+- **`bin/run-ots-upgrade.js`** is the daily upgrade cron. Walks
+  `EXPORTS_DIR/*.tar.gz.ots`, runs `ots upgrade` on each, uses the
+  bytes-changed signal as the authoritative "got anchored to
+  Bitcoin" event (mirrors gitdone). Idempotent; safe to run any
+  frequency. Logs structured: `<count anchored>, <count
+  pending/already-anchored>, <count errored>`.
+- **`GET /export/<token>.tar.gz.ots`** — token-bearer download
+  matching the `.sig` route. Same posture: token IS the credential,
+  no auth check. 404 message explicitly says "operator may not have
+  opted in" so importers can distinguish "stamp not present" from
+  "stamp failed verification."
+- **`/about`** gains a paragraph in the archive-signing section
+  explaining the .ots file when present, including the
+  `ots verify <archive>.tar.gz.ots` recipe and a link to
+  opentimestamps.org.
+- **+11 tests** (746 → 757): timestamp wrapper unit tests with stub
+  `ots` binaries (success / non-zero exit / ENOENT / timeout / proof
+  missing after stamp / upgrade success / upgrade non-zero / upgrade
+  ENOENT); .ots route end-to-end (served when present, 404 with
+  hint when absent, bad token rejected).
+
 ### Added — M7/B5: sub-import (URL-fetch model)
 
 The fork-and-go promise made loud in the PRD's §Exit as the real check

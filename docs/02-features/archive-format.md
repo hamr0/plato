@@ -4,7 +4,7 @@ This is the canonical specification for plato's export/import archive format. Ev
 
 The audience is both humans and AI assistants. If you are an AI helping a user reconstruct or transform an archive, this document gives you the schema; you do not need to guess.
 
-> **Status:** v1, M7/B1 (shape) + M7/B4 (signing) + M7/B5 (import). OpenTimestamps anchoring is deferred to M7/B6 — see *Future layers* at the end of this doc. Adding it does not change the shapes defined here.
+> **Status:** v1, M7/B1 (shape) + M7/B4 (signing) + M7/B5 (import) + M7/B6 (OpenTimestamps, operator-opt-in).
 
 ## Purpose
 
@@ -405,16 +405,71 @@ imported as <name>" without creating duplicates.
   responses, non-tarball content-types — all retry up to 3 attempts,
   then SLA-sweep at 3 days.
 
+## OpenTimestamps anchor (M7/B6, operator-opt-in)
+
+A third trust layer, layered on top of B4's signature without
+modifying anything in the archive itself. Plato never bundles the
+OpenTimestamps client (would push past the project's "five runtime
+deps" limit); operators opt in by installing the official Python CLI
+once:
+
+```bash
+apt install opentimestamps-client    # Debian/Ubuntu
+# or
+pipx install opentimestamps-client   # anywhere with Python >= 3.7
+```
+
+After installation, `bin/run-export-queue.js` automatically calls
+`ots stamp <archive>.tar.gz` after writing the `.sig`, producing a
+sibling `.tar.gz.ots` file. The proof is initially "calendar-pending"
+— the OTS calendar servers attest the archive existed at this hash,
+but the Bitcoin block attestation hasn't been merged in yet. A daily
+cron (`bin/run-ots-upgrade.js`) refreshes pending proofs in place;
+when Bitcoin confirmations land, the proof becomes self-contained.
+
+```
+plato-export-<scope>-<YYYY-MM-DD>-<8hex>.tar.gz       # the archive
+plato-export-<scope>-<YYYY-MM-DD>-<8hex>.tar.gz.sig   # B4 signature
+plato-export-<scope>-<YYYY-MM-DD>-<8hex>.tar.gz.ots   # B6 OTS proof (when operator opts in)
+```
+
+**Granularity locked at per-archive.** A single OTS anchor per
+archive proves the whole bundle existed before block N's timestamp.
+Per-file anchoring would multiply calendar requests and the manifest
+already carries per-file SHA-256s for integrity inside the archive
+— the OTS layer's job is only "this bundle existed by time T."
+
+**What B6 adds beyond B4:**
+
+- **Source-instance dead?** B4's signature is verifiable offline (the
+  embedded fingerprint matches `/.well-known/plato-pubkey` while the
+  source is alive), but proves nothing about WHEN. OTS proves "this
+  archive existed no later than [Bitcoin block timestamp]" without
+  any plato instance being reachable.
+- **Operator gone bad and rewriting history?** B4 is happy with a
+  fresh signature on rewritten content. OTS's earlier anchor is the
+  receipt: hash chain doesn't lie.
+- **Third-party verifiability.** Anyone with a Bitcoin node (or
+  trusting one via opentimestamps.org's verifier) can verify an
+  archive without a plato install:
+
+  ```bash
+  ots verify plato-export-foo-2026-05-07-aabbccdd.tar.gz.ots
+  # → "Success! Bitcoin block N attests existence as of <date>"
+  ```
+
+**Missing .ots is not a verification failure.** Archives without a
+`.ots` either predate operator opt-in, were stamped while ots-cli
+was missing, or had calendar timeouts at stamp time. Importers /
+verifiers should treat .ots-absence as "OTS not enabled here" and
+fall back to B4's signature alone.
+
 ## Future layers (deferred)
 
-Not part of v1. Documented here so the format is forward-compatible.
-
-- **M7/B6 — OpenTimestamps anchor.** The hash anchored to Bitcoin is at the operator's discretion: per-archive (single anchor proves the whole bundle existed before timestamp T) or per-file via the manifest's `files[].sha256` (more granular, more anchors to manage). The format accommodates either; the manifest's per-file hashes already exist for diagnostics, so adding per-file anchoring later is purely additive.
-
-The choice of granularity (per-archive vs per-md vs per-post) is deferred and does not affect this spec.
+(none currently — M7's planned scope is shipped.)
 
 ---
 
 **Format version:** 1
-**Spec last updated:** 2026-05-07 (M7/B5 — sub-import shipped)
+**Spec last updated:** 2026-05-07 (M7/B6 — OpenTimestamps shipped, operator-opt-in)
 **Authoritative source:** this file. The in-archive `README.md` is generated from it; if the two ever disagree, this file wins.

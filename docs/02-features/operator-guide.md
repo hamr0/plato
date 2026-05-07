@@ -388,6 +388,13 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
   ```
   */15 * * * * cd /opt/plato && node bin/run-import-queue.js >> /var/log/plato-import.log 2>&1
   ```
+- **OpenTimestamps anchor — operator-opt-in (M7/B6).** plato never bundles the OTS client to keep its "five runtime deps" posture intact. Operators who want their archives Bitcoin-anchored install the official Python client once: `apt install opentimestamps-client` (Debian/Ubuntu) or `pipx install opentimestamps-client` (anywhere with Python ≥ 3.7). The default binary lookup is `ots` on `$PATH`; override with `OTS_BIN=/path/to/ots` if needed. Once installed, the export worker calls `ots stamp <archive>.tar.gz` automatically after writing the .sig — failures (network hiccup, calendar timeout, binary missing) log and skip; the export still ships .tar.gz + .sig. Initial proofs are "calendar-pending" until Bitcoin confirmations land (~1 hour to a day); add a daily upgrade cron to refresh in place:
+
+  ```
+  30 4 * * * cd /opt/plato && node bin/run-ots-upgrade.js >> /var/log/plato-ots-upgrade.log 2>&1
+  ```
+
+  Importers / auditors verify with `ots verify <archive>.tar.gz.ots` (requires the .tar.gz alongside; see opentimestamps.org). Archives without a .ots are not "broken" — they just predate operator opt-in or the binary failed at stamp time. Verification falls back to the Ed25519 signature alone in that case.
 - **Backups** — copy `forum.db` and `posts/`. SQLite WAL means a hot copy works; for safety, use `sqlite3 forum.db ".backup forum.db.bak"`.
 - **Restoring** — drop the files in place, ensure `KNOWLESS_SECRET` is the same as before (otherwise users look like new accounts), `npm start`.
 
