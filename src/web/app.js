@@ -143,7 +143,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=31">
+<link rel="stylesheet" href="/static/style.css?v=32">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -1941,7 +1941,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   // Owner-only edit form (description, flairs, sensitive, threshold). Hidden
   // for co-mods — they manage their own role here, not the sub's settings.
   const editForm = isOwner
-    ? html`<form method="POST" action="/sub/${subName}/edit">
+    ? html`<form method="POST" action="/sub/${subName}/edit" class="sub-edit-form">
         <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200" value="${sub.description ?? ''}">
         ${flairEditorView({ flairs, flairsRequired: !!sub.flairs_required })}
         <label class="threshold-row">

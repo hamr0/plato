@@ -1513,9 +1513,11 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 
 /* Sub create / import submit — pill-shape to match the tab strip
  * above. Width is auto (overrides form { display: grid }) so the
- * button doesn't stretch full-width like a primary CTA. */
+ * button doesn't stretch full-width like a primary CTA, and the
+ * action lives on the right edge where the user finishes scanning
+ * the form. */
 .sub-create-form button {
-  justify-self: start;
+  justify-self: end;
   padding: 0.3rem 0.9rem;
   font-size: 0.85rem;
   font-weight: normal;
@@ -1528,6 +1530,15 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   border-color: var(--accent);
   color: var(--accent);
   filter: none;
+}
+
+/* Sub manage (owner edit) save: same right-edge placement, but
+ * a hair wider so the bare word "save" doesn't sit cramped inside
+ * the pill border. justify-self overrides form { display: grid }'s
+ * full-width stretch. */
+.sub-edit-form button.mod-action-pill {
+  justify-self: end;
+  padding: 0.3rem 1.4rem;
 }
 
 /* Inline subscribe / unsubscribe form on /sub/<name>. Sits in the top
