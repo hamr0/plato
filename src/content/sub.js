@@ -29,6 +29,7 @@ export const RESERVED_SUB_NAMES = new Set([
 ]);
 
 export const SUB_DESCRIPTION_MAX = 200;
+export const STICKY_NOTE_MAX = 200;
 
 export function validateSubDescription(description) {
   if (description == null) return '';
@@ -39,6 +40,17 @@ export function validateSubDescription(description) {
     throw new Error(`sub description must be ≤ ${SUB_DESCRIPTION_MAX} characters`);
   }
   return description;
+}
+
+export function validateStickyNote(note) {
+  if (note == null) return '';
+  if (typeof note !== 'string') {
+    throw new Error('sticky note must be a string');
+  }
+  if (note.length > STICKY_NOTE_MAX) {
+    throw new Error(`sticky note must be ≤ ${STICKY_NOTE_MAX} characters`);
+  }
+  return note;
 }
 
 export function validateSubName(name) {
@@ -146,6 +158,16 @@ export function setSubDescription(db, name, description) {
   if (!sub) throw new Error(`sub "${name}" not found`);
   const validated = validateSubDescription(description);
   db.prepare('UPDATE subs SET description = ? WHERE name = ?').run(validated, name);
+}
+
+export function setSubStickyNote(db, name, note) {
+  const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
+  if (!sub) throw new Error(`sub "${name}" not found`);
+  const validated = validateStickyNote(note);
+  // Empty string normalizes to NULL — keeps the column tidy and
+  // lets the renderer use a single "is null/empty" check.
+  db.prepare('UPDATE subs SET sticky_note = ? WHERE name = ?')
+    .run(validated || null, name);
 }
 
 export function setSubSensitive(db, name, sensitive) {

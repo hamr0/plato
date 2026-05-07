@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateSubName, RESERVED_SUB_NAMES } from '../../src/content/sub.js';
+import { validateSubName, validateStickyNote, RESERVED_SUB_NAMES, STICKY_NOTE_MAX } from '../../src/content/sub.js';
 
 test('validateSubName: accepts typical names', () => {
   validateSubName('cooking');
@@ -55,4 +55,26 @@ test('validateSubName: rejects non-strings', () => {
   assert.throws(() => validateSubName(123), /string/);
   assert.throws(() => validateSubName(null), /string/);
   assert.throws(() => validateSubName(undefined), /string/);
+});
+
+test('validateStickyNote: accepts null/undefined as empty string', () => {
+  assert.equal(validateStickyNote(null), '');
+  assert.equal(validateStickyNote(undefined), '');
+});
+
+test('validateStickyNote: accepts a typical short paragraph', () => {
+  assert.equal(validateStickyNote('hi mods here, **read the rules**'), 'hi mods here, **read the rules**');
+});
+
+test(`validateStickyNote: accepts exactly ${STICKY_NOTE_MAX} chars`, () => {
+  validateStickyNote('a'.repeat(STICKY_NOTE_MAX));
+});
+
+test(`validateStickyNote: rejects > ${STICKY_NOTE_MAX} chars`, () => {
+  assert.throws(() => validateStickyNote('a'.repeat(STICKY_NOTE_MAX + 1)), /≤ 200/);
+});
+
+test('validateStickyNote: rejects non-strings', () => {
+  assert.throws(() => validateStickyNote(123), /must be a string/);
+  assert.throws(() => validateStickyNote({}), /must be a string/);
 });

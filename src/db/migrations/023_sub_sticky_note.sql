@@ -1,0 +1,21 @@
+-- Migration 023: M8/B1 — subs.sticky_note for the per-sub mod-voice slot.
+--
+-- One short, mod-editable text field per sub, rendered above the feed
+-- on /sub/<name>. Markdown allowed (subset implied by the 200-char cap:
+-- bold, italic, links — no images, same XSS posture as posts via the
+-- shared renderMarkdown).
+--
+-- Locks (PRD-level, not just convention):
+-- - one note per sub (no rotation, no history — edits overwrite).
+-- - mods only (owner OR co); read-only state honored at the
+--   handler layer.
+-- - 200 chars max (one short paragraph; longer belongs in a pinned
+--   post, but post-pinning is permanently out — see PRD §Permanently
+--   out). Sticky note is the *only* mod-voice slot above the feed.
+-- - no algorithmic feed promotion of any post.
+--
+-- NULL = no sticky note set. Empty string = note explicitly cleared
+-- (treated identically by the renderer; we don't distinguish, but
+-- allow either to land in the column for ergonomics).
+
+ALTER TABLE subs ADD COLUMN sticky_note TEXT;

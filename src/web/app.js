@@ -29,6 +29,8 @@ import {
   setSubSensitive,
   setSubFlagThreshold,
   setSubDescription,
+  setSubStickyNote,
+  STICKY_NOTE_MAX,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
 import { parseFlairs } from '../content/flair.js';
@@ -1628,6 +1630,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${importedBanner({ sub, db })}
       ${subStateBanner({ db, sub, modRole })}
+      ${sub.sticky_note ? html`<div class="sub-sticky-note" role="note" aria-label="mod note">${raw(renderMarkdown(sub.sticky_note))}</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
@@ -1974,10 +1977,22 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   // "stuck" — makes explicit what the user is and why their action set
   // looks the way it does.
   const roleChip = html`<p class="role-chip muted">you are: <strong>${isOwner ? 'mod' : 'co-mod'}</strong> of //${subName}${isOwner ? html`` : html` · only the mod can promote / demote / transfer; your one mod-management action here is to step down as co-mod (you keep your account)`}</p>`;
+
+  // Sticky note: any mod (owner or co) edits. Separate form from the
+  // owner-only block above, separate endpoint. ≤200 chars, markdown
+  // (bold/italic/links via the shared renderer; no images, no raw HTML).
+  // Empty submit clears the note.
+  const stickyForm = html`<form method="POST" action="/sub/${subName}/sticky" class="sub-sticky-edit-form">
+    <label class="muted" for="sticky-note-${subName}">mod note (≤${STICKY_NOTE_MAX} chars, markdown subset; renders above the feed)</label>
+    <textarea id="sticky-note-${subName}" name="note" maxlength="${STICKY_NOTE_MAX}" data-charcount placeholder="(optional) one short paragraph mods want above the feed">${sub.sticky_note ?? ''}</textarea>
+    <button class="mod-action-pill">save mod note</button>
+  </form>`;
   send(res, 200, pageView({ db, currentHandle, title: html`manage //${subName}` }, html`
     <p><a href="/sub/${subName}">← back to //${subName}</a>${importedSubChip({ sub })}</p>
     ${roleChip}
     ${reactivateBlock}
+    <h3 class="section">// mod note</h3>
+    ${stickyForm}
     ${editForm}
     <h3 class="section">// mod</h3>
     <p class="co-mod-list-owner"><strong>${pseudonymFor(db, sub.owner_handle)}</strong>${sub.owner_handle === currentHandle ? html` <span class="muted">(you)</span>` : html``}</p>
@@ -2035,6 +2050,46 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
     }));
   }
   redirect(res, `/sub/${subName}`);
+}
+
+// POST /sub/<name>/sticky — any mod (owner or co) edits the sub's
+// sticky note. Separate from /edit (owner-only) so co-mods retain
+// the one mod-voice slot above the feed without inheriting the
+// owner's settings surface. Empty submit clears the note.
+async function handleSubSticky(req, res, { db, auth }, subName) {
+  const currentHandle = auth.handleFromRequest(req);
+  if (!currentHandle) {
+    return send(res, 401, errorPage(req, { db, auth }, {
+      title: 'login required', message: 'log in to edit this sub.',
+    }));
+  }
+  const sub = getSubByName(db, subName);
+  if (!sub) {
+    return send(res, 404, quickPage(req, { db, auth }, 'sub not found', html`<p class="muted">no such sub.</p>`));
+  }
+  if (!canModerate(db, subName, currentHandle)) {
+    return send(res, 403, errorPage(req, { db, auth }, {
+      title: 'mods only', message: 'editing the mod note is restricted to mods of this sub.',
+    }));
+  }
+  if (sub.disabled_at != null) {
+    return send(res, 409, errorPage(req, { db, auth }, {
+      title: 'sub is read-only',
+      message: 'this sub is currently disabled. reactivate from the manage page first.',
+    }));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const note = (form.note ?? '').trim();
+  try {
+    setSubStickyNote(db, subName, note);
+  } catch (err) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'mod note rejected', message: err.message,
+      links: html`<p><a href="/sub/${subName}/edit">← try again</a></p>`,
+    }));
+  }
+  redirect(res, `/sub/${subName}/edit`);
 }
 
 // POST /sub/<name>/mods — mod-management actions: promote, demote (incl.
@@ -5184,6 +5239,7 @@ const SUB_NAME_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})$/;
 const SUB_EDIT_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/edit$/;
 const SUB_MOD_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mod$/;
 const SUB_MODS_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/mods$/;
+const SUB_STICKY_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/sticky$/;
 const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_EXPORT_REQUEST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/export-request$/;
 const EXPORT_DOWNLOAD_PATH_RE   = /^\/export\/([0-9a-f]{64})\.tar\.gz$/;
@@ -5462,6 +5518,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       }
       if ((m = path.match(SUB_MODS_PATH_RE)) && method === 'POST') {
         return handleSubMods(req, res, { db, auth }, m[1]);
+      }
+      if ((m = path.match(SUB_STICKY_PATH_RE)) && method === 'POST') {
+        return handleSubSticky(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'), url.searchParams);

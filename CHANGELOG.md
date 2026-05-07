@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — sticky note per sub (M8/B1)
+
+Mods (owner or co) now have a single short text field per sub —
+`subs.sticky_note` — that renders above the feed on `/sub/<name>`.
+≤ 200 chars, markdown via the same `renderMarkdown` pipeline that
+posts use (so raw HTML stays escaped, image syntax becomes a link,
+dangerous URL schemes get filtered). One note per sub; no history;
+edits overwrite; empty submit clears. Visually a warm-accent
+left-rule block — readers register it as "moderator speaking",
+not another post.
+
+Editable from `/sub/<name>/edit` (visible to any mod role) via a
+new `POST /sub/<name>/sticky` route — separate from `/edit` so
+co-mods retain the mod-voice slot without inheriting the
+owner-only settings surface (description, flairs, thresholds).
+Disabled subs reject the edit (409) so a read-only sub can't gain
+a fresh mod-voice block during the silence window.
+
+Locks: one note per sub, mods only, 200-char max, no algorithmic
+feed promotion (sticky note is the *only* mod-voice slot above the
+feed; post-pinning remains permanently out — see PRD §Permanently
+out). Migration 023 adds the column. +18 tests; 786 → 804 green.
+
 ### Added — `bin/health-watch.sh` cron-side `/healthz` watcher (M8/B4)
 
 Pairs with the B2 readiness probe. Curls `/healthz` from cron; silent

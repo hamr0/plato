@@ -1496,6 +1496,33 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .imported-banner a { color: var(--accent); }
 .imported-banner strong { color: var(--text); }
 
+/* Sub sticky note (M8/B1) — the per-sub mod-voice slot above the feed.
+   One short paragraph, mod-editable. Visually distinct from posts: a
+   warm-accent left rule borrows the modlog-row idiom so readers
+   register "this is a moderator speaking", not another post. */
+.sub-sticky-note {
+  border-left: 3px solid var(--accent-warm);
+  padding: 0.4rem 0.7rem;
+  margin: 0.4rem 0 0.6rem;
+  background: var(--surface-2, transparent);
+  font-size: 0.92rem;
+}
+.sub-sticky-note p { margin: 0.3rem 0; }
+.sub-sticky-note p:first-child { margin-top: 0; }
+.sub-sticky-note p:last-child  { margin-bottom: 0; }
+.sub-sticky-note a { color: var(--accent); }
+
+/* Sub edit page: the sticky-note form sits inside an h3 section like
+   the rest of the manage page. Textarea inherits the form-styling but
+   wants a couple of rows by default. */
+.sub-sticky-edit-form { display: grid; gap: 0.3rem; margin-bottom: 0.8rem; }
+.sub-sticky-edit-form textarea {
+  min-height: 3.2em;
+  font-family: monospace;
+  font-size: 0.92rem;
+}
+.sub-sticky-edit-form button { justify-self: end; }
+
 /* Inline [imported] tag in modlog action cells. Same dim posture as the
    imported-banner — informational, not warning. */
 .imported-tag {
