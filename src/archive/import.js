@@ -37,28 +37,34 @@ import { recordSubImport } from '../content/mod.js';
 
 // Pseudonym format from src/identity/pseudonym.js: "<adjective>-<animal>"
 // (two unique-names-generator words separated by a single hyphen). On
-// collision with an existing pseudonym on this instance, wrap the
-// whole pseudonym in brackets — donkey-tiger → [donkey-tiger]. The
-// brackets are the visual signal "this name traveled from another
-// instance"; full-bracket reads cleanly as one bracketed token rather
-// than ambiguous half-decoration. PRD §Exit as the real check
-// (M7 followup lock — full-bracket).
+// collision with an existing pseudonym on this instance, append a
+// numeric suffix at storage time so the UNIQUE handles.pseudonym
+// constraint holds: donkey-tiger → donkey-tiger-2 → donkey-tiger-3 …
 //
-// Returns { value, bracketed: boolean }. If even the bracketed form
-// collides, append a numeric suffix (e.g. [donkey-tiger]-2). Throws
-// only on extreme exhaustion (>100 attempts), which is operationally
+// Brackets are NOT applied at storage time — they're a render-time
+// decoration. Any handle with non-null `imported_from_fingerprint`
+// renders bracketed in the UI (post author, comment author, modlog
+// mod_handle, /memlog actor cell). See `pseudonymsByHandle` for the
+// rendering helper. The render-time approach keeps the canonical
+// pseudonym clean for URLs, search, and future @-mentions while
+// still giving every imported user a visual "don't @-reply to me,
+// I won't see it" signal everywhere they appear.
+//
+// PRD §Cross-instance imports — Identity model (M7 followup lock).
+//
+// Returns { value, disambiguated: boolean }. Throws only on extreme
+// collision exhaustion (>100 attempts), which is operationally
 // impossible at hobby scale.
 export function pseudonymForImport(db, archivedPseudonym) {
   const existing = db.prepare('SELECT 1 FROM handles WHERE pseudonym = ?').get(archivedPseudonym);
-  if (!existing) return { value: archivedPseudonym, bracketed: false };
+  if (!existing) return { value: archivedPseudonym, disambiguated: false };
 
-  const bracketed = `[${archivedPseudonym}]`;
-  for (let i = 1; i < 100; i++) {
-    const candidate = i === 1 ? bracketed : `${bracketed}-${i}`;
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${archivedPseudonym}-${i}`;
     const collide = db.prepare('SELECT 1 FROM handles WHERE pseudonym = ?').get(candidate);
-    if (!collide) return { value: candidate, bracketed: true };
+    if (!collide) return { value: candidate, disambiguated: true };
   }
-  throw new Error(`pseudonymForImport: bracket-disambiguation exhausted for ${archivedPseudonym}`);
+  throw new Error(`pseudonymForImport: disambiguation exhausted for ${archivedPseudonym}`);
 }
 
 // Parse the archive bytes into the canonical structures + verify per-file
@@ -133,7 +139,7 @@ function postFilePathFor(post) {
 
 // Insert a single sub-archive into `db`. Caller wraps in a transaction.
 //
-// Returns { subName, counts: {handles, posts, comments, modActions, bracketed} }.
+// Returns { subName, counts: {handles, posts, comments, modActions, disambiguated} }.
 // Throws on:
 //   - destination sub name taken (and no rename_to provided),
 //   - PK collision on imported post/comment/mod_action ID,
@@ -178,7 +184,7 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
     archivedPseudonyms.set(sub.owner_handle, sub.owner_pseudonym ?? sub.owner_handle.slice(0, 8));
   }
 
-  let bracketedCount = 0;
+  let disambiguatedCount = 0;
   let insertedHandles = 0;
   const handleInsert = db.prepare(
     `INSERT INTO handles (handle, pseudonym, first_seen_at, imported_from_fingerprint)
@@ -188,8 +194,8 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
     const exists = db.prepare('SELECT 1 FROM handles WHERE handle = ?').get(h);
     if (exists) continue;
     const archivedPs = archivedPseudonyms.get(h) ?? h.slice(0, 8);
-    const { value: ps, bracketed } = pseudonymForImport(db, archivedPs);
-    if (bracketed) bracketedCount++;
+    const { value: ps, disambiguated } = pseudonymForImport(db, archivedPs);
+    if (disambiguated) disambiguatedCount++;
     handleInsert.run(h, ps, now, sourceFp);
     insertedHandles++;
   }
@@ -303,7 +309,7 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
       posts: posts.length,
       comments: comments.length,
       modActions: modlog.length,
-      bracketed: bracketedCount,
+      disambiguated: disambiguatedCount,
     },
   };
 }

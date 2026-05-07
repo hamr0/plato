@@ -271,6 +271,35 @@ test('GET /sub/<name>/modlog: imported_from_fingerprint rows render with [import
   assert.match(body, /imported-tag[^>]*>\[imported\]/);
 });
 
+test('imported handle pseudonyms render bracketed everywhere they appear (M7 followup)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  // Two handles with the same pseudonym shape — one native, one imported.
+  // The imported one must render bracketed; the native one must not.
+  const native = 'a'.repeat(64);
+  const imported = 'b'.repeat(64);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(native, 'native-fox', Date.now());
+  ctx.db.prepare(
+    `INSERT INTO handles (handle, pseudonym, first_seen_at, imported_from_fingerprint) VALUES (?, ?, ?, 'sha256:src')`
+  ).run(imported, 'imported-bear', Date.now());
+  ctx.db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)').run('archive', null, Date.now());
+  // Two mod actions in the same sub log so both pseudonyms surface.
+  ctx.db.prepare(
+    `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+     VALUES (?, ?, ?, 'remove', 'post', 'p1', 'r1', ?)`
+  ).run('m-native', 'archive', native, Date.now() - 1000);
+  ctx.db.prepare(
+    `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint)
+     VALUES (?, ?, ?, 'remove', 'post', 'p2', 'r2', ?, 'sha256:src')`
+  ).run('m-imported', 'archive', imported, Date.now());
+  const res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
+  const body = await res.text();
+  // Imported pseudonym renders with the [pseudonym] wrapper:
+  assert.match(body, /\[imported-bear\]/);
+  // Native pseudonym renders bare (no surrounding brackets):
+  assert.ok(body.includes('native-fox'), 'native pseudonym must appear');
+  assert.ok(!body.includes('[native-fox]'), 'native pseudonym must NOT be wrapped in brackets');
+});
+
 // --- /memlog rendering for import_ready / import_failed ---
 
 test('GET /memlog: import_ready row renders link to /sub/<imported_sub_name>', async (t) => {

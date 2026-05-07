@@ -174,25 +174,25 @@ test('findLatestImportJob: returns most recent (by requested_at)', () => {
 
 // --- pseudonym collision bracket ---
 
-test('pseudonymForImport: no collision → archived pseudonym verbatim', () => {
+test('pseudonymForImport: no collision → archived pseudonym verbatim (brackets are render-time only)', () => {
   const db = memDb();
   const r = pseudonymForImport(db, 'clever-tiger');
-  assert.deepEqual(r, { value: 'clever-tiger', bracketed: false });
+  assert.deepEqual(r, { value: 'clever-tiger', disambiguated: false });
 });
 
-test('pseudonymForImport: collision wraps the whole pseudonym — clever-tiger → [clever-tiger]', () => {
+test('pseudonymForImport: collision appends -2 (no brackets at storage time)', () => {
   const db = memDb();
   ensureHandle(db, ALICE, 'clever-tiger');
   const r = pseudonymForImport(db, 'clever-tiger');
-  assert.deepEqual(r, { value: '[clever-tiger]', bracketed: true });
+  assert.deepEqual(r, { value: 'clever-tiger-2', disambiguated: true });
 });
 
-test('pseudonymForImport: bracketed form also collides → numeric suffix', () => {
+test('pseudonymForImport: -2 also collides → -3', () => {
   const db = memDb();
   ensureHandle(db, ALICE, 'clever-tiger');
-  ensureHandle(db, BOB, '[clever-tiger]');
+  ensureHandle(db, BOB, 'clever-tiger-2');
   const r = pseudonymForImport(db, 'clever-tiger');
-  assert.deepEqual(r, { value: '[clever-tiger]-2', bracketed: true });
+  assert.deepEqual(r, { value: 'clever-tiger-3', disambiguated: true });
 });
 
 // --- tar reader symmetry ---
@@ -442,7 +442,7 @@ test('importSubArchive: writes a native modlog row crediting the importer (M7 fo
   }
 });
 
-test('importSubArchive: pseudonym collision wraps the whole pseudonym on destination handle', async () => {
+test('importSubArchive: pseudonym collision disambiguates with -2 at storage time', async () => {
   const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
   const destDb = memDb();
   const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-dest-'));
@@ -450,16 +450,17 @@ test('importSubArchive: pseudonym collision wraps the whole pseudonym on destina
   ensureHandle(destDb, importerHandle, 'importer-pseudo');
   // Pre-seed: a different handle on the destination already has the
   // pseudonym 'alice-pseudo'. The imported alice's pseudonym should
-  // bracket on insert.
+  // disambiguate to alice-pseudo-2 at the DB layer; brackets are
+  // applied at render time by pseudonymsByHandle, not here.
   ensureHandle(destDb, 'd'.repeat(64), 'alice-pseudo');
   try {
     const parsed = parseAndVerifyArchive(tar);
     const result = importSubArchive(destDb, {
       parsed, postsDir: destPostsDir, importerHandle,
     });
-    assert.equal(result.counts.bracketed, 1);
+    assert.equal(result.counts.disambiguated, 1);
     const importedAlice = destDb.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(ALICE);
-    assert.equal(importedAlice.pseudonym, '[alice-pseudo]');
+    assert.equal(importedAlice.pseudonym, 'alice-pseudo-2');
   } finally {
     rmSync(srcPostsDir, { recursive: true, force: true });
     rmSync(destPostsDir, { recursive: true, force: true });

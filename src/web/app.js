@@ -461,13 +461,22 @@ function subColorIndex(subName) {
   return h % 8;
 }
 
+// Returns a Map<handle, displayName>. For handles imported from another
+// instance (handles.imported_from_fingerprint non-null) the displayName
+// is full-bracket-wrapped — `[alice-tiger]` — so every render site
+// surfaces the "this user is from another instance, replies won't
+// reach them" signal automatically (M7 followup lock). The DB
+// pseudonym stays unbracketed; the bracket is render-time only.
 function pseudonymsByHandle(db, handles) {
   if (handles.length === 0) return new Map();
   const placeholders = handles.map(() => '?').join(',');
   const rows = db
-    .prepare(`SELECT handle, pseudonym FROM handles WHERE handle IN (${placeholders})`)
+    .prepare(`SELECT handle, pseudonym, imported_from_fingerprint FROM handles WHERE handle IN (${placeholders})`)
     .all(...handles);
-  return new Map(rows.map((r) => [r.handle, r.pseudonym]));
+  return new Map(rows.map((r) => [
+    r.handle,
+    r.imported_from_fingerprint ? `[${r.pseudonym}]` : r.pseudonym,
+  ]));
 }
 
 // PRD §Permanently out: no default catch-all sub. The legacy 'general' row
