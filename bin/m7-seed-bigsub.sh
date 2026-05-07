@@ -82,7 +82,11 @@ const ins = db.prepare(
 );
 const postIds = [];
 for (let i = 0; i < 120; i++) {
-  const id = `bs${i.toString(16).padStart(14, '0')}`;
+  // Post IDs must be 16 hex chars to match SUB_POST_PATH_RE in app.js
+  // ([0-9a-f]{16}) — earlier seed used 'bs<14hex>' which 404'd every
+  // post page. 'bb' prefix keeps the smoke fixture identifiable while
+  // staying in the hex alphabet.
+  const id = `bb${i.toString(16).padStart(14, '0')}`;
   // First 60 posts ~13 months ago (older year bucket); next 60 ~5
   // months ago (newer year bucket). One-minute gaps within each
   // batch so the per-post ordering is stable. Both batches stay in
@@ -108,9 +112,9 @@ const cIns = db.prepare(
 let cN = 0;
 for (let i = 0; i < 30; i++) {
   const { id: pid, created } = postIds[i];
-  const top = `bsc${(cN++).toString(16).padStart(13, '0')}`;
+  const top = `bbc${(cN++).toString(16).padStart(13, '0')}`;
   cIns.run(top, pid, null, BOB, `bob top-level take on post ${i + 1}.`, created + 60_000);
-  const reply = `bsc${(cN++).toString(16).padStart(13, '0')}`;
+  const reply = `bbc${(cN++).toString(16).padStart(13, '0')}`;
   cIns.run(reply, pid, top, ALICE, `alice reply to bob's take.`, created + 120_000);
 }
 console.error(`seeded //bigstudio (120 posts + ${cN} comments across first 30, owner=alice).`);
