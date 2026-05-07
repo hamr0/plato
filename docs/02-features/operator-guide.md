@@ -241,6 +241,8 @@ The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/d
 
 **System events in the modlog.** Spam-regex and URLhaus auto-collapses also write a `mod_actions` row attributed to the `system` pseudonym. They appear in `/modlog` audit/inbox modes and in the public `/sub/<name>/modlog` so anyone can see when and why the system intervened. Use `/modlog?mod=system` to view only auto-actions; the `reason` column carries the pattern source or blocked host.
 
+**Sub-archive exports in the modlog (M7 followup).** Every successful sub-archive export writes a `mod_actions` row (action `export`, target_type `sub`, mod_handle = the requester) so the act of taking a copy is visible alongside collapses and bans. Renders as `archive exported · <pseudonym>` in `/sub/<name>/modlog` and the unified `/modlog`. Personal exports (kind=user) are private and do NOT appear; failed exports do not appear. Imported sub-archives carry historical export rows verbatim with the `[imported]` tag pattern. See PRD §Cross-instance imports.
+
 **Display knob: `urlDisplayMax`.** Top-level integer in `config.json` (default 30, valid range 10–200). Bare auto-linked URLs longer than this are visually truncated to `prefix...` in rendered post bodies and comments; `href` is preserved (clicks still work) and the full URL surfaces via the `title` hover. `[label](url)` markdown with explicit labels is left untouched. No security floor — purely cosmetic. Bad value throws at boot.
 
 ```jsonc

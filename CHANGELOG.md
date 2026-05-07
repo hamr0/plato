@@ -6,6 +6,92 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — M7 followup: sub-archive export surfaces in public modlog
+
+Sub-exports leaving the instance are public-facing transparency
+events; the community deserves to know who has taken a copy. Closes
+the loop on M7's "export is honest because the bytes leave" by
+making the act itself visible in the same audit log that already
+shows collapses, removals, and bans.
+
+- **Migration 021** rebuilds `mod_actions` with `'export'` added to
+  the `action` CHECK enum (existing imported_from_fingerprint
+  column from migration 020 is preserved). SQLite can't ALTER a
+  CHECK in place — same rebuild pattern as 017.
+- **`recordSubExport(db, { subName, requestedBy, now })`** in
+  `src/content/mod.js` writes a row directly without going through
+  `recordAction`'s mod-role gate. Sub-export eligibility (mod OR
+  60-day continuous subscriber) is checked at request time by
+  `canExportSub`; the modlog row is the transparency receipt.
+- **Wired into all three completion paths** in
+  `src/archive/queue.js`:
+  1. `completeJob` parent — worker finished a build.
+  2. `completeJob` sentinel fan-out — each sibling sharing the
+     artifact gets credit for its own requester.
+  3. `enqueueSubExport` same-day shared-artifact dedupe path
+     (`insertSharedCompletedRow`) — second user requesting the
+     same sub same day reuses the bytes but still gets a row.
+- **Personal exports (`kind='user'`) explicitly do NOT write a
+  modlog row.** Personal archives are private; surfacing the act
+  on a public log would leak who is leaving.
+- **Failed exports do not write a row.** The modlog records what
+  actually happened, not what was attempted.
+- **Renderer label**: `MOD_ACTION_LABELS.export = 'archive
+  exported'` in `src/web/app.js`. Imported sub-archives carry
+  historical export rows verbatim with the existing `[imported]`
+  tag pattern (M7/B5) — no extra wiring on the import side.
+- +5 tests in `test/integration/export-queue.test.js`
+  (757 → 762 green).
+
+### Added — M7 followup: bearer URL is click-to-copy on /memlog
+
+Before this change the bearer URL on `export_ready` /memlog rows
+was hidden behind the chain-of-custody `/memlog/go/<id>` redirect.
+Operators who wanted to share or paste the URL into another
+instance had no surface to copy from.
+
+- **Per-row click-to-copy button** under the snippet on every
+  `export_ready` row, rendered through the existing `.rssvp-copy`
+  styling. The time-cell still routes through `/memlog/go/<id>`
+  (download path); the new button surfaces the URL as text.
+- **Personal-archive `<details>` block** now lists the bearer URL
+  as click-to-copy when a completed personal archive is on hand,
+  mirroring the rssvp-list pattern further down the page.
+- **Cursor fix**: `.memlog-export > summary` got the same
+  `cursor: pointer` rule the rssvp summary already had.
+- Style version bumped to `?v=26`.
+
+### Added — operator-side smoke scripts
+
+- `bin/m7-smoke-real.sh` — full HTTP round-trip across two real
+  `bin/server.js` instances on free ports. Drives login via the
+  dev-stderr magic-link path, POST `/sub/<name>/export-request`,
+  the `/memlog/go/<id>` chain-of-custody resolution, POST
+  `/sub/import` on the destination, and renderer assertions
+  on `/sub/<name>` + `/sub/<name>/modlog`. Complements the
+  existing worker-pipeline smoke (`bin/m7-smoke.sh`).
+- `bin/m7-manual-smoke-up.sh` + `bin/m7-manual-smoke-down.sh` —
+  stage a persistent two-instance dev pair on :8081/:8082 with
+  realistic seed content (//lobby, //bytes, four posts, two
+  comments, one mod action) for the human eyeball pass. Idempotent
+  re-run; teardown wipes state.
+
+### Locked — M8 spec (operator surface + UX polish)
+
+Folded into the build-plan as five locked B-items: B0 light/dark
+theme toggle (CSS variables, anti-flash inline script,
+operator-overridable palettes), B1 sticky note (one mod-editable
+note per sub, max 200 chars, the *only* mod-voice slot above the
+feed — post-pinning stays permanently out per PRD), B2 `/healthz`
+endpoint, B3 local backup script (atomic SQLite `.backup` + tarball
+of posts/exports/config; rotates last N), B4 health-watch cron with
+optional email + GitHub-issue diagnostic block, B5 weekly stats
+report (handles, subs, posts, comments, votes; week-over-week
+deltas; plain-text email). All operator-side tooling is shell
+scripts and a `/healthz` JSON route — no built-in supervisor, no
+Docker images, no Prometheus exporter, no clustering. See
+`docs/01-product/build-plan.md → M8 [LOCKED]`.
+
 ### Added — M7/B6: OpenTimestamps anchor (operator-opt-in)
 
 Closes the trust loop on archives. B4's Ed25519 signature proves
