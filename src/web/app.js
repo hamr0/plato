@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { html, render, raw } from './templates.js';
+import { html, render, raw, escapeHTML } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
@@ -461,22 +461,47 @@ function subColorIndex(subName) {
   return h % 8;
 }
 
-// Returns a Map<handle, displayName>. For handles imported from another
-// instance (handles.imported_from_fingerprint non-null) the displayName
-// is full-bracket-wrapped — `[alice-tiger]` — so every render site
-// surfaces the "this user is from another instance, replies won't
-// reach them" signal automatically (M7 followup lock). The DB
-// pseudonym stays unbracketed; the bracket is render-time only.
+// Returns a Map<handle, AuthorView>. Native handles map to a plain
+// pseudonym string. Imported handles (handles.imported_from_fingerprint
+// non-null) map to a render object that:
+//   - in html`` interpolation, emits a span carrying aria-label and a
+//     trailing dagger glyph: `<span aria-label="imported author alice-tiger">alice-tiger†</span>`
+//   - in string concat / String() coercion, returns the dagger-suffixed
+//     text `alice-tiger†` (toString fallback)
+//
+// Display strip: any trailing `-N` numeric suffix is removed for imported
+// pseudonyms only — the suffix exists in the DB to satisfy the UNIQUE
+// constraint when a name collides with an existing handle, but the human
+// shouldn't see it. The strip is gated on imported_from_fingerprint
+// because native HMAC pseudonyms can legitimately end in `-2`.
+//
+// Three signals carry the same meaning, one render rule:
+//   1. visual: trailing `†`
+//   2. assistive tech: aria-label="imported author <name>"
+//   3. plain text (copy/paste): the dagger persists outside the page
+//
+// PRD §Cross-instance imports — Identity model.
 function pseudonymsByHandle(db, handles) {
   if (handles.length === 0) return new Map();
   const placeholders = handles.map(() => '?').join(',');
   const rows = db
     .prepare(`SELECT handle, pseudonym, imported_from_fingerprint FROM handles WHERE handle IN (${placeholders})`)
     .all(...handles);
-  return new Map(rows.map((r) => [
-    r.handle,
-    r.imported_from_fingerprint ? `[${r.pseudonym}]` : r.pseudonym,
-  ]));
+  return new Map(rows.map((r) => [r.handle, authorView(r.pseudonym, r.imported_from_fingerprint != null)]));
+}
+
+// Build the renderable pseudonym for a single handle. Native → string.
+// Imported → raw-html object with toString fallback so it works in both
+// html`` interpolation and string concat. Exposed because a few render
+// sites fetch a single pseudonym outside the bulk pseudonymsByHandle path.
+function authorView(canonicalPseudonym, isImported) {
+  if (!isImported) return canonicalPseudonym;
+  const display = canonicalPseudonym.replace(/-\d+$/, '');
+  const text = `${display}†`;
+  const safe = escapeHTML(display);
+  const v = raw(`<span aria-label="imported author ${safe}">${safe}†</span>`);
+  v.toString = () => text;
+  return v;
 }
 
 // PRD §Permanently out: no default catch-all sub. The legacy 'general' row
@@ -1668,10 +1693,9 @@ async function handleSubCreate(req, res, { db, auth }) {
 //   1. disabled & no mods exist → permanent read-only, member-fork only.
 //   2. disabled & mods exist     → reactivation possible, prompt the mod.
 //   3. active & approaching 30d  → 28d warning with migration framing.
-// Imported-sub banner (M7/B5). Renders only on subs whose
-// imported_from_url is non-null. The owner_handle was set to the
-// importing user at completion time, so attribution = importer's
-// pseudonym on this instance.
+// Imported-sub banner. Renders only on subs whose imported_from_url is
+// non-null. The owner_handle was set to the importing user at completion
+// time, so attribution = importer's pseudonym on this instance.
 function importedBanner({ sub, db }) {
   if (!sub.imported_from_url) return html``;
   const importedAt = sub.imported_at ? new Date(sub.imported_at).toISOString().slice(0, 10) : '';
@@ -1685,7 +1709,21 @@ function importedBanner({ sub, db }) {
     ? html` · imported by <strong>${importer}</strong>`
     : html``;
   const dateLine = importedAt ? html` on <strong>${importedAt}</strong>` : html``;
-  return html`<div class="imported-banner">[imported] this community was originally hosted at <a href="${sub.imported_from_url}">${sourceHost}</a>${dateLine}${importerLine}. posts, comments, votes, and modlog are preserved verbatim from the source archive.</div>`;
+  return html`<div class="imported-banner">[imported] from <a href="${sub.imported_from_url}">${sourceHost}</a>${dateLine}${importerLine} · historical authors marked †. posts, comments, votes, and modlog are preserved verbatim from the source archive.</div>`;
+}
+
+// Compact `[i]` chip for sub-scoped pages other than the index (post
+// detail, modlog, edit). The full banner above lives only on the index;
+// inner pages get this small persistent indicator with the source host
+// and date in its title attribute on hover. Renders empty for native subs.
+function importedSubChip({ sub }) {
+  if (!sub?.imported_from_url) return html``;
+  const importedAt = sub.imported_at ? new Date(sub.imported_at).toISOString().slice(0, 10) : '';
+  const sourceHost = (() => {
+    try { return new URL(sub.imported_from_url).host; } catch { return sub.imported_from_url; }
+  })();
+  const tip = `imported from ${sourceHost}${importedAt ? ` on ${importedAt}` : ''} · historical authors marked †`;
+  return html`<span class="imported-chip" title="${tip}">[i]</span>`;
 }
 
 function subStateBanner({ db, sub, modRole }) {
@@ -1859,7 +1897,7 @@ function renderSubEdit(req, res, { db, auth }, subName) {
   // looks the way it does.
   const roleChip = html`<p class="role-chip muted">you are: <strong>${isOwner ? 'mod' : 'co-mod'}</strong> of //${subName}${isOwner ? html`` : html` · only the mod can promote / demote / transfer; your one mod-management action here is to step down as co-mod (you keep your account)`}</p>`;
   send(res, 200, pageView({ db, currentHandle, title: html`manage //${subName}` }, html`
-    <p><a href="/sub/${subName}">← back to //${subName}</a></p>
+    <p><a href="/sub/${subName}">← back to //${subName}</a>${importedSubChip({ sub })}</p>
     ${roleChip}
     ${reactivateBlock}
     ${editForm}
@@ -2449,7 +2487,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(post.id)}`,
       ogType: 'article',
     }, html`
-      <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a></p>
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a>${importedSubChip({ sub })}</p>
       <div class="post post-page">
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
@@ -4061,7 +4099,7 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
     description: `public moderation log for ${branding.forumName} //${subName}: every soft removal, hard removal, ban, and system auto-action.`,
     canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/modlog`,
   }, html`
-    <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a> · //modlog</p>
+    <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a>${importedSubChip({ sub })} · //modlog</p>
     <h2>// modlog</h2>
     <p class="muted">every moderator action in this sub. public.</p>
     ${filterBar}

@@ -41,16 +41,14 @@ import { recordSubImport } from '../content/mod.js';
 // numeric suffix at storage time so the UNIQUE handles.pseudonym
 // constraint holds: donkey-tiger → donkey-tiger-2 → donkey-tiger-3 …
 //
-// Brackets are NOT applied at storage time — they're a render-time
-// decoration. Any handle with non-null `imported_from_fingerprint`
-// renders bracketed in the UI (post author, comment author, modlog
-// mod_handle, /memlog actor cell). See `pseudonymsByHandle` for the
-// rendering helper. The render-time approach keeps the canonical
-// pseudonym clean for URLs, search, and future @-mentions while
-// still giving every imported user a visual "don't @-reply to me,
-// I won't see it" signal everywhere they appear.
+// The render layer (pseudonymsByHandle in src/web/app.js) marks every
+// imported pseudonym with a trailing dagger (`alice-tiger†`) and an
+// aria-label, so a reader can tell that replies won't reach the
+// archived author. The numeric suffix is stripped at display time —
+// it's plumbing for the UNIQUE constraint, not user-facing. The dagger
+// is the user-facing signal.
 //
-// PRD §Cross-instance imports — Identity model (M7 followup lock).
+// PRD §Cross-instance imports — Identity model.
 //
 // Returns { value, disambiguated: boolean }. Throws only on extreme
 // collision exhaustion (>100 attempts), which is operationally

@@ -1355,6 +1355,19 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   margin-right: 0.2em;
 }
 
+/* Compact [i] chip on inner sub-scoped pages (post detail, modlog,
+   sub-edit). The full imported-banner only renders on the sub index;
+   this chip carries the same provenance via its title attribute on
+   hover so the signal persists across every page within an imported
+   sub. Same dim palette as imported-banner. */
+.imported-chip {
+  color: var(--text-dim);
+  font-size: 0.85em;
+  font-family: monospace;
+  margin-left: 0.3em;
+  cursor: help;
+}
+
 /* Two-tab nav for /sub/create (create new / import from URL). M7/B5. */
 .sub-create-tabs { margin: 0.5rem 0 1rem; display: flex; gap: 0.4rem; }
 .sub-create-tabs a {

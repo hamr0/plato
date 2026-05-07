@@ -6,6 +6,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — M7 followup: imported authors marked with † + aria-label, persistent [i] sub chip
+
+Reverts the bracket-everywhere render lock from earlier this session
+in favor of a more accessible, less typographically loud signal. The
+worry the bracket was solving — a reader replying to an archived
+author whose reply will never arrive — is now carried by three
+parallel signals on every imported pseudonym, all driven from one
+render rule:
+
+1. **Visual.** A trailing dagger glyph: `alice-tiger†`. Historical
+   typography convention for "no longer with us." Survives copy/paste
+   and plain-text contexts (RSS feeds, terminals).
+2. **Assistive tech.** `aria-label="imported author alice-tiger"` on
+   the wrapping span. Screen readers announce "imported author
+   alice-tiger" instead of speaking the dagger glyph literally.
+3. **Display strip.** Any trailing `-N` numeric suffix (collision
+   plumbing for the UNIQUE constraint) is stripped at render time
+   *only* for imported handles, so a reader sees `alice-tiger†` not
+   `alice-tiger-2†`. Native HMAC pseudonyms ending in `-N` are
+   unaffected — the strip is gated on `imported_from_fingerprint`.
+
+`pseudonymsByHandle` now returns an `AuthorView` value that's
+either a plain string (native) or a raw-html object with a
+`toString` fallback (imported). Templates interpolate the html;
+string concat (`mod=${value}`) and `escapeXml(value)` get the
+dagger-suffixed text. No call-site changes across 23 render points.
+
+- **Imported-banner copy** on `/sub/<name>` index changed to
+  `[imported] from <host> on <date> · imported by <pseudo> · historical authors marked †. posts, comments, votes, and modlog are preserved verbatim from the source archive.`
+- **Compact `[i]` chip** added to inner sub-scoped pages (post
+  detail, public modlog, sub-edit). `title` carries
+  `imported from <host> on <date> · historical authors marked †`
+  on hover. CSS class `.imported-chip` follows the dim
+  `imported-banner` palette — informational, not warning.
+- **`pseudonymForImport`** unchanged — `-2`/`-3`/… collision
+  suffixes were already correct under the previous lock.
+- Render-time bracket wrap (`[alice-tiger]`) and the
+  bracket-on-modlog-render assertion are removed. Tests rewritten
+  to check for the dagger + aria-label + chip presence + display
+  strip + native-not-stripped guard. +5 tests in
+  `test/integration/import-routes.test.js` (763 → 768 green).
+
 ### Added — M7 followup: sub-archive import surfaces in public modlog
 
 Parallel to the export-side modlog row shipped earlier this session.
