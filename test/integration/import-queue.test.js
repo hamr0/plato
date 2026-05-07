@@ -108,6 +108,22 @@ test('completeImport: stamps imported_sub_name + completed_at; fingerprints idem
   );
 });
 
+test('failImport: terminal:true short-circuits retry path on attempt 1', () => {
+  // Errors guaranteed to recur (dedupe collision: same source archive,
+  // same exported_at) shouldn't burn three retry slots. Worker tags
+  // the error with err.terminal=true; the queue forces failed_at now.
+  const db = memDb();
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  const job = enqueueSubImport(db, { sourceUrl: SOURCE_URL, requestedBy: ALICE });
+  claimNextPendingImport(db);
+  const r = failImport(db, job.id, { errorMessage: 'already imported as //x', terminal: true });
+  assert.equal(r, 'failed');
+  const row = db.prepare('SELECT failed_at, retry_count, error_message FROM import_jobs WHERE id = ?').get(job.id);
+  assert.ok(row.failed_at, 'terminal:true sets failed_at on attempt 1');
+  assert.equal(row.retry_count, 1, 'retry_count still reflects this attempt; we just skipped the requeue');
+  assert.match(row.error_message, /already imported/);
+});
+
 test('failImport: re-queues until MAX_ATTEMPTS, then terminal-fails', () => {
   const db = memDb();
   ensureHandle(db, ALICE, 'alice-pseudo');

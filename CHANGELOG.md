@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — import dedupe collision now fails fast instead of retrying
+
+When a sub-import URL points at an archive that's already been imported
+on this instance (same `(source_sub, source_exported_at)` key), the
+worker used to swallow the dedupe error and re-queue the job up to
+three times. Same source archive, same lock — three wasted ticks
+before the user saw the failure in /memlog.
+
+Dedupe collisions now mark the import job terminal-failed on the
+first attempt. The `import_failed` notification fires immediately
+("import failed: already imported as //x on YYYY-MM-DD" — no
+"after 3 attempts" wording). `failImport(db, jobId, { terminal: true })`
+is the new escape hatch for errors guaranteed to recur on retry; the
+worker tags the dedupe error and the queue forces `failed_at` now.
+
 ### Added — light/dark theme toggle (M8/B0)
 
 A two-state theme button now sits last in the header right-cluster.
@@ -13,7 +28,22 @@ Default behavior follows the OS hint via `@media (prefers-color-scheme:
 light)`; once the user clicks, that choice is sticky in `localStorage`
 and the OS hint stops applying for that browser. An anti-flash inline
 `<script>` in `<head>` stamps the saved `data-theme` on `<html>` before
-first paint so reloads don't strobe.
+first paint so reloads don't strobe. Without JS the toggle button is
+hidden via CSS (`html:not(.has-js) .theme-toggle`), so users on no-JS
+browsers get prefers-color-scheme behavior without dead chrome.
+
+Active defaults: dark = **tokyo-night** (`#1a1b26` bg, `#c0caf5` text —
+modern deep navy with soft blues, settled on after eyeballing nine
+candidates side-by-side), light = **zinc-cool** (`#eef0f2` bg,
+`#202428` text — soft cool gray, lowest brightness of the light
+options for long sessions).
+
+`style.css` ships drop-in palette presets — copy any commented
+`:root { ... }` block over the active one and reload, no config touch
+needed. **Dark presets** (9): tokyo-night, github-dark, warm-amber,
+cool-cyan, mocha-purple, monokai-pro, nord, gruvbox-dark, night-owl.
+**Light presets** (5): zinc-cool, github-light, notion-cream,
+solarized-light, stone-warm.
 
 Operators can override the light palette the same way they already
 override the dark palette — `branding.colors` (existing) sets `--up`
@@ -21,13 +51,13 @@ and `--down` for dark; the new `branding.colorsLight` sets the same
 variables for light. Both are validated by the same
 `resolveBrandingColors` (CSS-injection guard, ASCII-clean values),
 emitted as inline `<style>` blocks scoped to `:root`,
-`[data-theme="light"]:root`, and the media query. Without JS the
-toggle button is hidden via CSS (`html:not(.has-js) .theme-toggle`),
-so users on no-JS browsers get prefers-color-scheme behavior without
-dead chrome.
+`[data-theme="light"]:root`, and the media query.
 
-Added `src/web/static/theme.js` (~30 LOC, defer-loaded) and a paper-
-light palette block in `src/web/static/style.css`. No schema change.
+Added `src/web/static/theme.js` (~30 LOC, defer-loaded). The
+sub-create / sub-import submit buttons (`.sub-create-form button`)
+were also restyled as pill chips matching the create/import tab strip
+above them — the `/sub/create` action row reads as one consistent
+button family. No schema change.
 
 ### Added — sub-archive paginated reader mirrors personal archive
 

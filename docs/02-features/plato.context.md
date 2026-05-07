@@ -129,7 +129,7 @@ Three categories. Pick the right effort tier before changing.
 
 These are explicit operator surfaces. Changing them is a one-line edit + restart, and the design assumes you will.
 
-- **Color tokens.** Every color in the UI is a `--*` CSS variable on `:root` in `style.css`. Re-skinning is a search-and-replace: `--bg`, `--text`, `--accent`, `--accent-warm`, `--border`, `--text-dim`. Vote arrows, links, logo dots, mod-button hover, modlog accent rows all re-skin together. **v1 requirement.**
+- **Color tokens.** Every color in the UI is a `--*` CSS variable on `:root` in `style.css`. Re-skinning is a search-and-replace: `--bg`, `--text`, `--accent`, `--accent-warm`, `--border`, `--text-dim`. Vote arrows, links, logo dots, mod-button hover, modlog accent rows all re-skin together. **v1 requirement.** `style.css` also ships nine drop-in dark presets and five light presets — `tokyo-night` (active dark default), `github-dark`, `warm-amber`, `cool-cyan`, `mocha-purple`, `monokai-pro`, `nord`, `gruvbox-dark`, `night-owl`; `zinc-cool` (active light default), `github-light`, `notion-cream`, `solarized-light`, `stone-warm`. Each is a single commented `:root { ... }` line at the top of `style.css`; copy any block over the active one and reload. The light presets sit under `[data-theme="light"]:root` plus a `@media (prefers-color-scheme: light)` mirror — both blocks must change together.
 - **Reserved sub names.** Add to `RESERVED_SUB_NAMES` to block names that collide with new top-level routes you've added.
 - **Disposable-email blocklist.** `disposable-domains.txt`, one domain per line. Operator owns the file; M5 adds a cron sync to the upstream community-maintained list.
 - **Auto-uncollapse thresholds (per sub).** Set on sub creation via the form; floors are enforced (post ≥ 50, comment ≥ 20). Higher means harder for the community to overrule a soft-removal.
@@ -257,7 +257,7 @@ The `operator` block is metadata for cron tooling (see [`cron-jobs.md`](cron-job
 
 Spam knobs are forum-wide on purpose: per-sub overrides invite "soft sub" loopholes. Per-sub config is reserved for non-spam decisions (auto-uncollapse thresholds, flairs, sensitive flag) and one moderation lever (`flag_threshold`, floor 3 — operators can raise but not lower).
 
-The `branding.colors` section of `config.json` overrides vote-arrow CSS variables at boot:
+The `branding.colors` (dark) and `branding.colorsLight` (light) sections of `config.json` override vote-arrow CSS variables at boot. Each section takes the same `{up, down}` shape and is independently optional:
 
 ```jsonc
 {
@@ -265,12 +265,15 @@ The `branding.colors` section of `config.json` overrides vote-arrow CSS variable
     "forumName": "terribic",
     "tagline":   "terrific or terrible",
     "hostedBy":  "@tedvdb",
-    "colors": { "up": "#7fd962", "down": "#73d0ff" }
+    "colors":      { "up": "#7fd962", "down": "#73d0ff" },
+    "colorsLight": { "up": "#117833", "down": "#0066cc" }
   }
 }
 ```
 
-`up` overrides `--up` (positive score + voted-up arrow); `down` overrides `--down` (negative score number + voted-down arrow). Any CSS color string works (hex, `rgb()`, named); the same injection guard as flair colors rejects `;{}<>"'`.
+`colors.up` overrides `--up` and `colors.down` overrides `--down` under `:root` (dark default). `colorsLight` overrides the same two variables under `[data-theme="light"]:root` plus the `@media (prefers-color-scheme: light)` block. Any CSS color string works (hex, `rgb()`, named); the same injection guard as flair colors rejects `;{}<>"'`. Bad value throws at boot with a field-name error — `branding.colors.up must be a string` vs `branding.colorsLight.down contains invalid characters` so the operator knows which palette failed.
+
+The user-facing theme toggle (M8/B0) sits last in the header right-cluster. Two-state, no OS-default once clicked: a click stamps `data-theme="light"` or `"dark"` on `<html>` and persists in `localStorage.theme`. Anti-flash inline `<script>` in `<head>` reads the saved value and applies it before first paint so reloads don't strobe. Without JS the button hides itself (`html:not(.has-js) .theme-toggle`) so no-JS users get the OS-hint behavior with no dead chrome.
 
 `spam-patterns.txt` is the operator's per-instance regex set, one line per pattern, `#` comments, blank-line tolerant. Bad regex skips with a stderr warning. Restart picks up edits.
 

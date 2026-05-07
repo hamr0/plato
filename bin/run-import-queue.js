@@ -107,7 +107,11 @@ try {
     sourceExportedAt: parsed.manifest.exported_at,
   });
   if (prior) {
-    throw new Error(`already imported as //${prior.imported_sub_name} on ${new Date(prior.completed_at).toISOString().slice(0, 10)}`);
+    const dedupeErr = new Error(`already imported as //${prior.imported_sub_name} on ${new Date(prior.completed_at).toISOString().slice(0, 10)}`);
+    // Skip the retry path — same source archive will hit the same lock
+    // every attempt. Memlog row fires now instead of after 3 wasted ticks.
+    dedupeErr.terminal = true;
+    throw dedupeErr;
   }
 
   // Transaction so partial imports don't leave the DB in a half-state.
@@ -142,15 +146,18 @@ try {
   });
   console.log(`[import-queue] done job=${job.id} sub=//${result.subName} posts=${result.counts.posts} comments=${result.counts.comments} bracketed=${result.counts.bracketed}`);
 } catch (err) {
-  const result = failImport(db, job.id, { errorMessage: err.message });
+  const result = failImport(db, job.id, { errorMessage: err.message, terminal: err.terminal === true });
   if (result === 'failed') {
+    const snippet = err.terminal === true
+      ? `import failed: ${err.message}. you can request a new one anytime.`
+      : `import failed after 3 attempts: ${err.message}. you can request a new one anytime.`;
     recordNotification(db, {
       recipientHandle: job.requested_by,
       kind: 'import_failed',
       subName: null,
       targetType: 'import',
       targetId: job.id,
-      snippet: `import failed after 3 attempts: ${err.message}. you can request a new one anytime.`,
+      snippet,
     });
   }
   console.error(`[import-queue] ${result} job=${job.id} attempt=${job.retry_count}: ${err.message}`);

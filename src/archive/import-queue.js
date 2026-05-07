@@ -140,10 +140,15 @@ export function completeImport(db, jobId, { importedSubName, now = Date.now() })
 
 // Record a failure. retry_count < MAX_ATTEMPTS → re-queue (clear
 // started_at). Otherwise terminal-fail. Returns 'requeued' | 'failed'.
-export function failImport(db, jobId, { errorMessage, now = Date.now() }) {
+//
+// `terminal: true` short-circuits the retry path and writes failed_at
+// immediately. Use this for errors that are guaranteed to recur on
+// retry (dedupe collision: same source archive, same exported_at,
+// already imported here — three attempts will hit the same lock).
+export function failImport(db, jobId, { errorMessage, terminal = false, now = Date.now() }) {
   const job = db.prepare('SELECT retry_count FROM import_jobs WHERE id = ?').get(jobId);
   if (!job) throw new Error(`failImport: job ${jobId} not found`);
-  if (job.retry_count < MAX_ATTEMPTS) {
+  if (!terminal && job.retry_count < MAX_ATTEMPTS) {
     db.prepare(
       `UPDATE import_jobs SET started_at = NULL, error_message = ? WHERE id = ?`
     ).run(errorMessage ?? null, jobId);

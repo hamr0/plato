@@ -72,7 +72,31 @@ Three categories. Pick the right tier before deciding.
 
 These are the operator surfaces. The project assumes you'll touch them.
 
-**Colors.** Open `src/web/static/style.css`, find the `:root` block at the top. Every color in the forum is a `--variable`. Change `--accent: #58a6ff` to your brand color and reload — vote arrows, links, logo dots, mod-button hover, the modlog accent rows all switch together. Forkable color tokens are a v1 commitment, not a "we might do this someday" — every PR that adds a new color has to add a variable, not a hex literal.
+**Colors.** Open `src/web/static/style.css`, find the `:root` block at the top. Every color in the forum is a `--variable`. Change `--accent: #7aa2f7` to your brand color and reload — vote arrows, links, logo dots, mod-button hover, the modlog accent rows all switch together. Forkable color tokens are a v1 commitment, not a "we might do this someday" — every PR that adds a new color has to add a variable, not a hex literal.
+
+**Built-in palette presets (M8/B0).** `style.css` ships nine drop-in dark palettes and five light palettes — each is one commented `:root { ... }` line in the file. Copy any block over the active one and reload, no config touch needed.
+
+| Preset | Bg | Vibe |
+|---|---|---|
+| **tokyo-night** *(active dark default)* | `#1a1b26` | modern deep navy, soft blues |
+| github-dark | `#0d1117` | original plato default; cool charcoal, blue accent, industry-familiar |
+| warm-amber (ayu-dark) | `#1a1a1a` | amber accent; mailing-list feel |
+| cool-cyan | `#0f1419` | deep ocean, cyan accent |
+| mocha-purple (catppuccin) | `#1e1e2e` | purple accent, higher contrast for long reads |
+| monokai-pro | `#2d2a2e` | vibrant accents on warm dark bg, code-editor aesthetic |
+| nord | `#2e3440` | frosty arctic, calm cool blues, lower vibrancy |
+| gruvbox-dark | `#282828` | retro warm earth, vim/terminal classic, yellow-amber accent |
+| night-owl | `#011627` | cobalt-deep navy; highest accent contrast |
+
+| Preset | Bg | Vibe |
+|---|---|---|
+| **zinc-cool** *(active light default)* | `#eef0f2` | soft cool gray, lowest brightness, terminal-honest |
+| github-light | `#f6f8fa` | brightest neutral cool gray; industry-familiar |
+| notion-cream | `#f9f7f0` | warm off-white, ink-feel |
+| solarized-light | `#fdf6e3` | warm cream, paper-feel |
+| stone-warm | `#f5f4ed` | slight warm gray, less yellow than solarized |
+
+The light blocks live under `[data-theme="light"]:root` plus a `@media (prefers-color-scheme: light)` mirror — both must change together if you swap the default. Look for the labelled comment line above each block.
 
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
@@ -85,7 +109,8 @@ These are the operator surfaces. The project assumes you'll touch them.
 | `branding.hostedBy` | optional | global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when unset), `/about` opening sentence (falls back to `@<forumName>` when unset) |
 | `branding.feedbackEmail` | optional | global footer link (`feedback · about · modlog`), `/about` "questions or feedback" link — both `mailto:`, address hidden behind link text |
 | `branding.rules` | optional, ≤4 lines (defaults ship if omitted) | `/about` rules section, footer of every magic-link email (single source of truth — knowless mail-footer cap, no URL schemes, no bare domains) |
-| `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables — vote arrows, score color, "you voted here" memory shade |
+| `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables under `:root` (dark theme) — vote arrows, score color, "you voted here" memory shade |
+| `branding.colorsLight.up` / `branding.colorsLight.down` | optional | same `--up` / `--down` under `[data-theme="light"]:root` + `@media (prefers-color-scheme: light)` (M8/B0 light-theme toggle) |
 | `branding.metaDescription` | optional | `<meta name="description">` and `og:description` for `/`, link-unfurls (Slack/Signal/iMessage/Mastodon). Per-page descriptions for `/about`, `/modlog`, `/subs`, `/sub/<name>`, `/sub/<name>/post/<id>` are auto-derived and not operator-tunable |
 | `urlDisplayMax` | optional, default 30 | bare-URL truncation ceiling in rendered post + comment bodies (`href` always preserved; full URL on hover) |
 | `feedPageSize` | optional, default 50 | items per page on the home feed and on each sub feed before the `← prev | page N | next →` footer |
@@ -102,7 +127,8 @@ The forum process never reads the `operator.*` block — it exists purely for th
     "forumName": "plato",
     "tagline": "a forum that lives at one URL",
     "hostedBy": "@tedvdb",
-    "colors": { "up": "#3fb950", "down": "#58a6ff" }
+    "colors":      { "up": "#9ece6a", "down": "#7aa2f7" },
+    "colorsLight": { "up": "#117833", "down": "#0066cc" }
   }
 }
 ```
@@ -110,8 +136,9 @@ The forum process never reads the `operator.*` block — it exists purely for th
 - `forumName` shows in the top wordmark, footer wordmark, page title, and the "check your email" header.
 - `tagline` shows as the subtitle on the home page.
 - `hostedBy` (optional) renders in **two** places: the global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when empty), and the opening sentence of `/about` (`this is a <forumName> instance, hosted by <hostedBy>`). When unset on `/about`, falls back to `@<forumName>`.
-- `colors.up` (optional) overrides `--up` — positive score color and the voted-up arrow's "you voted here" memory shade.
-- `colors.down` (optional) overrides `--down` — negative score color and the voted-down arrow's "you voted here" memory shade.
+- `colors.up` (optional) overrides `--up` under `:root` (dark theme) — positive score color and the voted-up arrow's "you voted here" memory shade.
+- `colors.down` (optional) overrides `--down` under `:root` (dark theme) — negative score color and the voted-down arrow's "you voted here" memory shade.
+- `colorsLight.up` / `colorsLight.down` (optional, M8/B0) override the same two variables under `[data-theme="light"]:root` and the `@media (prefers-color-scheme: light)` block. Independent of `colors`; either or both may be set.
 
 Color values accept any CSS color string (hex `#fff`, rgb `rgb(127, 217, 98)`, named `tomato`). Boot-time validation rejects any string containing `;{}<>"'` to block CSS-injection. Bad config throws at boot, not on first user request.
 

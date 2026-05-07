@@ -19,20 +19,23 @@
  *     query. Operator-supplied colorsLight values land via an
  *     inline <style> in <head> alongside the existing colors.
  * ============================================================ */
+/* DEFAULT: tokyo-night — modern deep navy with soft blues. Sits between
+ * github-dark and mocha-purple in saturation. Other presets are below
+ * the light block; copy any one-line ":root { ... }" block over this
+ * one to swap. */
 :root {
-  /* Surfaces */
-  --bg: #0d1117;
-  --bg-soft: #161b22;
-  --border: #30363d;
+  --bg: #1a1b26;
+  --bg-soft: #24283b;
+  --border: #414868;
   /* Type */
-  --text: #c9d1d9;
-  --text-dim: #8b949e;
+  --text: #c0caf5;
+  --text-dim: #a9b1d6;
   /* Accents */
-  --accent: #58a6ff;       /* primary — links, mark, active states */
-  --accent-warm: #d29922;  /* secondary — reserved for flair pills, NSFW badges, mod highlights */
-  /* Vote signal — distinct from accent so the up/down sense is obvious at a glance */
-  --up: #3fb950;           /* upvote active — affirming green */
-  --down: #58a6ff;         /* downvote active — blue, matches the accent family */
+  --accent: #7aa2f7;       /* primary — links, mark, active states */
+  --accent-warm: #ff9e64;  /* secondary — flair pills, NSFW badges, mod highlights */
+  /* Vote signal — distinct from accent so the up/down sense is obvious */
+  --up: #9ece6a;
+  --down: #7aa2f7;
   --flair-text: #ffffff;   /* flair pill text — light by default; owners pick any background */
 }
 
@@ -98,7 +101,7 @@
  * ------------------------------------------------------------ */
 
 /* :root { --bg:#0d1117; --bg-soft:#161b22; --border:#30363d; --text:#c9d1d9; --text-dim:#8b949e; --accent:#58a6ff; --accent-warm:#d29922; --up:#3fb950; --down:#58a6ff; } */
-/* default — github-dark, blue accent (above)                                                                                                                  */
+/* github-dark — original plato default. Cool charcoal, blue accent. Conservative, industry-familiar.                                                            */
 
 /* :root { --bg:#1a1a1a; --bg-soft:#222;    --border:#333;    --text:#e6e1cf; --text-dim:#a0998c; --accent:#ffb454; --accent-warm:#ff8f40; --up:#7fd962; --down:#73d0ff; } */
 /* warm-amber — ayu-dark, amber accent. Good for mailing-list-style discussion.                                                                                */
@@ -117,9 +120,6 @@
 
 /* :root { --bg:#282828; --bg-soft:#3c3836; --border:#504945; --text:#ebdbb2; --text-dim:#a89984; --accent:#83a598; --accent-warm:#d79921; --up:#b8bb26; --down:#83a598; } */
 /* gruvbox-dark — retro warm earth tones, popular among vim/terminal users. Yellow-amber accent + muted greens.                                                  */
-
-/* :root { --bg:#1a1b26; --bg-soft:#24283b; --border:#414868; --text:#c0caf5; --text-dim:#a9b1d6; --accent:#7aa2f7; --accent-warm:#ff9e64; --up:#9ece6a; --down:#7aa2f7; } */
-/* tokyo-night — modern deep navy with soft blues. Sits between github-dark and mocha-purple in saturation.                                                      */
 
 /* :root { --bg:#011627; --bg-soft:#0b2942; --border:#1d3b53; --text:#d6deeb; --text-dim:#7e8aa0; --accent:#82aaff; --accent-warm:#ffcb6b; --up:#a6e22e; --down:#82aaff; } */
 /* night-owl — cobalt-deep blue, popular for streamers/recordings. Highest contrast accent against the deepest bg.                                               */
