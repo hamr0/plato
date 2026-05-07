@@ -27,6 +27,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 function memDb() {
   const db = openDb(':memory:');
   applyAllMigrations(db);
+  // Common test fixtures: handles + subs that completeJob's mod_actions
+  // FK insert (M7 followup: sub-archive exports surface in /modlog) needs
+  // to find. Production code paths always have these; isolating the queue
+  // layer in tests doesn't, so seed defaults here.
+  const ins = (sql, ...args) => db.prepare(sql).run(...args);
+  ins('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)', 'h1', 'h-one', 0);
+  ins('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)', 'h2', 'h-two', 0);
+  ins('INSERT INTO subs (name, description, owner_handle, created_at) VALUES (?, ?, ?, ?)', 'lobby', 'test sub', 'h1', 0);
+  ins('INSERT INTO subs (name, description, owner_handle, created_at) VALUES (?, ?, ?, ?)', 'a', 'test sub a', 'h1', 0);
+  ins('INSERT INTO subs (name, description, owner_handle, created_at) VALUES (?, ?, ?, ?)', 'b', 'test sub b', 'h1', 0);
   return db;
 }
 
@@ -211,6 +221,85 @@ test('pruneExpiredJobs: deletes expired rows + reports filenames', () => {
   const filenames = pruneExpiredJobs(db, { now: ts(3) + DOWNLOAD_TTL_MS.sub + 1 });
   assert.deepEqual(filenames, ['expired.tar.gz']);
   assert.equal(db.prepare('SELECT COUNT(*) AS c FROM export_jobs').get().c, 0);
+});
+
+// --- M7 followup: sub-archive completion writes a public-modlog row ---
+
+test('completeJob: kind=sub writes a public-modlog row crediting the requester', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  completeJob(db, job.id, {
+    archiveFilename: 'plato-export-lobby-fixture.tar.gz',
+    archiveSizeBytes: 100, downloadToken: newDownloadToken(), now: ts(3),
+  });
+  const rows = db.prepare(
+    `SELECT mod_handle, action, target_type, target_id, sub_name, created_at
+     FROM mod_actions WHERE action = 'export'`
+  ).all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].mod_handle, 'h1');
+  assert.equal(rows[0].sub_name, 'lobby');
+  assert.equal(rows[0].target_type, 'sub');
+  assert.equal(rows[0].target_id, 'lobby');
+  assert.equal(rows[0].created_at, ts(3));
+});
+
+test('completeJob: kind=user does NOT write a modlog row (personal exports are private)', () => {
+  const db = memDb();
+  enqueueUserExport(db, { requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  completeJob(db, job.id, {
+    archiveFilename: 'plato-export-user-fixture.tar.gz',
+    archiveSizeBytes: 100, downloadToken: newDownloadToken(), now: ts(3),
+  });
+  const exportRows = db.prepare(`SELECT 1 FROM mod_actions WHERE action = 'export'`).all();
+  assert.equal(exportRows.length, 0);
+});
+
+test('completeJob: failed sub-export does NOT write a modlog row', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(1) });
+  for (let i = 0; i < MAX_ATTEMPTS; i++) {
+    const j = claimNextPendingJob(db, { now: ts(2 + i * 2) });
+    failJob(db, j.id, { errorMessage: 'boom', now: ts(3 + i * 2) });
+  }
+  const exportRows = db.prepare(`SELECT 1 FROM mod_actions WHERE action = 'export'`).all();
+  assert.equal(exportRows.length, 0);
+});
+
+test('completeJob: sentinel siblings each get their own modlog row', () => {
+  const db = memDb();
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  // h2 piles on while h1 is in-flight → sentinel sibling.
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h2', now: ts(3) });
+  completeJob(db, job.id, {
+    archiveFilename: 'plato-export-lobby-fixture.tar.gz',
+    archiveSizeBytes: 100, downloadToken: newDownloadToken(), now: ts(4),
+  });
+  const rows = db.prepare(
+    `SELECT mod_handle FROM mod_actions WHERE action = 'export' ORDER BY mod_handle`
+  ).all();
+  assert.deepEqual(rows.map((r) => r.mod_handle), ['h1', 'h2']);
+});
+
+test('enqueueSubExport: same-day completed-non-expired path writes a modlog row for the new requester', () => {
+  const db = memDb();
+  // First request completes.
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h1', now: ts(1) });
+  const job = claimNextPendingJob(db, { now: ts(2) });
+  completeJob(db, job.id, {
+    archiveFilename: 'plato-export-lobby-fixture.tar.gz',
+    archiveSizeBytes: 100, downloadToken: newDownloadToken(), now: ts(3),
+  });
+  // Second user requests same sub same window → reuses bytes via
+  // insertSharedCompletedRow; should still credit h2 in the modlog.
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: 'h2', now: ts(4) });
+  const rows = db.prepare(
+    `SELECT mod_handle FROM mod_actions WHERE action = 'export' ORDER BY created_at`
+  ).all();
+  assert.deepEqual(rows.map((r) => r.mod_handle), ['h1', 'h2']);
 });
 
 // --- enqueueUserExport ---

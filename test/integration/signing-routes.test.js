@@ -123,6 +123,11 @@ function seedSignedExport(db, exportsDir, { handle, subName, body, now = Date.no
   const filename = `plato-export-${subName}-fixture.tar.gz`;
   writeFileSync(join(exportsDir, filename), body);
   writeFileSync(join(exportsDir, `${filename}.sig`), sig);
+  // completeJob writes a public-modlog row crediting the requester
+  // (M7 followup); ensure the handle FK exists.
+  db.prepare(
+    'INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)'
+  ).run(handle, `pseudo-${handle.slice(0, 8)}`, now);
   const job = enqueueSubExport(db, { subName, requestedBy: handle, now: now - 1000 });
   const token = newDownloadToken();
   completeJob(db, job.id, {

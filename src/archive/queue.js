@@ -23,6 +23,7 @@
 // works before the row + on-disk file are pruned.
 
 import { randomBytes } from 'node:crypto';
+import { recordSubExport } from '../content/mod.js';
 
 const ID_BYTES = 8;        // → 16-hex job id
 const TOKEN_BYTES = 32;    // → 64-hex download token
@@ -112,6 +113,10 @@ function insertSharedCompletedRow(db, { kind, scope, requestedBy, parent, now })
     now, now,
     parent.archive_filename, parent.archive_size_bytes, token, parent.expires_at,
   );
+  // Sub-exports get a public-modlog row; user-exports don't (private).
+  if (kind === 'sub') {
+    recordSubExport(db, { subName: scope, requestedBy, now });
+  }
   return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
 }
 
@@ -250,7 +255,7 @@ export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, down
   if (typeof downloadToken !== 'string' || !/^[0-9a-f]{64}$/.test(downloadToken)) {
     throw new Error('completeJob: downloadToken must be 64-char hex');
   }
-  const row = db.prepare('SELECT kind, scope FROM export_jobs WHERE id = ?').get(jobId);
+  const row = db.prepare('SELECT kind, scope, requested_by FROM export_jobs WHERE id = ?').get(jobId);
   if (!row) throw new Error(`completeJob: job ${jobId} not found`);
   const ttl = DOWNLOAD_TTL_MS[row.kind];
   if (ttl == null) throw new Error(`completeJob: unknown kind ${row.kind}`);
@@ -264,10 +269,13 @@ export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, down
               download_token = ?, expires_at = ?
         WHERE id = ?`
     ).run(now, archiveFilename, archiveSizeBytes, downloadToken, expiresAt, jobId);
+    if (row.kind === 'sub') {
+      recordSubExport(db, { subName: row.scope, requestedBy: row.requested_by, now });
+    }
 
     // Fan out to sentinel siblings sharing this artifact.
     const siblings = db.prepare(
-      `SELECT id FROM export_jobs
+      `SELECT id, requested_by FROM export_jobs
         WHERE kind = ? AND scope = ?
           AND started_at = ?
           AND completed_at IS NULL AND failed_at IS NULL`
@@ -284,6 +292,9 @@ export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, down
         now, now, archiveFilename, archiveSizeBytes,
         newDownloadToken(), expiresAt, s.id,
       );
+      if (row.kind === 'sub') {
+        recordSubExport(db, { subName: row.scope, requestedBy: s.requested_by, now });
+      }
     }
     db.exec('COMMIT');
   } catch (err) {

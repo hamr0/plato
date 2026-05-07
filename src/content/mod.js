@@ -225,6 +225,31 @@ export function recordAction(db, {
   return { id };
 }
 
+// Public-modlog audit row for a completed sub-archive export. Bypasses
+// the recordAction mod-role gate because exports can be requested by
+// any tenured subscriber, not only mods — the eligibility check at
+// canExportSub is what authorizes the action; the modlog row is the
+// transparency receipt. No state flip; pure audit.
+//
+// Called from the queue layer once per completed export (parent +
+// each sentinel sibling sharing the artifact + same-day dedupe row),
+// so co-requesters of the same archive each get their own credit.
+export function recordSubExport(db, { subName, requestedBy, now = Date.now() }) {
+  if (typeof subName !== 'string' || subName.length === 0) {
+    throw new Error('recordSubExport: subName required');
+  }
+  if (typeof requestedBy !== 'string' || requestedBy.length === 0) {
+    throw new Error('recordSubExport: requestedBy required');
+  }
+  const id = newId();
+  db.prepare(
+    `INSERT INTO mod_actions
+       (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+     VALUES (?, ?, ?, 'export', 'sub', ?, NULL, ?)`
+  ).run(id, subName, requestedBy, subName, now);
+  return { id };
+}
+
 export function listModActions(db, subName, { limit = 100, offset = 0 } = {}) {
   return db.prepare(
     `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint

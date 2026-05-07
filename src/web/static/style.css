@@ -1069,8 +1069,10 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .rssvp-link { color: var(--accent); cursor: pointer; }
 .rssvp-link:hover { text-decoration: underline dotted; }
 .rssvp-link.rssvp-copied { color: var(--up); text-decoration: none; }
-.memlog-feeds > summary { cursor: pointer; padding: 0.25rem 0; }
-.memlog-feeds > summary:hover .rssvp-mark { text-decoration: underline dotted; }
+.memlog-feeds > summary,
+.memlog-export > summary { cursor: pointer; padding: 0.25rem 0; }
+.memlog-feeds > summary:hover .rssvp-mark,
+.memlog-export > summary:hover .rssvp-mark { text-decoration: underline dotted; }
 .rssvp-list { list-style: none; padding-left: 0; margin: 0.5rem 0; }
 .rssvp-list li { margin: 0.35rem 0; }
 .rssvp-copy {

@@ -135,7 +135,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=25">
+<link rel="stylesheet" href="/static/style.css?v=26">
 ${feedTag}
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
@@ -341,6 +341,7 @@ const MOD_ACTION_LABELS = {
   transfer_owner:            'transferred mod role',
   auto_disable_inactivity:   'auto-disabled (mod inactivity)',
   manual_reactivate:         'reactivated',
+  export:                    'archive exported',
 };
 
 // Modlog cell with the `[imported]` prefix when the row was inserted by
@@ -3749,7 +3750,15 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
           const typeLabel = isActivity ? 'actv' : 'ntfy';
           const fromName = isActivity ? '—' : (n.actor_handle ? (pseudonyms.get(n.actor_handle) ?? n.actor_handle.slice(0, 8)) : 'system');
           const where = n.sub_name ? html`<a class="sub-link sub-${subColorIndex(n.sub_name)}" href="/sub/${n.sub_name}">//${n.sub_name}</a>` : html`—`;
-          const snippet = n.snippet ?? '';
+          // For export_ready rows, the bearer URL is the thing the user
+          // wants to share/paste into another instance's /sub/import.
+          // The time-cell already routes to it via /memlog/go (download
+          // path); a click-to-copy button under the snippet surfaces it
+          // as a visible, copyable string the same way RSS feeds do.
+          const copyLink = n.kind === 'export_ready' && link
+            ? html`<div class="memlog-copy-row"><button type="button" class="rssvp-copy" data-copy="${siteMeta.baseUrl}${link}" title="click to copy"><code>${siteMeta.baseUrl}${link}</code></button></div>`
+            : html``;
+          const snippet = html`${n.snippet ?? ''}${copyLink}`;
           const rowCls = n.read_at ? 'memlog-row-read' : '';
           // Activity rows have post/comment ids, not notification ids —
           // route directly via memlogTargetLink, no read-state to mark.
@@ -3817,11 +3826,16 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
 function personalExportBlock({ db, handle, queuedHint }) {
   const latest = findLatestJob(db, { kind: 'user', scope: handle, requestedBy: handle });
   let pill;
+  let readyUrl = null;
+  let readyExpDate = null;
   let blurb = 'one tarball with everything you authored on this instance: posts, comments, votes you cast, your subscriptions, and the public modlog actions you took or received. produced overnight in off-peak hours; you\'ll get a memlog notification when it\'s ready (3-day SLA, then a 3-day download window).';
   if (latest && !latest.failed_at) {
     if (latest.completed_at && latest.expires_at && latest.expires_at > Date.now()) {
-      const expDate = formatYmd(latest.expires_at);
-      pill = html`<button class="export-btn" type="button" disabled title="archive ready (expires ${expDate})">archive ready</button>`;
+      readyExpDate = formatYmd(latest.expires_at);
+      pill = html`<button class="export-btn" type="button" disabled title="archive ready (expires ${readyExpDate})">archive ready</button>`;
+      if (latest.download_token) {
+        readyUrl = `${siteMeta.baseUrl}/export/${latest.download_token}.tar.gz`;
+      }
     } else {
       pill = html`<button class="export-btn" type="button" disabled title="archive queued — you'll get a memlog when ready">archive queued</button>`;
     }
@@ -3833,12 +3847,22 @@ function personalExportBlock({ db, handle, queuedHint }) {
   const queued = queuedHint
     ? html`<p class="muted">archive queued. you'll get a memlog notification when it's ready.</p>`
     : html``;
+  // When a completed archive is on hand, surface the bearer URL the
+  // same way the rssvp-list does — visible, click-to-copy, downloadable
+  // by anyone holding the token. Mirrors the per-row copy button on
+  // sub-export notifications.
+  const urlList = readyUrl
+    ? html`<ul class="rssvp-list">
+        <li><button type="button" class="rssvp-copy" data-copy="${readyUrl}" title="click to copy"><code>${readyUrl}</code></button> — <strong class="rssvp-desc">your archive (expires ${readyExpDate})</strong></li>
+      </ul>`
+    : html``;
   return html`
     <details class="memlog-export">
       <summary><span class="rssvp-mark">personal archive</span></summary>
       <p class="muted">${blurb}</p>
       ${queued}
       <p>${pill}</p>
+      ${urlList}
     </details>`;
 }
 
