@@ -393,6 +393,36 @@ export function findLatestJob(db, { kind, scope, requestedBy }) {
   ).get(kind, scope, requestedBy) ?? null;
 }
 
+// All in-flight (pending or in-progress) export + import jobs requested
+// by this user. Excludes shared-artifact sentinels (started_at = -1).
+// Used by /memlog's "request in flight" banner so the user can see that
+// a worker hasn't claimed their job yet versus a worker is mid-build.
+//
+// Each row gets a synthetic `_kind` discriminator (`export` | `import`)
+// so the renderer can branch on label without re-checking the source
+// table. Ordered newest-first; banner caps at 5 rows for sanity.
+export function listInFlightJobsForRequester(db, requestedBy, { limit = 5 } = {}) {
+  if (!requestedBy) return [];
+  const exports = db.prepare(
+    `SELECT * FROM export_jobs
+      WHERE requested_by = ?
+        AND completed_at IS NULL
+        AND failed_at IS NULL
+        AND (started_at IS NULL OR started_at > 0)
+      ORDER BY requested_at DESC`
+  ).all(requestedBy).map((r) => ({ ...r, _kind: 'export' }));
+  const imports = db.prepare(
+    `SELECT * FROM import_jobs
+      WHERE requested_by = ?
+        AND completed_at IS NULL
+        AND failed_at IS NULL
+      ORDER BY requested_at DESC`
+  ).all(requestedBy).map((r) => ({ ...r, _kind: 'import' }));
+  return [...exports, ...imports]
+    .sort((a, b) => b.requested_at - a.requested_at)
+    .slice(0, limit);
+}
+
 // Delete jobs whose download window has passed. Returns a deduped list
 // of archive filenames the caller should unlink from disk. With the
 // shared-artifact dedupe (M7 followup), several expired rows can

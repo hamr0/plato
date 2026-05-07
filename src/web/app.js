@@ -75,6 +75,7 @@ import {
 } from '../content/rss-token.js';
 import {
   enqueueSubExport, enqueueUserExport, findCompletedJobByToken, findLatestJob,
+  listInFlightJobsForRequester,
   DOWNLOAD_TTL_MS as EXPORT_DOWNLOAD_TTL_MS,
   SLA_MS as EXPORT_SLA_MS,
 } from '../archive/queue.js';
@@ -4012,12 +4013,14 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   // one). State machine mirrors the sub-export pill: pending/queued
   // disables the button; recent-completed shows expiry.
   const exportBlock = personalExportBlock({ db, handle, queuedHint: searchParams?.get('export') === 'queued' });
+  const inFlightBlock = inFlightRequestsBlock({ db, handle });
   send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
     <div class="memlog-page">
       <p><a href="/">← home</a></p>
       <h2>// memlog</h2>
       <p class="muted">your private personal log — everything you do on this instance and everything done in response. one place, filtered by mode.</p>
       <p class="muted">${intro}</p>
+      ${inFlightBlock ?? html``}
       ${filterBar}
       ${filterSummary}
       ${body}
@@ -4025,6 +4028,53 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
       ${feedsBlock}
     </div>
   `));
+}
+
+// Banner above the chip row showing every in-flight export + import
+// request the user owns. Returns null when none — caller skips render.
+//
+// Two states surface here: `pending` (queued, waiting for the next
+// off-peak worker tick) and `in progress` (worker has claimed the row
+// and is fetching/building right now). Completed and terminal-failed
+// rows fire memlog notifications; this block bows out as soon as the
+// state machine moves past in-progress, so the banner self-clears.
+//
+// A "refresh" link gives the user manual feedback without JS polling
+// (the page itself is plain HTML — auto-refresh would need a head-tag
+// plumbing we don't have today).
+function inFlightRequestsBlock({ db, handle }) {
+  const jobs = listInFlightJobsForRequester(db, handle);
+  if (jobs.length === 0) return null;
+  const rows = jobs.map((j) => {
+    const isExport = j._kind === 'export';
+    const claimed = isExport ? (j.started_at != null && j.started_at > 0) : (j.started_at != null);
+    const state = claimed ? 'in progress' : 'queued';
+    const ago = relativeTime(j.requested_at);
+    let label;
+    if (isExport) {
+      label = j.kind === 'user'
+        ? html`personal archive`
+        : html`sub archive: <a href="/sub/${j.scope}">//${j.scope}</a>`;
+    } else {
+      const hint = j.rename_to ? html` → //${j.rename_to}` : html``;
+      label = html`import: <code class="memlog-inflight-url">${j.source_url}</code>${hint}`;
+    }
+    const retryHint = (j.retry_count ?? 0) > 0
+      ? html` <span class="muted">(retry ${j.retry_count})</span>`
+      : html``;
+    return html`<li>
+      <span class="memlog-inflight-state">${state}</span> · ${label}${retryHint}
+      <span class="muted">· requested ${ago}</span>
+    </li>`;
+  });
+  const note = jobs.some((j) => j._kind === 'export' ? (j.started_at == null || j.started_at < 0) : j.started_at == null)
+    ? 'queued items move to "in progress" the next time the worker runs (off-peak window). a memlog notification fires on completion or terminal failure.'
+    : 'workers are processing your requests. a memlog notification fires on completion.';
+  return html`<aside class="memlog-inflight">
+    <h3>requests in flight</h3>
+    <ul>${rows}</ul>
+    <p class="muted">${note} <a href="/memlog">refresh</a></p>
+  </aside>`;
 }
 
 // Personal-export request UI on /memlog. Reflects the latest user-export

@@ -412,6 +412,25 @@ button.filter-btn {
 .filter-form { display: inline; margin: 0; }
 .modlog-filters .filter-sep { color: var(--text-dim); padding: 0 0.2rem; }
 .modlog-summary { margin: 0.4rem 0; }
+.memlog-inflight {
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  padding: 0.6rem 0.9rem;
+  margin: 0.6rem 0;
+  border-radius: 3px;
+}
+.memlog-inflight h3 { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.4rem; }
+.memlog-inflight ul { margin: 0; padding-left: 1.2rem; font-size: 0.9rem; }
+.memlog-inflight li { margin: 0.2rem 0; }
+.memlog-inflight p { margin: 0.4rem 0 0; font-size: 0.85rem; }
+.memlog-inflight .memlog-inflight-state {
+  color: var(--accent-warm);
+  font-weight: 600;
+}
+.memlog-inflight .memlog-inflight-url {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
 .event-count {
   font-variant-numeric: tabular-nums;
   color: var(--accent-warm);
