@@ -524,11 +524,12 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
   // last 24h" should not lie. If no sub had any activity, the caller's
   // empty-state branch handles the fallback ("no subs yet").
   return db.prepare(
-    `SELECT s.name, s.description, s.sensitive, COUNT(p.id) AS post_count
+    `SELECT s.name, s.description, s.sensitive, s.imported_from_url, s.imported_at,
+       COUNT(p.id) AS post_count
      FROM subs s
      JOIN posts p ON p.sub_name = s.name AND p.created_at >= ?
      WHERE s.name != 'general'
-     GROUP BY s.name, s.description, s.sensitive
+     GROUP BY s.name, s.description, s.sensitive, s.imported_from_url, s.imported_at
      ORDER BY MAX(p.created_at) DESC, post_count DESC, s.name ASC`
   ).all(sinceMs);
 }
@@ -1016,7 +1017,7 @@ function activeSubsBlock({ subs, currentHandle, memCounts, modSet }) {
     <h3 class="section">// active subs · last 24h</h3>
     <div class="active-subs-list">
       ${top.map((s) => html`<div class="active-sub-row">
-        ${modSet?.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>
+        ${modSet?.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${importedSubChip({ sub: s })}
         ${s.sensitive ? html`<span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}
         <span class="desc muted">${s.description ? html`— ${s.description}` : html``}</span>
         <span class="stats muted"><strong>${s.post_count}</strong> ${s.post_count === 1 ? 'post' : 'posts'} · <strong data-mem-count="${s.name}">${memCounts?.get(s.name) ?? 0}</strong> mem</span>
@@ -1380,7 +1381,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>mem</th><th class="col-active">active</th><th class="col-owner">owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td>${modSet.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
+          <td>${modSet.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${importedSubChip({ sub: s })}${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" data-mem-count="${s.name}">${subCounts.get(s.name) ?? 0}</td>
@@ -1543,7 +1544,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
     200,
     pageView({
       db, currentHandle,
-      title: html`//${subName}`,
+      title: html`//${subName}${importedSubChip({ sub })}`,
       subtitle: sub.description || null,
       description: sub.description || `//${subName} on ${branding.forumName}: ${defaultSiteDescription()}`,
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,

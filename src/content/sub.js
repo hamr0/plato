@@ -191,6 +191,7 @@ export function listAllSubs(db, { sort = 'active' } = {}) {
   }[sort] ?? 'ORDER BY last_post_at IS NULL, last_post_at DESC, s.name ASC';
   return db.prepare(
     `SELECT s.name, s.description, s.owner_handle, s.sensitive, s.disabled_at,
+       s.imported_from_url, s.imported_at,
        COUNT(p.id) AS post_count,
        MAX(p.created_at) AS last_post_at
      FROM subs s

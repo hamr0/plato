@@ -218,8 +218,9 @@ header h1 .logo-mark {
   margin: 0.3rem 0;
 }
 .sub-thresholds .threshold-row > span {
-  flex: 0 0 8.5rem;
+  flex: 0 0 11rem;
   color: var(--text-dim);
+  white-space: nowrap;
 }
 .sub-thresholds .threshold-row > input[type="number"] {
   flex: 0 0 5rem;
@@ -1374,10 +1375,14 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
    sub. Same dim palette as imported-banner. */
 .imported-chip {
   color: var(--text-dim);
-  font-size: 0.85em;
+  font-size: 0.8em;
   font-family: monospace;
   margin-left: 0.3em;
+  padding: 0 0.3em;
+  border: 1px solid var(--border);
+  border-radius: 2px;
   cursor: help;
+  vertical-align: middle;
 }
 
 /* Two-tab nav for /sub/create (create new / import from URL). M7/B5. */
