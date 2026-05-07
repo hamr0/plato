@@ -119,6 +119,7 @@ try {
       postsDir: POSTS_DIR,
       importerHandle: job.requested_by,
       renameTo: job.rename_to ?? null,
+      sourceUrl: job.source_url,
     });
     db.exec('COMMIT');
   } catch (err) {

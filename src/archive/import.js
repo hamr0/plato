@@ -135,7 +135,13 @@ function postFilePathFor(post) {
 //   - destination sub name taken (and no rename_to provided),
 //   - PK collision on imported post/comment/mod_action ID,
 //   - bracket-disambiguation exhaustion (extremely rare).
-export function importSubArchive(db, { parsed, postsDir, importerHandle, renameTo = null, now = Date.now() }) {
+//
+// `sourceUrl` is the URL the worker actually fetched (the chain-of-
+// custody record). Stored as subs.imported_from_url so the imported
+// banner can display where the bytes came from. Optional — falls back
+// to the manifest's instance.base_url when omitted, which may be empty
+// if the source operator hadn't set branding.baseUrl.
+export function importSubArchive(db, { parsed, postsDir, importerHandle, renameTo = null, sourceUrl = null, now = Date.now() }) {
   const { manifest, sub, posts, comments, modlog, postBodies } = parsed;
   const sourceFp = manifest.instance.pubkey_fingerprint ?? null;
 
@@ -211,7 +217,7 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
     sub.auto_uncollapse_post ?? 50,
     sub.auto_uncollapse_comment ?? 20,
     null, // not disabled — the importer is now the active mod
-    manifest.instance.base_url ?? null,
+    sourceUrl ?? manifest.instance.base_url ?? null,
     sourceFp,
     now,
     sourceExportedAtMs,
