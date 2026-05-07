@@ -1328,6 +1328,48 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
 .new-account-mark { color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
+/* Imported-sub banner (M7/B5). Sits below the sensitive-banner and above
+   the sub-state-banner on /sub/<name>. Visually quieter than sensitive
+   (no warning posture) — it's information about provenance, not a
+   safety advisory. Uses the dim/border palette so the eye reads it as
+   chrome the first time and skims past on later visits. */
+.imported-banner {
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 0.4rem 0.7rem;
+  margin: 0.4rem 0;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+.imported-banner a { color: var(--accent); }
+.imported-banner strong { color: var(--text); }
+
+/* Inline [imported] tag in modlog action cells. Same dim posture as the
+   imported-banner — informational, not warning. */
+.imported-tag {
+  color: var(--text-dim);
+  font-size: 0.85em;
+  margin-right: 0.2em;
+}
+
+/* Two-tab nav for /sub/create (create new / import from URL). M7/B5. */
+.sub-create-tabs { margin: 0.5rem 0 1rem; display: flex; gap: 0.4rem; }
+.sub-create-tabs a {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-decoration: none;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+.sub-create-tabs a.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--bg-soft);
+}
+
 /* Inline subscribe / unsubscribe form on /sub/<name>. Sits in the top
    action row alongside ← home, public //modlog, edit sub. The form is
    invisible chrome around a single button so the row reads like the

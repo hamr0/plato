@@ -227,7 +227,7 @@ export function recordAction(db, {
 
 export function listModActions(db, subName, { limit = 100, offset = 0 } = {}) {
   return db.prepare(
-    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint
      FROM mod_actions
      WHERE sub_name = ?
      ORDER BY created_at DESC
@@ -303,7 +303,7 @@ export function listModActionsAcrossSubs(db, subNames, { limit = 25, offset = 0,
   if (!subNames || subNames.length === 0) return [];
   const { where, params } = buildAuditClause(subNames, filters);
   return db.prepare(
-    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint
      FROM mod_actions
      WHERE ${where}
      ORDER BY created_at DESC
@@ -332,9 +332,9 @@ export function listInboxAcrossSubs(db, subNames, { limit = 50, offset = 0, ...f
   if (!subNames || subNames.length === 0) return [];
   const { where, params } = buildAuditClause(subNames, filters);
   return db.prepare(
-    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, event_count
+    `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint, event_count
      FROM (
-       SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at,
+       SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint,
               ROW_NUMBER() OVER (PARTITION BY target_type, target_id ORDER BY created_at DESC) AS rn,
               COUNT(*)     OVER (PARTITION BY target_type, target_id)                         AS event_count
        FROM mod_actions

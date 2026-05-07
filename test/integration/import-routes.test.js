@@ -1,0 +1,268 @@
+// Sub-import HTTP routes (M7/B5):
+//   GET  /sub/create?mode=import — second tab on the sub-create page
+//   POST /sub/import             — auth-required, queues an import job
+// Plus the imported-sub banner + [imported] modlog tag rendering.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { knowless } from 'knowless';
+import { openDb } from '../../src/db/index.js';
+import { loadDisposableDomains } from '../../src/content/disposable-domain.js';
+import { createApp } from '../../src/web/app.js';
+import { applyAllMigrations } from '../_helpers/migrations.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DISPOSABLE_PATH = resolve(HERE, '../../disposable-domains.txt');
+
+function captureMailer() {
+  const sent = [];
+  return {
+    sent,
+    async submit({ to, subject, body }) { sent.push({ to, subject, body }); return { messageId: '<x@t>' }; },
+    async verify() { return true; },
+    close() {},
+  };
+}
+function magicLinkFrom(email) {
+  const m = email.body.match(/https?:\/\/\S+\/auth\/callback\?t=\S+/);
+  if (!m) throw new Error('no link');
+  return m[0];
+}
+function newJar() {
+  const c = new Map();
+  return {
+    update(h) {
+      if (!h) return;
+      for (const raw of (Array.isArray(h) ? h : [h])) {
+        const head = raw.split(';')[0]; const eq = head.indexOf('=');
+        if (eq === -1) continue;
+        c.set(head.slice(0, eq).trim(), head.slice(eq + 1).trim());
+      }
+    },
+    header() { return [...c.entries()].map(([k, v]) => `${k}=${v}`).join('; '); },
+  };
+}
+async function jfetch(jar, url, opts = {}) {
+  const headers = { ...(opts.headers ?? {}) };
+  const ck = jar.header(); if (ck) headers.Cookie = ck;
+  const res = await fetch(url, { ...opts, headers, redirect: 'manual' });
+  jar.update(res.headers.getSetCookie?.() ?? res.headers.get('set-cookie'));
+  return res;
+}
+async function loginAs(ctx, email) {
+  const jar = newJar();
+  await jfetch(jar, ctx.baseUrl + '/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `email=${encodeURIComponent(email)}`,
+  });
+  const link = magicLinkFrom(ctx.mailer.sent.at(-1));
+  await jfetch(jar, link);
+  return jar;
+}
+
+async function spinUp() {
+  return new Promise((res) => {
+    const tmp = http.createServer((q, r) => r.end()).listen(0, () => {
+      const port = tmp.address().port;
+      tmp.close(() => {
+        const baseUrl = `http://localhost:${port}`;
+        const db = openDb(':memory:');
+        applyAllMigrations(db);
+        const mailer = captureMailer();
+        const auth = knowless({
+          secret: randomBytes(32).toString('hex'),
+          baseUrl, from: 'a@t', dbPath: ':memory:',
+          openRegistration: true, cookieSecure: false, mailer,
+        });
+        const postsDir = mkdtempSync(join(tmpdir(), 'plato-imp-posts-'));
+        const exportsDir = mkdtempSync(join(tmpdir(), 'plato-imp-exports-'));
+        const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
+        const app = createApp({ db, auth, disposableDomains, postsDir, exportsDir, baseUrl });
+        const server = http.createServer(app).listen(port, () => {
+          res({ db, auth, mailer, postsDir, exportsDir, baseUrl, server });
+        });
+      });
+    });
+  });
+}
+async function teardown({ auth, db, postsDir, exportsDir, server }) {
+  await new Promise((r) => server.close(r));
+  auth.close(); db.close();
+  rmSync(postsDir, { recursive: true, force: true });
+  rmSync(exportsDir, { recursive: true, force: true });
+}
+
+// --- /sub/create tabs ---
+
+test('GET /sub/create: default mode=create renders create form, hides import form', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/create');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /class="sub-create-tabs"/);
+  assert.match(body, /create new<\/a>/);
+  assert.match(body, /import from URL<\/a>/);
+  assert.match(body, /action="\/sub\/create"/);
+  assert.doesNotMatch(body, /action="\/sub\/import"/);
+});
+
+test('GET /sub/create?mode=import: renders import form, hides create form', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/create?mode=import');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /action="\/sub\/import"/);
+  assert.match(body, /name="sourceUrl"/);
+  assert.match(body, /name="renameTo"/);
+  assert.doesNotMatch(body, /action="\/sub\/create"\b/);
+});
+
+test('GET /sub/create: anon sees 401', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/sub/create?mode=import');
+  assert.equal(res.status, 401);
+});
+
+// --- POST /sub/import ---
+
+test('POST /sub/import: anon → 401', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=https%3A%2F%2Fother.example%2Fexport%2Fx.tar.gz',
+  });
+  assert.equal(res.status, 401);
+});
+
+test('POST /sub/import: missing url → 400', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('POST /sub/import: invalid url → 400', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=not-a-url',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('POST /sub/import: non-http(s) protocol → 400', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=ftp%3A%2F%2Fother.example%2Fx.tar.gz',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('POST /sub/import: bad rename name → 400', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=' + encodeURIComponent('https://other.example/export/x.tar.gz') + '&renameTo=Bad%20Name',
+  });
+  assert.equal(res.status, 400);
+});
+
+test('POST /sub/import: valid → 302 to /memlog?import=queued + row enqueued', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const res = await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'sourceUrl=' + encodeURIComponent('https://other.example/export/x.tar.gz') + '&renameTo=lobby-archive',
+  });
+  assert.equal(res.status, 302);
+  assert.match(res.headers.get('location'), /\/memlog\?import=queued/);
+  const row = ctx.db.prepare('SELECT source_url, rename_to FROM import_jobs').get();
+  assert.equal(row.source_url, 'https://other.example/export/x.tar.gz');
+  assert.equal(row.rename_to, 'lobby-archive');
+});
+
+test('POST /sub/import: idempotent within pending — second submit collapses onto same row', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const url = 'https://other.example/export/x.tar.gz';
+  const body = 'sourceUrl=' + encodeURIComponent(url);
+  await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
+  });
+  await jfetch(jar, ctx.baseUrl + '/sub/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
+  });
+  const count = ctx.db.prepare('SELECT COUNT(*) AS n FROM import_jobs').get().n;
+  assert.equal(count, 1);
+});
+
+// --- imported banner on /sub/<name> ---
+
+test('GET /sub/<name>: imported banner renders only on imported subs', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  // Native sub: no banner.
+  ctx.db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)').run('lobby', null, Date.now());
+  let res = await fetch(ctx.baseUrl + '/sub/lobby');
+  let body = await res.text();
+  assert.doesNotMatch(body, /class="imported-banner"/);
+
+  // Imported sub: banner shows source host + date.
+  const importerHandle = 'a'.repeat(64);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(importerHandle, 'importer-pseudo', Date.now());
+  ctx.db.prepare(
+    `INSERT INTO subs (name, owner_handle, created_at, imported_from_url, imported_from_fingerprint, imported_at, imported_at_source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run('archive', importerHandle, Date.now(), 'https://source.example.com/export/aa.tar.gz', 'sha256:fp', Date.UTC(2026, 4, 7), Date.UTC(2026, 4, 6));
+  ctx.db.prepare(`INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, 'owner')`).run('archive', importerHandle);
+  res = await fetch(ctx.baseUrl + '/sub/archive');
+  body = await res.text();
+  assert.match(body, /class="imported-banner"/);
+  assert.match(body, /source\.example\.com/);
+  assert.match(body, /imported by <strong>importer-pseudo<\/strong>/);
+  assert.match(body, /\[imported\]/);
+});
+
+// --- [imported] tag in modlog ---
+
+test('GET /sub/<name>/modlog: imported_from_fingerprint rows render with [imported] tag', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)').run('archive', null, Date.now());
+  const modHandle = 'a'.repeat(64);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(modHandle, 'archived-mod', Date.now());
+  // Imported row + native row in the same modlog.
+  ctx.db.prepare(
+    `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint)
+     VALUES (?, ?, ?, 'collapse', 'comment', 'c1', 'noisy', ?, 'sha256:fp')`
+  ).run('m1', 'archive', modHandle, Date.now() - 1000);
+  ctx.db.prepare(
+    `INSERT INTO mod_actions (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+     VALUES (?, ?, ?, 'remove', 'post', 'p1', 'illegal', ?)`
+  ).run('m2', 'archive', modHandle, Date.now());
+  const res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
+  const body = await res.text();
+  assert.match(body, /imported-tag[^>]*>\[imported\]/);
+});

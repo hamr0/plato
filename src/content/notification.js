@@ -1,6 +1,6 @@
 // Per-user notifications — memlog (M6/B0).
 //
-// Five kinds of events generate rows:
+// Seven kinds of events generate rows:
 //   comment_on_post   — top-level comment on a post you authored
 //   reply_to_comment  — reply to a comment you authored
 //   mod_action        — your content or handle was acted on by a mod
@@ -9,6 +9,11 @@
 //                       (M7/B2-b; target_id = job id; snippet = expiry date)
 //   export_failed     — an archive you requested terminal-failed after
 //                       MAX_ATTEMPTS or hit its SLA window
+//   import_ready      — a sub-import you requested has finished
+//                       (M7/B5; target_id = import job id; snippet links
+//                       to the new sub on this instance)
+//   import_failed     — an import you requested terminal-failed (URL
+//                       fetch failed, archive corrupt, name conflict, etc.)
 //
 // Vote events are deliberately not recorded. Score is the visible signal;
 // per-vote pings are an engagement-bait surface plato refuses.
@@ -23,6 +28,8 @@ export const NOTIFICATION_KINDS = Object.freeze([
   'mod_action',
   'export_ready',
   'export_failed',
+  'import_ready',
+  'import_failed',
 ]);
 
 export const NOTIFICATION_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;

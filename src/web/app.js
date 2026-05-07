@@ -80,6 +80,7 @@ import {
 } from '../archive/queue.js';
 import { canExportSub, subExportEligibility } from '../archive/gate.js';
 import { getOrCreateInstanceKeypair } from '../archive/signing.js';
+import { enqueueSubImport } from '../archive/import-queue.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -341,6 +342,16 @@ const MOD_ACTION_LABELS = {
   auto_disable_inactivity:   'auto-disabled (mod inactivity)',
   manual_reactivate:         'reactivated',
 };
+
+// Modlog cell with the `[imported]` prefix when the row was inserted by
+// a sub-import (M7/B5). Native rows render unchanged.
+function modActionCell(a) {
+  const label = MOD_ACTION_LABELS[a.action] ?? a.action;
+  const tag = a.imported_from_fingerprint
+    ? html`<span class="imported-tag">[imported]</span> `
+    : html``;
+  return html`<span class="mod-action mod-action-${a.action}">${tag}${label}</span>`;
+}
 
 function logoMark({ size = 22, loading = false } = {}) {
   const h = Math.round(size * (8 / 24));
@@ -1500,6 +1511,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
     }, html`
       <div class="sub-action-row"><a href="/">← home</a> · <a href="/sub/${subName}/modlog">public //modlog</a> · <a href="/sub/${subName}/rss" class="rssvp-link">rssvp</a>${currentHandle ? html` · ${subscribeForm({ subName, currentHandle, db, returnTo, modRole })}` : html``} · ${subExportPill({ db, subName, currentHandle, returnTo })}${modRole ? html` · <a href="/sub/${subName}/edit">manage</a>` : html``}</div>
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
+      ${importedBanner({ sub, db })}
       ${subStateBanner({ db, sub, modRole })}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
@@ -1518,7 +1530,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
   );
 }
 
-function renderSubCreate(req, res, { db, auth }) {
+function renderSubCreate(req, res, { db, auth }, searchParams) {
   const currentHandle = auth.handleFromRequest(req);
   if (!currentHandle) {
     return send(
@@ -1529,42 +1541,63 @@ function renderSubCreate(req, res, { db, auth }) {
       `)
     );
   }
+  const mode = searchParams?.get('mode') === 'import' ? 'import' : 'create';
+  // Two-tab page: "create new" and "import from URL". Same auth gate;
+  // import lives here because it's structurally another way to add a sub
+  // to this instance. M7/B5.
+  const tabs = html`
+    <nav class="sub-create-tabs">
+      <a href="/sub/create" class="${mode === 'create' ? 'active' : ''}">create new</a>
+      <a href="/sub/create?mode=import" class="${mode === 'import' ? 'active' : ''}">import from URL</a>
+    </nav>`;
+  const createForm = html`
+    <form method="POST" action="/sub/create">
+      <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
+      <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200">
+      <fieldset class="sub-thresholds">
+        <legend class="muted">auto-uncollapse (soft mod)</legend>
+        <label class="threshold-row">
+          <span>posts (≥ 50)</span>
+          <input type="number" name="autoUncollapsePost" value="50" min="50" step="1" required>
+        </label>
+        <label class="threshold-row">
+          <span>comments (≥ 20)</span>
+          <input type="number" name="autoUncollapseComment" value="20" min="20" step="1" required>
+        </label>
+        <p class="muted">net upvotes that auto-lift a soft-removal. higher = harder to overrule a mod. applies to soft removals only — hard removals never auto-revert.</p>
+      </fieldset>
+      <fieldset class="sub-thresholds">
+        <legend class="muted">flag auto-hide threshold</legend>
+        <label class="threshold-row">
+          <span>distinct flaggers (≥ 3)</span>
+          <input type="number" name="flagThreshold" value="3" min="3" step="1" required>
+        </label>
+        <p class="muted">distinct users who must flag a target before it auto-hides for mod review. higher = niche subs avoid spurious auto-hides; never below 3 (so a single flagger can't collapse).</p>
+      </fieldset>
+      ${flairEditorView()}
+      <label class="threshold-row">
+        <input type="checkbox" name="sensitive" value="1">
+        <span>sensitive content (banner advisory; not for porn — see rules)</span>
+      </label>
+      <button>create</button>
+    </form>
+    <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>`;
+  const importForm = html`
+    <form method="POST" action="/sub/import">
+      <input name="sourceUrl" type="url" placeholder="https://other-instance.com/export/...tar.gz" required>
+      <input name="renameTo" placeholder="import as (optional — only if name is taken here)" pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
+      <button>import</button>
+    </form>
+    <p class="muted">paste the URL of an exported sub archive. the server fetches the bytes directly — no upload, no chain-of-custody. if the source instance is offline, the URL must point to wherever you've mirrored the archive (archive.org, S3, a static host).</p>
+    <p class="muted">you become the new sub's mod on this instance. all original posts, comments, votes, and modlog entries are preserved verbatim. pseudonyms that collide with existing ones get bracket marks (e.g., <code>clever-tiger</code> → <code>[clever]-tiger</code>). modlog rows from the archive are tagged <code>[imported]</code>.</p>
+    <p class="muted">you'll get a memlog notification when the import finishes — usually within the next off-peak window.</p>`;
   send(
     res,
     200,
-    pageView({ db, currentHandle, title: 'create a sub' }, html`
+    pageView({ db, currentHandle, title: 'create or import a sub' }, html`
       <p><a href="/">← home</a></p>
-      <form method="POST" action="/sub/create">
-        <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
-        <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200">
-        <fieldset class="sub-thresholds">
-          <legend class="muted">auto-uncollapse (soft mod)</legend>
-          <label class="threshold-row">
-            <span>posts (≥ 50)</span>
-            <input type="number" name="autoUncollapsePost" value="50" min="50" step="1" required>
-          </label>
-          <label class="threshold-row">
-            <span>comments (≥ 20)</span>
-            <input type="number" name="autoUncollapseComment" value="20" min="20" step="1" required>
-          </label>
-          <p class="muted">net upvotes that auto-lift a soft-removal. higher = harder to overrule a mod. applies to soft removals only — hard removals never auto-revert.</p>
-        </fieldset>
-        <fieldset class="sub-thresholds">
-          <legend class="muted">flag auto-hide threshold</legend>
-          <label class="threshold-row">
-            <span>distinct flaggers (≥ 3)</span>
-            <input type="number" name="flagThreshold" value="3" min="3" step="1" required>
-          </label>
-          <p class="muted">distinct users who must flag a target before it auto-hides for mod review. higher = niche subs avoid spurious auto-hides; never below 3 (so a single flagger can't collapse).</p>
-        </fieldset>
-        ${flairEditorView()}
-        <label class="threshold-row">
-          <input type="checkbox" name="sensitive" value="1">
-          <span>sensitive content (banner advisory; not for porn — see rules)</span>
-        </label>
-        <button>create</button>
-      </form>
-      <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>
+      ${tabs}
+      ${mode === 'import' ? importForm : createForm}
     `)
   );
 }
@@ -1623,6 +1656,26 @@ async function handleSubCreate(req, res, { db, auth }) {
 //   1. disabled & no mods exist → permanent read-only, member-fork only.
 //   2. disabled & mods exist     → reactivation possible, prompt the mod.
 //   3. active & approaching 30d  → 28d warning with migration framing.
+// Imported-sub banner (M7/B5). Renders only on subs whose
+// imported_from_url is non-null. The owner_handle was set to the
+// importing user at completion time, so attribution = importer's
+// pseudonym on this instance.
+function importedBanner({ sub, db }) {
+  if (!sub.imported_from_url) return html``;
+  const importedAt = sub.imported_at ? new Date(sub.imported_at).toISOString().slice(0, 10) : '';
+  const importer = sub.owner_handle
+    ? db.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(sub.owner_handle)?.pseudonym
+    : null;
+  const sourceHost = (() => {
+    try { return new URL(sub.imported_from_url).host; } catch { return sub.imported_from_url; }
+  })();
+  const importerLine = importer
+    ? html` · imported by <strong>${importer}</strong>`
+    : html``;
+  const dateLine = importedAt ? html` on <strong>${importedAt}</strong>` : html``;
+  return html`<div class="imported-banner">[imported] this community was originally hosted at <a href="${sub.imported_from_url}">${sourceHost}</a>${dateLine}${importerLine}. posts, comments, votes, and modlog are preserved verbatim from the source archive.</div>`;
+}
+
 function subStateBanner({ db, sub, modRole }) {
   if (sub.disabled_at != null) {
     const subName = sub.name;
@@ -3222,6 +3275,54 @@ async function handleSubExportRequest(req, res, { db, auth }, subName) {
   redirect(res, '/memlog?export=queued');
 }
 
+// POST /sub/import — enqueue a sub-archive import from a URL the user
+// pastes. M7/B5. Auth-only (no tenure gate — the export gate already
+// filters drive-bys at the source). Server fetches the bytes itself at
+// worker time; nothing happens here beyond URL validation + enqueue.
+// Idempotent: a second click while a pending job exists is a no-op
+// redirect.
+async function handleSubImportRequest(req, res, { db, auth }) {
+  const handle = auth.handleFromRequest(req);
+  if (!handle) {
+    return send(res, 401, quickPage(req, { db, auth }, 'login required',
+      html`<p class="muted">log in to import a sub.</p>`));
+  }
+  const body = await readBody(req);
+  const form = parseForm(body);
+  const sourceUrl = (form.sourceUrl ?? '').trim();
+  const renameToRaw = (form.renameTo ?? '').trim();
+  const renameTo = renameToRaw.length > 0 ? renameToRaw : null;
+  if (!sourceUrl) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'url required', message: 'paste an https URL pointing to an exported plato archive.',
+    }));
+  }
+  let parsed;
+  try { parsed = new URL(sourceUrl); } catch {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'invalid url', message: `"${sourceUrl}" is not a valid URL.`,
+    }));
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'invalid url', message: 'only http(s) URLs are supported.',
+    }));
+  }
+  if (renameTo && !/^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?$/.test(renameTo)) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'bad rename',
+      message: `"${renameTo}" doesn't match plato sub-name format (lowercase, 3–30, hyphens ok, no leading/trailing hyphen).`,
+    }));
+  }
+  // Ensure a handles row for this user — import_jobs.requested_by FKs to
+  // handles. A user can reach this route after login but before doing
+  // anything that materializes their pseudonym, in which case the handle
+  // doesn't yet exist as a row.
+  pseudonymFor(db, handle);
+  enqueueSubImport(db, { sourceUrl, renameTo, requestedBy: handle });
+  redirect(res, '/memlog?import=queued');
+}
+
 // POST /export-request — enqueue a personal (per-user) archive job. Auth
 // required; no tenure gate (your own data is yours from day one).
 // Idempotent: a second call while a pending/in-progress job exists is a
@@ -3468,6 +3569,7 @@ const MEMLOG_KIND_FILTERS = [
   { slug: 'replies',     kinds: ['reply_to_comment'],           label: 'replies' },
   { slug: 'mod-actions', kinds: ['mod_action'],                 label: 'mod actions' },
   { slug: 'archives',    kinds: ['export_ready', 'export_failed'], label: 'archives' },
+  { slug: 'imports',     kinds: ['import_ready', 'import_failed'], label: 'imports' },
 ];
 
 const MEMLOG_MODES = ['notifications', 'activity', 'all'];
@@ -3519,6 +3621,16 @@ function memlogTargetLink(db, n) {
     if (!row?.download_token) return null;
     return `/export/${row.download_token}.tar.gz`;
   }
+  if (n.target_type === 'import') {
+    // import_ready: link to the imported sub on this instance.
+    // import_failed: no link — snippet carries the reason.
+    if (n.kind !== 'import_ready') return null;
+    const row = db.prepare(
+      `SELECT imported_sub_name FROM import_jobs WHERE id = ? AND completed_at IS NOT NULL`
+    ).get(n.target_id);
+    if (!row?.imported_sub_name) return null;
+    return `/sub/${row.imported_sub_name}`;
+  }
   return null;
 }
 
@@ -3528,6 +3640,8 @@ const MEMLOG_KIND_LABELS = {
   mod_action:       'mod action',
   export_ready:     'archive ready',
   export_failed:    'archive failed',
+  import_ready:     'import ready',
+  import_failed:    'import failed',
   my_post:          'my post',
   my_comment:       'my comment',
 };
@@ -3872,7 +3986,7 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${modCell(a)}</td>
           <td>${userCell(a)}</td>
-          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
+          <td>${modActionCell(a)}</td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
         </tr>`)}</tbody>
@@ -4190,7 +4304,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${modCell(a)}</td>
           <td>${userCell(a)}</td>
-          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
+          <td>${modActionCell(a)}</td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.reason ?? ''}</td>
           <td>${revokeCell(a)}</td>
@@ -4498,7 +4612,7 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
           <td class="muted">${relativeTime(a.created_at)}</td>
           <td>${modCell(a)}</td>
           <td>${userCell(a)}</td>
-          <td><span class="mod-action mod-action-${a.action}">${MOD_ACTION_LABELS[a.action] ?? a.action}</span></td>
+          <td>${modActionCell(a)}</td>
           <td>${targetCell(a)}</td>
           <td class="muted">${a.event_count > 1 ? html`<span class="event-count">${a.event_count}×</span>` : ''}</td>
           <td class="muted">${a.reason ?? ''}</td>
@@ -4839,8 +4953,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });
-      if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { db, auth });
+      if (path === '/sub/create' && method === 'GET') return renderSubCreate(req, res, { db, auth }, url.searchParams);
       if (path === '/sub/create' && method === 'POST') return handleSubCreate(req, res, { db, auth });
+      if (path === '/sub/import' && method === 'POST') return handleSubImportRequest(req, res, { db, auth });
 
       let m;
       if ((m = path.match(SUB_POST_COMMENT_EDIT_PATH_RE)) && method === 'GET') {
