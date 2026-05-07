@@ -1375,14 +1375,10 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
    sub. Same dim palette as imported-banner. */
 .imported-chip {
   color: var(--text-dim);
-  font-size: 0.8em;
+  font-size: 0.85em;
   font-family: monospace;
   margin-left: 0.3em;
-  padding: 0 0.3em;
-  border: 1px solid var(--border);
-  border-radius: 2px;
   cursor: help;
-  vertical-align: middle;
 }
 
 /* Two-tab nav for /sub/create (create new / import from URL). M7/B5. */
