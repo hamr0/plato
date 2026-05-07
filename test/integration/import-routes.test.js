@@ -64,6 +64,10 @@ async function loginAs(ctx, email) {
   });
   const link = magicLinkFrom(ctx.mailer.sent.at(-1));
   await jfetch(jar, link);
+  // Fetch home so siteHeader's pseudonymFor() materializes a handles
+  // row — otherwise FK-constrained INSERTs (notifications,
+  // import_jobs.requested_by) won't find the handle.
+  await jfetch(jar, ctx.baseUrl + '/');
   return jar;
 }
 
@@ -265,4 +269,106 @@ test('GET /sub/<name>/modlog: imported_from_fingerprint rows render with [import
   const res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
   const body = await res.text();
   assert.match(body, /imported-tag[^>]*>\[imported\]/);
+});
+
+// --- /memlog rendering for import_ready / import_failed ---
+
+test('GET /memlog: import_ready row renders link to /sub/<imported_sub_name>', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const aliceHandle = ctx.db.prepare(
+    `SELECT handle FROM handles ORDER BY first_seen_at DESC LIMIT 1`
+  ).get()?.handle;
+  // Pre-seed: a completed import job belonging to alice + the matching
+  // notification.
+  const jobId = randomBytes(8).toString('hex');
+  ctx.db.prepare(
+    `INSERT INTO import_jobs (id, source_url, source_scope_sub, source_exported_at, source_fingerprint,
+       imported_sub_name, requested_by, requested_at, completed_at)
+     VALUES (?, 'https://src.example/x.tar.gz', 'lobby', '2026-05-07T00:00:00.000Z', 'sha256:fp',
+       'lobby-imp', ?, ?, ?)`
+  ).run(jobId, aliceHandle, Date.now() - 1000, Date.now());
+  ctx.db.prepare(
+    `INSERT INTO subs (name, owner_handle, created_at, imported_from_url) VALUES ('lobby-imp', ?, ?, ?)`
+  ).run(aliceHandle, Date.now(), 'https://src.example/x.tar.gz');
+  ctx.db.prepare(
+    `INSERT INTO notifications (recipient_handle, kind, sub_name, target_type, target_id, snippet, created_at)
+     VALUES (?, 'import_ready', 'lobby-imp', 'import', ?, 'imported //lobby-imp from src — 1 post', ?)`
+  ).run(aliceHandle, jobId, Date.now());
+
+  const res = await jfetch(jar, ctx.baseUrl + '/memlog?show=all');
+  const body = await res.text();
+  assert.match(body, /imported \/\/lobby-imp from src/);
+  // The kind label shows up in the row
+  assert.match(body, /import ready/);
+  // The "go" link should resolve through the import target_type to the imported sub page
+  assert.match(body, new RegExp(`href="/memlog/go/\\d+"`));
+});
+
+test('GET /memlog/go/<id>: import_ready notification 302s to /sub/<imported_sub_name>', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const aliceHandle = ctx.db.prepare(
+    `SELECT handle FROM handles ORDER BY first_seen_at DESC LIMIT 1`
+  ).get()?.handle;
+  const jobId = randomBytes(8).toString('hex');
+  ctx.db.prepare(
+    `INSERT INTO import_jobs (id, source_url, source_scope_sub, source_exported_at,
+       imported_sub_name, requested_by, requested_at, completed_at)
+     VALUES (?, 'https://src.example/x.tar.gz', 'lobby', '2026-05-07T00:00:00.000Z',
+       'lobby-imp', ?, ?, ?)`
+  ).run(jobId, aliceHandle, Date.now() - 1000, Date.now());
+  ctx.db.prepare(
+    `INSERT INTO subs (name, owner_handle, created_at, imported_from_url) VALUES ('lobby-imp', ?, ?, ?)`
+  ).run(aliceHandle, Date.now(), 'https://src.example/x.tar.gz');
+  ctx.db.prepare(
+    `INSERT INTO notifications (recipient_handle, kind, sub_name, target_type, target_id, snippet, created_at)
+     VALUES (?, 'import_ready', 'lobby-imp', 'import', ?, 's', ?)`
+  ).run(aliceHandle, jobId, Date.now());
+  const notifRow = ctx.db.prepare('SELECT id FROM notifications WHERE kind = ? LIMIT 1').get('import_ready');
+  const res = await jfetch(jar, ctx.baseUrl + `/memlog/go/${notifRow.id}`);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.get('location'), '/sub/lobby-imp');
+});
+
+test('GET /memlog: import_failed row renders snippet with no link', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const aliceHandle = ctx.db.prepare(
+    `SELECT handle FROM handles ORDER BY first_seen_at DESC LIMIT 1`
+  ).get()?.handle;
+  const jobId = randomBytes(8).toString('hex');
+  ctx.db.prepare(
+    `INSERT INTO import_jobs (id, source_url, requested_by, requested_at, failed_at, error_message)
+     VALUES (?, 'https://bad.example/missing.tar.gz', ?, ?, ?, 'fetch failed: HTTP 404')`
+  ).run(jobId, aliceHandle, Date.now() - 1000, Date.now());
+  ctx.db.prepare(
+    `INSERT INTO notifications (recipient_handle, kind, target_type, target_id, snippet, created_at)
+     VALUES (?, 'import_failed', 'import', ?, 'import failed after 3 attempts: fetch failed: HTTP 404', ?)`
+  ).run(aliceHandle, jobId, Date.now());
+  const res = await jfetch(jar, ctx.baseUrl + '/memlog?show=all');
+  const body = await res.text();
+  assert.match(body, /import failed/);
+  assert.match(body, /HTTP 404/);
+});
+
+test('GET /memlog?kind=imports: filter chip narrows to import kinds', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const jar = await loginAs(ctx, 'alice@plato.test');
+  const aliceHandle = ctx.db.prepare(
+    `SELECT handle FROM handles ORDER BY first_seen_at DESC LIMIT 1`
+  ).get()?.handle;
+  // One import_ready + one comment_on_post; filter must keep only import_ready.
+  ctx.db.prepare(
+    `INSERT INTO notifications (recipient_handle, kind, target_type, target_id, snippet, created_at)
+     VALUES (?, 'import_ready', 'import', 'imp1', 'snippet-import', ?)`
+  ).run(aliceHandle, Date.now() - 1000);
+  ctx.db.prepare(
+    `INSERT INTO notifications (recipient_handle, kind, sub_name, target_type, target_id, snippet, created_at)
+     VALUES (?, 'comment_on_post', 'lobby', 'post', 'p1', 'snippet-comment', ?)`
+  ).run(aliceHandle, Date.now());
+  const res = await jfetch(jar, ctx.baseUrl + '/memlog?kind=imports&show=all');
+  const body = await res.text();
+  assert.match(body, /snippet-import/);
+  assert.doesNotMatch(body, /snippet-comment/);
 });

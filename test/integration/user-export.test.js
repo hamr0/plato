@@ -273,6 +273,57 @@ test('userArchiveFilenameFor: shape uses 8-char handle prefix', () => {
   assert.equal(f, 'plato-export-user-aaaaaaaa-2026-05-06.tar.gz');
 });
 
+test('userArchiveFilenameFor: jobId disambiguator appended when supplied', () => {
+  const f = userArchiveFilenameFor(ALICE, new Date('2026-05-06T12:00:00Z'), { jobId: 'deadbeef00112233' });
+  assert.equal(f, 'plato-export-user-aaaaaaaa-2026-05-06-deadbeef.tar.gz');
+});
+
+test('buildUserArchiveBytes: index.html renders pseudonym, lists posts with links to per-post HTML, lists comments', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-'));
+  try {
+    seedUserFixture(db, postsDir);
+    // alice's post id from the fixture
+    const ALICE_POST_ID = '1234567890abcdef';
+    const tar = buildUserArchiveBytes(db, ALICE, {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+    });
+    const entries = readTar(tar);
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+    // Page identity
+    assert.match(indexHtml, /<title>[^<]*alice-pseudo[^<]*<\/title>/);
+    assert.match(indexHtml, /<h1>alice-pseudo — personal archive<\/h1>/);
+    // Source attribution
+    assert.match(indexHtml, /exported from\s*<a href="http:\/\/localhost">testforum<\/a>/);
+    // Post listed with link to its rendered HTML page
+    assert.match(indexHtml, new RegExp(`<a href="posts/${ALICE_POST_ID}\\.html">alice&apos;s post</a>`));
+    assert.match(indexHtml, /in \/\/news/);
+    // Section headers with counts (1 post, 1 comment)
+    assert.match(indexHtml, /\/\/ posts \(1\)/);
+    assert.match(indexHtml, /\/\/ comments \(1\)/);
+    // No JS, no external assets — banner + meta
+    assert.match(indexHtml, /no javascript/);
+    assert.match(indexHtml, /handle: <code>aaaaaaaaaaaaaaaa…<\/code>/);
+    // Comment snippet appears with sub attribution
+    assert.match(indexHtml, /thoughtful reply/);
+    assert.match(indexHtml, /on \/\/lobby/);
+    // The per-post HTML page exists and renders the title + body
+    const postHtml = entryByPath(entries, `posts/${ALICE_POST_ID}.html`).body.toString('utf8');
+    assert.match(postHtml, /<h1>alice&apos;s post<\/h1>/);
+    assert.match(postHtml, /alice-pseudo/);
+    // Self-contained: links archive.css, no external CDN
+    assert.match(postHtml, /<link rel="stylesheet" href="\.\.\/archive\.css">/);
+    assert.match(postHtml, /← index/);
+    // archive.css exists in the tar
+    assert.ok(entryByPath(entries, 'archive.css'), 'archive.css must be in the tarball');
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildUserArchiveBytes: votes.json doesn\'t leak OTHER users\' handles (only own)', () => {
   const db = memDb();
   const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-'));

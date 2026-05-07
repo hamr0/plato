@@ -691,6 +691,37 @@ test('buildSubArchiveBytes: pubkeyFingerprint when supplied lands in manifest.in
   }
 });
 
+test('buildSubArchiveBytes: index.html renders sub name, lists posts with links to per-post HTML, embeds archive.css link', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-'));
+  try {
+    const { postId } = seedSubFixture(db, postsDir, 'studio');
+    const tar = buildSubArchiveBytes(db, 'studio', {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+    });
+    const entries = readTar(tar);
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+    assert.match(indexHtml, /<h1>\/\/studio archive<\/h1>/);
+    assert.match(indexHtml, /exported from\s*<a href="http:\/\/localhost">testforum<\/a>/);
+    assert.match(indexHtml, new RegExp(`<a href="posts/${postId}\\.html">`));
+    assert.match(indexHtml, /\/\/ posts/);
+    assert.match(indexHtml, /<link rel="stylesheet" href="archive\.css">/);
+    // No JS, self-contained
+    assert.doesNotMatch(indexHtml, /<script\b/i);
+    // The per-post HTML page exists
+    const postHtml = entryByPath(entries, `posts/${postId}.html`).body.toString('utf8');
+    assert.match(postHtml, /← index/);
+    assert.match(postHtml, /<link rel="stylesheet" href="\.\.\/archive\.css">/);
+    // archive.css present
+    assert.ok(entryByPath(entries, 'archive.css'));
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildSubArchiveBytes: gzipped tarball round-trips through gunzip', async () => {
   const { gzipSync, gunzipSync } = await import('node:zlib');
   const db = memDb();
