@@ -37,6 +37,7 @@
   --up: #9ece6a;
   --down: #7aa2f7;
   --flair-text: #ffffff;   /* flair pill text — light by default; owners pick any background */
+  --note-bg: #3a3320;      /* sticky-note fill — muted amber tint over dark bg */
 }
 
 /* Light palette — paper-light preset. Two activation paths:
@@ -57,6 +58,7 @@
   --up: #117833;
   --down: #0066cc;
   --flair-text: #ffffff;
+  --note-bg: #fff8c5;      /* sticky-note fill — pale yellow over light bg */
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
@@ -70,6 +72,7 @@
     --up: #117833;
     --down: #0066cc;
     --flair-text: #ffffff;
+    --note-bg: #fff8c5;
   }
 }
 
@@ -1497,15 +1500,19 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .imported-banner strong { color: var(--text); }
 
 /* Sub sticky note (M8/B1) — the per-sub mod-voice slot above the feed.
-   One short paragraph, mod-editable. Visually distinct from posts: a
-   warm-accent left rule borrows the modlog-row idiom so readers
-   register "this is a moderator speaking", not another post. */
+   Full-frame yellow notice: filled background (--note-bg, theme-aware),
+   warm-accent border on all four sides, normal text color for high
+   contrast. Reads at-a-glance as "moderator speaking" — visually
+   different from posts, the sensitive-banner (red-rim warning), and
+   the imported-banner (dim chrome). */
 .sub-sticky-note {
-  border-left: 3px solid var(--accent-warm);
-  padding: 0.4rem 0.7rem;
-  margin: 0.4rem 0 0.6rem;
-  background: var(--surface-2, transparent);
-  font-size: 0.92rem;
+  border: 1px solid var(--accent-warm);
+  background: var(--note-bg);
+  color: var(--text);
+  padding: 0.5rem 0.8rem;
+  margin: 0.5rem 0 0.7rem;
+  border-radius: 3px;
+  font-size: 0.95rem;
 }
 .sub-sticky-note p { margin: 0.3rem 0; }
 .sub-sticky-note p:first-child { margin-top: 0; }

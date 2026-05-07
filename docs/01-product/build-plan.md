@@ -320,7 +320,9 @@ No clustering, no Docker images, no Prometheus exporter — operator brings thei
 
 **M8 logs reference (operator-facing).** Documented in operator-guide and cron-jobs.md: which logs plato writes itself (`$BACKUP_DIR/health.log`, `data/stats.log` — both naturally tiny, no rotation needed), which are operator-redirected from cron (`/var/log/plato-*.log` — `logrotate.d` snippet provided, daily/14-day/compressed). The "If something breaks" entry at the top of *When something goes wrong* points operators at the GitHub issue tracker and notes that B4's alert email already contains a paste-ready issue body.
 
-**Out of M8 (deferred or out for v1):** docker-compose, full-text search, mobile-responsive layout pass, GitHub Actions CI, multi-instance migration story. Each is a separate milestone or a permanent deferral if PRD §Permanently out applies.
+**Out of M8 (deferred or out for v1):** docker-compose for production deploys, full-text search, mobile-responsive layout pass, GitHub Actions CI, multi-instance migration story. Each is a separate milestone or a permanent deferral if PRD §Permanently out applies.
+
+**Locked-in for post-M8 — evaluation Docker image.** Shippable single-image `Dockerfile` for the "try plato in 30 seconds" path: `docker run -p 8080:8080 plato/plato:latest` boots a fresh instance with an in-memory-ish DB and a banner on `/about` that says "evaluation image — for tinkering, not production. For production, see operator-guide." Distinct from production deploy (which stays no-docker; systemd + cron + logrotate is the recommended path because plato is single-process / single-SQLite / single-port — see operator-guide §Why no docker for production for the reasoning). The eval image is a marketing/adoption surface only; production-shape posture is unchanged. Concretely: a Dockerfile in the repo root, a CHANGELOG note when published, a README block. No compose file, no volume management, no production guidance attached.
 
 **Out of M8 (still permanently out per PRD):** post-pinning, per-sub themes, multiple sticky notes, sticky-note as algorithmic feed promotion, supervisord/systemd opinions baked into plato.
 

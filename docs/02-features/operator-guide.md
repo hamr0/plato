@@ -390,6 +390,19 @@ If you want any of the above different, plato is the wrong starting point — fo
 
 ## Running plato
 
+### Why no docker for production
+
+plato is single-process / single-SQLite-file / single-port by design (see *What's locked in*). Docker's value-add lines up with the *opposite* of those decisions — multi-service orchestration, horizontal scaling, env-var-everything config — so wrapping plato in a container layer adds friction without solving anything plato needs:
+
+- **Config gets worse.** plato has `config.json` (validated at boot, single source of truth) plus a few env vars for secrets/paths. Docker conventions push everything to env vars; you'd either bind-mount `config.json` (a worse version of "edit the file in place") or expand the env-var surface to mirror every config key.
+- **Backups get awkward.** `bin/backup.sh` does an atomic `sqlite3 .backup` against a known file path. Inside docker that's either `docker exec` from cron (couples cron to container lifecycle) or expose the file via volume (leaks the implementation detail you containerized to hide).
+- **`/healthz` gets less useful.** Docker has its own `HEALTHCHECK`, so you'd run two healthchecks with two log destinations.
+- **Migrations get a "when" question.** Today: `npm run migrate && npm start`. With docker: container-start race? Init container? One-shot `docker run … npm run migrate`? All of those replace one explicit step with multiple implicit ones.
+
+The recommended production path is: **systemd unit + cron + logrotate + the `bin/*.sh` scripts in this guide.** Any VPS with Node ≥ 22.5 and `sqlite3` already has everything plato needs — `nvm install 22 && apt install sqlite3` is the entire prep.
+
+A separate "evaluation Docker image" is on the roadmap (`docker run -p 8080:8080 plato/plato:latest` for kicking the tires). That's a marketing/onboarding surface, not a deploy path; production posture stays no-docker.
+
 ### First-time install
 
 ```bash
