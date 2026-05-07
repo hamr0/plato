@@ -43,28 +43,28 @@
  * the sticky-dark override for users on a light-default OS who
  * clicked the toggle to dark — wins back over the media query. */
 [data-theme="light"]:root {
-  --bg: #fafafa;
-  --bg-soft: #f4f4f5;
-  --border: #d4d4d8;
-  --text: #18181b;
-  --text-dim: #52525b;
-  --accent: #0066cc;
-  --accent-warm: #b45309;
-  --up: #15803d;
-  --down: #0066cc;
+  --bg: #f6f8fa;        /* off-white — natural inverse of #0d1117 dark default; gentler than pure paper for long sessions */
+  --bg-soft: #eaeef2;
+  --border: #d0d7de;
+  --text: #1f2328;      /* slightly softer than near-black so the page doesn't punch */
+  --text-dim: #57606a;
+  --accent: #0969da;
+  --accent-warm: #9a6700;
+  --up: #1a7f37;
+  --down: #0969da;
   --flair-text: #ffffff;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #fafafa;
-    --bg-soft: #f4f4f5;
-    --border: #d4d4d8;
-    --text: #18181b;
-    --text-dim: #52525b;
-    --accent: #0066cc;
-    --accent-warm: #b45309;
-    --up: #15803d;
-    --down: #0066cc;
+    --bg: #f6f8fa;
+    --bg-soft: #eaeef2;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --text-dim: #57606a;
+    --accent: #0969da;
+    --accent-warm: #9a6700;
+    --up: #1a7f37;
+    --down: #0969da;
     --flair-text: #ffffff;
   }
 }
@@ -773,7 +773,22 @@ button:hover { filter: brightness(1.1); }
 .active-sub-row .desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .active-sub-row .stats { font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .active-subs-foot { margin: 0.4rem 0 0; font-size: 0.85rem; }
-.active-subs-foot .new-sub { color: var(--accent); }
+/* `+ new sub` mirrors the .filter-btn pill so the home action row reads as one
+ * consistent button family with the home/modlog/memlog filter chips. */
+.new-sub {
+  display: inline-block;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.new-sub:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  text-decoration: none;
+}
 
 /* Collapsed new-post form — looks like a tappable action, not a section label */
 .new-post-toggle { margin: 1.5rem 0 0.6rem; }
