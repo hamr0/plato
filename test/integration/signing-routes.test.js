@@ -171,6 +171,51 @@ test('GET /export/<token>.tar.gz.sig: sig file missing on disk → 404 (archive 
   assert.equal(res.status, 404);
 });
 
+// ---- /export/<token>.tar.gz.ots (M7/B6 — operator-opt-in OpenTimestamps) ----
+
+test('GET /export/<token>.tar.gz.ots: serves .ots proof when present on disk', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const archiveBytes = gzipSync(Buffer.from('payload'));
+  const { token, filename } = seedSignedExport(ctx.db, ctx.exportsDir, {
+    handle: 'h'.repeat(64), subName: 'lobby', body: archiveBytes,
+  });
+  // Synthesize a fake .ots proof next to the archive (operator with
+  // ots-cli would land here naturally; we just write bytes for the
+  // route test).
+  const otsBytes = Buffer.from('opentimestamps proof v1: stub bytes for test');
+  const { writeFileSync } = await import('node:fs');
+  writeFileSync(join(ctx.exportsDir, `${filename}.ots`), otsBytes);
+  const res = await fetch(`${ctx.baseUrl}/export/${token}.tar.gz.ots`, { redirect: 'manual' });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/octet-stream');
+  assert.match(res.headers.get('content-disposition'), /\.tar\.gz\.ots"/);
+  assert.equal(res.headers.get('cache-control'), 'private, no-store');
+  const got = Buffer.from(await res.arrayBuffer());
+  assert.deepEqual(got, otsBytes);
+});
+
+test('GET /export/<token>.tar.gz.ots: missing proof → 404 with operator-opt-in hint', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const archiveBytes = gzipSync(Buffer.from('payload'));
+  const { token } = seedSignedExport(ctx.db, ctx.exportsDir, {
+    handle: 'h'.repeat(64), subName: 'lobby', body: archiveBytes,
+  });
+  // No .ots file written — simulates an operator who hasn't installed
+  // ots-cli.
+  const res = await fetch(`${ctx.baseUrl}/export/${token}.tar.gz.ots`, { redirect: 'manual' });
+  assert.equal(res.status, 404);
+  const body = await res.text();
+  assert.match(body, /operator may not have opted in/);
+});
+
+test('GET /export/<token>.tar.gz.ots: bad token → 404', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(`${ctx.baseUrl}/export/${'0'.repeat(64)}.tar.gz.ots`, { redirect: 'manual' });
+  assert.equal(res.status, 404);
+});
+
 test('GET /export/<token>.tar.gz: signature path no longer matches the .tar.gz route', async (t) => {
   // Defensive: ensure the EXPORT_DOWNLOAD_PATH_RE is anchored so .sig doesn't satisfy it.
   const ctx = await spinUp(); t.after(() => teardown(ctx));

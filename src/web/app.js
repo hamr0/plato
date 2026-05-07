@@ -1241,6 +1241,7 @@ function renderAbout(req, res, { db, auth }) {
     <p>every export this instance produces is signed with an Ed25519 keypair belonging to this server. the public half lives at <a href="/.well-known/plato-pubkey">/.well-known/plato-pubkey</a> and its fingerprint is:</p>
     <pre><code>${instanceKey.fingerprint}</code></pre>
     <p>each archive ships with a sibling <code>.tar.gz.sig</code> file containing the detached signature; the manifest's <code>instance.pubkey_fingerprint</code> field carries the same value. an importer fetches the pubkey from this URL, confirms the fingerprint matches, then verifies the signature over the gzipped bytes.</p>
+    <p>if this operator opted into <strong>OpenTimestamps</strong> anchoring, archives also ship with a <code>.tar.gz.ots</code> proof. that proof anchors the archive's hash to a Bitcoin block within roughly an hour after stamping, giving anyone a way to prove the archive existed before that block's timestamp without trusting plato or this operator. a missing <code>.ots</code> file means OTS wasn't enabled here — verification falls back to the Ed25519 signature alone. see <a href="https://opentimestamps.org">opentimestamps.org</a> for the verification recipe (<code>ots verify &lt;archive&gt;.tar.gz.ots</code>).</p>
   </section>`;
 
   const fork = html`<section class="about-section">
@@ -3364,6 +3365,34 @@ function handleExportDownload(res, { db, exportsDir }, token) {
   res.end(buf);
 }
 
+// GET /export/<token>.tar.gz.ots — sibling OpenTimestamps proof
+// (M7/B6). Token-bearer, same posture as the .sig route. 404 if the
+// .ots file is missing on disk — operator may not have ots-cli
+// installed, in which case stamps were silently skipped at export
+// time; an importer-side verifier should treat .ots-absence as
+// "operator opted out" rather than "verification failed."
+function handleExportOtsDownload(res, { db, exportsDir }, token) {
+  const job = findCompletedJobByToken(db, token);
+  if (!job) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('not found or expired');
+  }
+  const otsName = `${job.archive_filename}.ots`;
+  const path = resolve(exportsDir, otsName);
+  if (!existsSync(path)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('ots proof not present (operator may not have opted in)');
+  }
+  const buf = readFileSync(path);
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Content-Disposition': `attachment; filename="${otsName}"`,
+    'Cache-Control': 'private, no-store',
+    'Content-Length': String(buf.length),
+  });
+  res.end(buf);
+}
+
 // GET /export/<token>.tar.gz.sig — sibling detached Ed25519 signature
 // over the gzipped archive bytes (M7/B4). Same token-bearer posture as
 // the .tar.gz route: the token IS the credential. 404s if the sig file
@@ -4764,6 +4793,7 @@ const SUB_SUBSCRIBE_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/subscribe$/;
 const SUB_EXPORT_REQUEST_PATH_RE = /^\/sub\/([a-z0-9-]{3,30})\/export-request$/;
 const EXPORT_DOWNLOAD_PATH_RE   = /^\/export\/([0-9a-f]{64})\.tar\.gz$/;
 const EXPORT_SIG_DOWNLOAD_PATH_RE = /^\/export\/([0-9a-f]{64})\.tar\.gz\.sig$/;
+const EXPORT_OTS_DOWNLOAD_PATH_RE = /^\/export\/([0-9a-f]{64})\.tar\.gz\.ots$/;
 const SUB_RSS_PATH_RE       = /^\/sub\/([a-z0-9-]{3,30})\/rss$/;
 const PERSONAL_RSS_PATH_RE      = /^\/u\/([0-9a-f]{64})\/rss$/;
 const PERSONAL_SUBS_RSS_PATH_RE = /^\/u\/([0-9a-f]{64})\/subs\.rss$/;
@@ -4990,6 +5020,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       }
       if ((m = path.match(EXPORT_SIG_DOWNLOAD_PATH_RE)) && method === 'GET') {
         return handleExportSignatureDownload(res, { db, exportsDir }, m[1]);
+      }
+      if ((m = path.match(EXPORT_OTS_DOWNLOAD_PATH_RE)) && method === 'GET') {
+        return handleExportOtsDownload(res, { db, exportsDir }, m[1]);
       }
       if ((m = path.match(SUB_RSS_PATH_RE)) && method === 'GET') {
         return renderSubRss(res, { db, postsDir }, m[1]);

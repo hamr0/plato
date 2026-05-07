@@ -32,6 +32,7 @@ import { recordNotification } from '../src/content/notification.js';
 import { buildSubArchiveBytes, archiveFilenameFor } from '../src/archive/sub-export.js';
 import { buildUserArchiveBytes, userArchiveFilenameFor } from '../src/archive/user-export.js';
 import { getOrCreateInstanceKeypair, signBytes } from '../src/archive/signing.js';
+import { stampFile } from '../src/archive/timestamp.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -129,6 +130,16 @@ try {
   // + .sig. Spec: docs/02-features/archive-format.md (Signing).
   const sig = signBytes(instanceKey.privateKey, gz);
   writeFileSync(resolve(EXPORTS_DIR, `${filename}.sig`), sig);
+  // OpenTimestamps anchor (M7/B6). Best-effort: if `ots` CLI is missing
+  // (operator hasn't opted in) or any calendar is down, log and proceed
+  // — the export still ships .tar.gz + .sig regardless. The proof is
+  // calendar-pending until bin/run-ots-upgrade.js refreshes it.
+  const otsResult = await stampFile(resolve(EXPORTS_DIR, filename));
+  if (otsResult.error) {
+    console.log(`[export-queue] ots stamp skipped (${otsResult.error})`);
+  } else {
+    console.log(`[export-queue] ots stamp ok → ${filename}.ots (calendar-pending until next ots-upgrade)`);
+  }
   const token = newDownloadToken();
   completeJob(db, job.id, {
     archiveFilename: filename,
