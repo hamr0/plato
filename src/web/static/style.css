@@ -963,15 +963,24 @@ button:hover { filter: brightness(1.1); }
 
 /* Long comments collapse behind read-more. summary shows the first ~280
  * chars; expanding swaps in the full rendered body. Top-level comments
- * (depth 0) stay uncapped since they're direct replies to the post. */
+ * (depth 0) stay uncapped since they're direct replies to the post.
+ *
+ * Toggle UX: closed state shows the preview ellipsis + "read more";
+ * open state hides the preview + the read-more label and surfaces
+ * "show less" instead, so the user has an obvious affordance to fold
+ * back. The summary itself stays clickable in both states. */
 .comment-long > summary {
   cursor: pointer;
   list-style: none;
   white-space: pre-wrap;
 }
 .comment-long > summary::-webkit-details-marker { display: none; }
-.comment-long > summary .read-more { color: var(--accent); }
-.comment-long[open] > summary { display: none; }
+.comment-long > summary .read-more,
+.comment-long[open] > summary .show-less { color: var(--accent); }
+.comment-long > summary .show-less { display: none; }
+.comment-long[open] > summary .comment-preview,
+.comment-long[open] > summary .read-more { display: none; }
+.comment-long[open] > summary .show-less { display: inline; }
 .composer-bar .textarea-wrap { flex: 1; }
 .composer-bar button { white-space: nowrap; align-self: center; margin-left: auto; }
 

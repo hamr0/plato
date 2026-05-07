@@ -143,7 +143,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=34">
+<link rel="stylesheet" href="/static/style.css?v=35">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -2407,7 +2407,7 @@ function commentNodeView(node, ctx, depth) {
     const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
     const longBody = isLong
       ? html`<details class="comment-long">
-          <summary class="muted">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… <span class="read-more">read more</span></summary>
+          <summary class="muted"><span class="comment-preview">${node.body.slice(0, COMMENT_PREVIEW_CHARS).trimEnd()}… </span><span class="read-more">read more</span><span class="show-less">show less</span></summary>
           ${fullBody}
         </details>`
       : fullBody;
