@@ -975,6 +975,21 @@ button:hover { filter: brightness(1.1); }
 .composer-bar .textarea-wrap { flex: 1; }
 .composer-bar button { white-space: nowrap; align-self: center; margin-left: auto; }
 
+/* Inline per-comment reply form mirrors the composer-bar shape so the
+ * "comment" and "reply" actions read as the same idiom: textarea takes
+ * the row, pill-shaped button anchors to the right edge and centers
+ * vertically between the textarea and the char counter. The hidden
+ * parent_id input stays in flow but takes no visible space. */
+.reply-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+  margin: 0.4rem 0 0;
+}
+.reply-form .textarea-wrap { flex: 1; min-width: 0; }
+.reply-form button { white-space: nowrap; align-self: center; margin-left: auto; }
+
 /* Page padding so the last comment isn't hidden behind the bar. Apply to
  * body when the bar is present — guarded by a sub-tree class on the post
  * page so other pages aren't affected. */

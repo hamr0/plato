@@ -143,7 +143,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=32">
+<link rel="stylesheet" href="/static/style.css?v=33">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -2390,7 +2390,7 @@ function commentNodeView(node, ctx, depth) {
             <textarea name="body" placeholder="markdown reply" maxlength="${COMMENT_BODY_MAX}" data-charcount required></textarea>
             <div class="char-counter muted" data-for="body" aria-live="polite">0 / ${COMMENT_BODY_MAX}</div>
           </div>
-          <button>reply</button>
+          <button class="mod-action-pill">reply</button>
         </form>
       </details>`
     : html``;
