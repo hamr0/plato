@@ -1304,7 +1304,19 @@ function renderAbout(req, res, { db, auth }) {
     <p><strong>mods.</strong> each sub has exactly one <em>mod</em> (the creator) and any number of <em>co-mods</em> the mod has promoted from its subscribers. mods can collapse posts (soft-hide; reversible by community votes), remove posts (hard, for harassment / illegal content), ban users from their sub, and resolve flags. every mod action lands in the <a href="/modlog">public modlog</a> with the mod's pseudonym and reason — no shadowbans, no quiet removals.</p>
     <p><strong>flags.</strong> if you see a problem, click the flag button. flags go into a queue every mod of that sub can see; the first mod to act handles it. enough distinct flags on the same target also auto-collapses it pending mod review.</p>
     <p><strong>read-only subs.</strong> a sub becomes read-only — content viewable, no new posts/comments/votes — when its mod steps down without a successor, or when no mod has been active in it for 30 days (a 28-day warning surfaces in a banner before that). a current mod can flip it back to active anytime. if no mods remain, the sub stays read-only as a permanent record; the community migrates by creating a successor sub. the operator does not assign new mods or override sub state — communities decide their own fate.</p>
-    <p><strong>leaving.</strong> you can export your own contribution as an archive (M7, in progress). the archive is yours; importing it elsewhere or never importing it is your call.</p>
+    <p><strong>leaving.</strong> request your archive from <a href="/memlog">/memlog</a>; mods of a sub (or any 60-day continuous subscriber) can request that sub's archive from <code>/sub/&lt;name&gt;/manage</code>. you'll get a memlog notification with a token-bearer download link. the archive is yours; importing it elsewhere or never importing it is your call.</p>
+  </section>`;
+
+  const interop = html`<section class="about-section">
+    <h3>interop &amp; portability</h3>
+    <p>your data is portable, and the export shape is human-friendly enough to read without plato installed.</p>
+    <ul>
+      <li><strong>personal archive</strong> — every logged-in user can request their own archive (no tenure gate; your data is yours from day one). it contains your authored posts and comments, your subscriptions, mod actions on your content, and mod actions you took. request from <a href="/memlog">/memlog</a>; the worker builds a signed <code>.tar.gz</code> within the next off-peak window and a memlog notification surfaces a token-bearer download link.</li>
+      <li><strong>sub archive</strong> — mods can export any sub they moderate; non-mods can request after 60 days of continuous subscription. contains every post, every comment, every mod action, and vote tallies (no per-voter handles). request from <code>/sub/&lt;name&gt;/manage</code>.</li>
+      <li><strong>readable offline, in any browser</strong> — both archive kinds bundle a self-contained <code>index.html</code> static reader: no JavaScript, no external assets, no plato install needed. open it directly from disk. above 100 items the reader auto-paginates with kind + per-year chips so a multi-year sub doesn't become one giant page.</li>
+      <li><strong>sub archives are importable</strong> into any other plato instance via URL paste at <code>/sub/create?mode=import</code> — the destination fetches the bytes, verifies the signature, and rehydrates posts / comments / votes / modlog with original timestamps. imported handles render dim+italic with a per-sub <code>[i]</code> chip carrying provenance. personal archives are not importable (the posts inside are tied to subs on the source instance).</li>
+      <li><strong>posts are plain markdown on disk</strong> from the moment you submit them. <code>posts/&lt;date&gt;-&lt;id&gt;.md</code> files are the canonical store; the database is an index, regenerable. you can read them with <code>cat</code>, edit them with any text editor, version them with git, or bypass plato entirely and feed them to a static-site generator.</li>
+    </ul>
   </section>`;
 
   send(res, 200, pageView({
@@ -1317,6 +1329,7 @@ function renderAbout(req, res, { db, auth }) {
       <p>this is a <strong>plato</strong> instance, hosted by ${handle}.${feedback}</p>
       ${rules}
       ${howItWorks}
+      ${interop}
       ${dataHandling}
       ${signing}
       ${fork}
