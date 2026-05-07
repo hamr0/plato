@@ -4026,10 +4026,13 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   // disables the button; recent-completed shows expiry.
   const exportBlock = personalExportBlock({ db, handle, queuedHint: searchParams?.get('export') === 'queued' });
   const inFlightBlock = inFlightRequestsBlock({ db, handle });
-  // Auto-refresh while jobs are pending/in-progress — workers tick on
-  // off-peak crontab so 30s is the smallest cadence that's likely to
-  // surface a state change. The block self-clears once the state
-  // machine moves past in-progress, so the meta-refresh stops with it.
+  // Auto-refresh while jobs are pending/in-progress. 30s is short
+  // enough to surface a state change promptly once a worker actually
+  // claims the row; outside the off-peak window (default 01:00–06:00,
+  // bin/run-export-queue.js) the page just reloads against unchanged
+  // state until the next worker tick. Acceptable cost — the block
+  // self-clears the moment the row leaves pending+in-progress, so
+  // the refresh loop stops with it.
   const headExtra = inFlightBlock
     ? raw('<meta http-equiv="refresh" content="30">')
     : null;

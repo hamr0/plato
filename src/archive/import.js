@@ -34,6 +34,18 @@ import { resolve } from 'node:path';
 import { sha256Hex, validateManifest } from './manifest.js';
 import { readTar } from './extract.js';
 import { recordSubImport } from '../content/mod.js';
+import { AUTO_UNCOLLAPSE_POST_FLOOR, AUTO_UNCOLLAPSE_COMMENT_FLOOR } from '../content/sub.js';
+import { FLAG_THRESHOLD_FLOOR } from '../content/flag.js';
+
+// Clamp a per-sub spam-defense value from the manifest up to this
+// instance's floor. The source instance may have run with looser
+// floors (older plato version, or a fork that lowered them); the
+// destination always enforces its own. Non-integers and missing
+// values fall back to the floor outright.
+function clampToFloor(value, floor) {
+  if (!Number.isInteger(value)) return floor;
+  return value < floor ? floor : value;
+}
 
 // Pseudonym format from src/identity/pseudonym.js: "<adjective>-<animal>"
 // (two unique-names-generator words separated by a single hyphen). On
@@ -204,6 +216,15 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
   if (!Number.isFinite(sourceExportedAtMs)) {
     throw new Error(`import: manifest.exported_at is not a valid timestamp (${manifest.exported_at})`);
   }
+  // Spam-defense floors are this instance's responsibility — clamp
+  // every per-sub value the manifest carries up to local floors before
+  // the row lands. A source instance running an older plato (or a fork
+  // that lowered floors) cannot import a sub whose flag_threshold = 1
+  // or auto_uncollapse_post = 5 here. CLAUDE.md "Spam-defense floor
+  // model" — operators can tighten, never loosen.
+  const flagThreshold = clampToFloor(sub.flag_threshold, FLAG_THRESHOLD_FLOOR);
+  const autoUncollapsePost = clampToFloor(sub.auto_uncollapse_post, AUTO_UNCOLLAPSE_POST_FLOOR);
+  const autoUncollapseComment = clampToFloor(sub.auto_uncollapse_comment, AUTO_UNCOLLAPSE_COMMENT_FLOOR);
   db.prepare(
     `INSERT INTO subs (
        name, description, owner_handle, default_sort, created_at,
@@ -220,9 +241,9 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
     sub.sensitive ? 1 : 0,
     JSON.stringify(sub.flairs ?? []),
     sub.flairs_required ? 1 : 0,
-    sub.flag_threshold ?? 3,
-    sub.auto_uncollapse_post ?? 50,
-    sub.auto_uncollapse_comment ?? 20,
+    flagThreshold,
+    autoUncollapsePost,
+    autoUncollapseComment,
     null, // not disabled — the importer is now the active mod
     sourceUrl ?? manifest.instance.base_url ?? null,
     sourceFp,

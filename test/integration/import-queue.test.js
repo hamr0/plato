@@ -442,6 +442,92 @@ test('importSubArchive: writes a native modlog row crediting the importer (M7 fo
   }
 });
 
+test('importSubArchive: clamps sub-floor flag_threshold up to FLAG_THRESHOLD_FLOOR', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-floor-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    parsed.sub.flag_threshold = 1; // below floor (3)
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const row = destDb.prepare('SELECT flag_threshold FROM subs WHERE name = ?').get('lobby');
+    assert.equal(row.flag_threshold, 3, 'clamped to floor, not stored as 1');
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
+test('importSubArchive: clamps sub-floor auto_uncollapse_post up to AUTO_UNCOLLAPSE_POST_FLOOR', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-floor-p-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    parsed.sub.auto_uncollapse_post = 5; // below floor (50)
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const row = destDb.prepare('SELECT auto_uncollapse_post FROM subs WHERE name = ?').get('lobby');
+    assert.equal(row.auto_uncollapse_post, 50);
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
+test('importSubArchive: clamps sub-floor auto_uncollapse_comment up to AUTO_UNCOLLAPSE_COMMENT_FLOOR', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-floor-c-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    parsed.sub.auto_uncollapse_comment = 2; // below floor (20)
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const row = destDb.prepare('SELECT auto_uncollapse_comment FROM subs WHERE name = ?').get('lobby');
+    assert.equal(row.auto_uncollapse_comment, 20);
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
+test('importSubArchive: preserves above-floor values verbatim (operator can tighten, never loosen)', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-floor-keep-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    parsed.sub.flag_threshold = 7;
+    parsed.sub.auto_uncollapse_post = 200;
+    parsed.sub.auto_uncollapse_comment = 100;
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const row = destDb.prepare(
+      'SELECT flag_threshold, auto_uncollapse_post, auto_uncollapse_comment FROM subs WHERE name = ?'
+    ).get('lobby');
+    assert.equal(row.flag_threshold, 7);
+    assert.equal(row.auto_uncollapse_post, 200);
+    assert.equal(row.auto_uncollapse_comment, 100);
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
 test('importSubArchive: auto-subscribes the importer (mirrors createSub lock so mem >= 1)', async () => {
   const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
   const destDb = memDb();

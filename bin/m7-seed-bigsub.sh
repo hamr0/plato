@@ -45,9 +45,21 @@ const ALICE = deriveHandle(normalize('alice@manual-smoke.test'), A_SECRET);
 const BOB   = deriveHandle(normalize('bob@manual-smoke.test'),   A_SECRET);
 const db = openDb(`${ROOT_TMP}/a/forum.db`);
 
-const exists = db.prepare('SELECT 1 FROM subs WHERE name = ?').get('bigstudio');
-if (exists) {
-  console.error('//bigstudio already seeded — skip.');
+const existing = db.prepare('SELECT created_at FROM subs WHERE name = ?').get('bigstudio');
+
+// Heal-only path: if //bigstudio already exists, just patch the
+// owner-subscription row (the original seed predates the createSub
+// lock) and exit. Lets operators who ran the seed before this fix
+// `git pull` + re-run to backfill without dropping their state.
+if (existing) {
+  const healed = db.prepare(
+    'INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?,?,?)'
+  ).run(ALICE, 'bigstudio', existing.created_at);
+  console.error(
+    healed.changes > 0
+      ? '//bigstudio already seeded — backfilled missing owner subscription.'
+      : '//bigstudio already seeded — nothing to heal.'
+  );
   process.exit(0);
 }
 
