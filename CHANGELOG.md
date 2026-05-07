@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — `/healthz` operator probe (M8/B2)
+
+New public, unauthenticated `GET /healthz` returns JSON
+`{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}`
+with `Cache-Control: no-store`. Status code is `200` when both
+writability checks pass and `503` when either fails — so an external
+watcher (a curl in cron, a Pingdom-style probe, the B4 health-watcher
+cron coming next) can alarm on non-2xx without parsing the body.
+
+`db_writable` runs `BEGIN IMMEDIATE; ROLLBACK;` so the probe acquires
+the same reserved lock real writes do (read-only mounts and stale
+handles surface here, not just at the next user POST).
+`exports_dir_writable` is an `accessSync(W_OK)` against the configured
+`exportsDir`; not-configured counts as false. `version` is read from
+`package.json` once at module load. `last_migration` reads the
+`schema_migrations` tail and returns null when the table is absent
+(fresh installs, or test fixtures that bypass `bin/migrate.js`).
+
+Operator-guide section under recurring operations explains the curl
+one-liner. The B4 watcher cron will tail this route and email the
+operator on non-2xx; B2 is the surface, B4 is the consumer.
+
 ### Locked — post + comment length caps stay at Reddit's numbers
 
 Server-side caps `TITLE_MAX = 300` / `BODY_MAX = 40 000` / `COMMENT_BODY_MAX = 10 000` are now PRD-locked at Reddit's exact numbers (PRD §Content Model → Length limits). Plato's audience overlap with Reddit is the largest of the forum-shaped peers, so a Redditor pasting an existing post over should just work. HN/Lobsters tighten via social pressure; plato's visual layer already nudges shorter without constraining the cap (`COMMENT_PREVIEW_CHARS = 280` auto-folds long comments, feed previews truncate post bodies to one paragraph). If real usage shows runaway thread sprawl, drop `COMMENT_BODY_MAX` to 5 000 — that's the next stop along the HN direction. Don't tighten preemptively.

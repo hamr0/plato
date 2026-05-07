@@ -115,6 +115,7 @@ Validate at boot: missing required env fails fast with a clear error. The server
 | GET | `/post/<id>` | canonical post permalink |
 | POST | `/vote` | cast/toggle/switch a vote |
 | POST | `/flag` | submit a flag (categories: spam/harassment/illegal/off_topic/other) |
+| GET | `/healthz` | operator probe (M8/B2). Public, no auth, no body parsing. JSON `{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}`. `Cache-Control: no-store`. `200` when DB + exports dir are writable; `503` otherwise so an external watcher can alarm on non-2xx. |
 | GET | `/avatar/<handle>.svg` | deterministic identicon |
 | GET | `/static/*` | CSS/JS/icons (path-traversal-safe) |
 | GET/POST | `/login`, `/auth/callback`, `/verify`, `/logout` | mounted by knowless |

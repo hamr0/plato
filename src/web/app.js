@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { accessSync, constants as fsConstants, existsSync, readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { html, render, raw, escapeHTML } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
@@ -183,6 +184,15 @@ const branding = {
 // Set at boot from createApp. layout() reads `siteMeta.baseUrl` to compose
 // canonical / og:url. Module-scoped (one process per instance).
 const siteMeta = { baseUrl: '' };
+
+const APP_VERSION = (() => {
+  try {
+    const pkgPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json');
+    return JSON.parse(readFileSync(pkgPath, 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+})();
 
 // Operator-supplied vote-color overrides emitted as inline <style> in
 // <head>. Two scopes: the dark palette wins under :root; the light
@@ -2879,6 +2889,7 @@ function renderRobots(res) {
     'Disallow: /logout',
     'Disallow: /verify',
     'Disallow: /auth/',
+    'Disallow: /healthz',
     'Disallow: /memlog',
     'Disallow: /modlog/resolve',
     'Disallow: /sub/*/subscribe',
@@ -2919,6 +2930,49 @@ function renderHumans(res) {
   );
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   res.end(lines.join('\n'));
+}
+
+// /healthz — operator probe surface (M8/B2). Public, no auth, no body
+// parsing, no caching. 200 when DB is writable and exports dir is
+// writable; 503 when any check fails so an external watcher (B4) can
+// alarm on it.
+function handleHealthz(res, { db, exportsDir }) {
+  let dbWritable = false;
+  try {
+    db.exec('BEGIN IMMEDIATE; ROLLBACK;');
+    dbWritable = true;
+  } catch {}
+
+  let exportsDirWritable = false;
+  try {
+    if (exportsDir) {
+      accessSync(exportsDir, fsConstants.W_OK);
+      exportsDirWritable = true;
+    }
+  } catch {}
+
+  let lastMigration = null;
+  try {
+    const row = db.prepare(
+      'SELECT filename FROM schema_migrations ORDER BY applied_at DESC LIMIT 1'
+    ).get();
+    lastMigration = row?.filename ?? null;
+  } catch {}
+
+  const ok = dbWritable && exportsDirWritable;
+  const body = JSON.stringify({
+    ok,
+    version: APP_VERSION,
+    uptime_s: Math.floor(process.uptime()),
+    db_writable: dbWritable,
+    exports_dir_writable: exportsDirWritable,
+    last_migration: lastMigration,
+  });
+  res.writeHead(ok ? 200 : 503, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
 }
 
 // /.well-known/security.txt — RFC 9116. Declares how to report security
@@ -5306,6 +5360,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
 
       if (await applyStaticRoute(req, res)) return;
 
+      if (path === '/healthz' && method === 'GET') return handleHealthz(res, { db, exportsDir });
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/humans.txt' && method === 'GET') return renderHumans(res);
