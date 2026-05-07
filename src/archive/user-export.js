@@ -92,10 +92,11 @@ function fmtTimestamp(ms) {
   return new Date(ms).toISOString();
 }
 
-function renderIndexHtml({ pseudonym, handle, posts, comments, instance }) {
-  const sourceLine = instance.base_url
-    ? `exported from <a href="${escapeHtml(instance.base_url)}">${escapeHtml(instance.forum_name)}</a> · format v1`
-    : `exported from ${escapeHtml(instance.forum_name)} · format v1`;
+function renderIndexHtml({ pseudonym, handle, posts, comments }) {
+  const activeSubs = [...new Set([...posts, ...comments].map((r) => r.sub_name))].sort();
+  const activeLine = activeSubs.length > 0
+    ? `<p class="muted">active in ${activeSubs.map((s) => `//${escapeHtml(s)}`).join(', ')}</p>`
+    : '';
 
   const postItems = posts.length === 0
     ? '<p class="muted">no posts authored.</p>'
@@ -107,7 +108,7 @@ function renderIndexHtml({ pseudonym, handle, posts, comments, instance }) {
         return `<li>
           <a href="posts/${escapeHtml(p.id)}.html">${escapeHtml(p.title)}</a>
           ${tags.length ? `<span class="muted">${escapeHtml(tags.join(' '))}</span>` : ''}
-          <div class="meta">in //${escapeHtml(p.sub_name)} · ${fmtTimestamp(p.created_at)} · score ${p.score}</div>
+          <div class="meta">in //${escapeHtml(p.sub_name)} · ${fmtTimestamp(p.created_at)}</div>
         </li>`;
       }).join('\n')}</ul>`;
 
@@ -116,15 +117,13 @@ function renderIndexHtml({ pseudonym, handle, posts, comments, instance }) {
     : `<ul class="comments">${comments.slice().sort((a, b) => b.created_at - a.created_at).slice(0, 100).map((c) => {
         const snippet = (c.body || '').replace(/\s+/g, ' ').slice(0, 140);
         return `<li>
-          <div class="meta">on //${escapeHtml(c.sub_name)} · ${fmtTimestamp(c.created_at)} · score ${c.score}</div>
+          <div class="meta">on //${escapeHtml(c.sub_name)} · ${fmtTimestamp(c.created_at)}</div>
           <div>${escapeHtml(snippet)}${(c.body || '').length > 140 ? '…' : ''}</div>
         </li>`;
       }).join('\n')}${comments.length > 100 ? `<p class="muted">… ${comments.length - 100} more in <code>comments.json</code></p>` : ''}</ul>`;
 
   return `<h1>${escapeHtml(pseudonym || handle.slice(0, 8))} — personal archive</h1>
-<p class="muted">${sourceLine}</p>
-<p class="muted">handle: <code>${escapeHtml(handle.slice(0, 16))}…</code></p>
-<p class="muted">offline static reader. no javascript. read-only. see README.md for the schema.</p>
+${activeLine}
 <h2 class="section">// posts (${posts.length})</h2>
 ${postItems}
 <h2 class="section">// comments (${comments.length})</h2>
@@ -144,7 +143,7 @@ function renderPostHtml({ post, postBody, pseudonym, subName }) {
 
   return `<p><a href="../index.html">← index</a></p>
 <h1>${escapeHtml(post.title)}</h1>
-<p class="muted">posted by ${escapeHtml(pseudonym || post.handle.slice(0, 8))} in //${escapeHtml(subName)} · ${fmtTimestamp(post.created_at)}${post.edited_at ? ' · edited' : ''} · score ${post.score}</p>
+<p class="muted">posted by ${escapeHtml(pseudonym || post.handle.slice(0, 8))} in //${escapeHtml(subName)} · ${fmtTimestamp(post.created_at)}${post.edited_at ? ' · edited' : ''}</p>
 ${sensitiveBanner}
 ${collapsedBanner}
 ${removedBanner}

@@ -296,17 +296,19 @@ test('buildUserArchiveBytes: index.html renders pseudonym, lists posts with link
     // Page identity
     assert.match(indexHtml, /<title>[^<]*alice-pseudo[^<]*<\/title>/);
     assert.match(indexHtml, /<h1>alice-pseudo — personal archive<\/h1>/);
-    // Source attribution
-    assert.match(indexHtml, /exported from\s*<a href="http:\/\/localhost">testforum<\/a>/);
+    // Active-in line — alice posted in //news and commented in //lobby.
+    assert.match(indexHtml, /active in \/\/lobby, \/\/news/);
     // Post listed with link to its rendered HTML page
     assert.match(indexHtml, new RegExp(`<a href="posts/${ALICE_POST_ID}\\.html">alice&apos;s post</a>`));
     assert.match(indexHtml, /in \/\/news/);
     // Section headers with counts (1 post, 1 comment)
     assert.match(indexHtml, /\/\/ posts \(1\)/);
     assert.match(indexHtml, /\/\/ comments \(1\)/);
-    // No JS, no external assets — banner + meta
-    assert.match(indexHtml, /no javascript/);
-    assert.match(indexHtml, /handle: <code>aaaaaaaaaaaaaaaa…<\/code>/);
+    // Stripped: no source-line / handle-line / offline-reader-line / score.
+    assert.ok(!indexHtml.includes('exported from'), 'source attribution line removed');
+    assert.ok(!indexHtml.includes('handle: <code>'), 'handle echo line removed');
+    assert.ok(!indexHtml.includes('no javascript'), 'offline-reader line removed');
+    assert.ok(!/score \d/.test(indexHtml), 'score column removed from meta');
     // Comment snippet appears with sub attribution
     assert.match(indexHtml, /thoughtful reply/);
     assert.match(indexHtml, /on \/\/lobby/);
