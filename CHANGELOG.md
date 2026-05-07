@@ -28,22 +28,46 @@ the import as a native action alongside the historical
 - +1 test in `test/integration/import-queue.test.js`
   (762 → 763 green).
 
-### Changed — M7 followup: pseudonym collision wraps the WHOLE pseudonym
+### Changed — M7 followup: imported pseudonyms render bracketed everywhere
 
-Lock change: `clever-tiger` → `[clever-tiger]` (was
-`[clever]-tiger`). The full-bracket form reads cleanly as a single
-annotated token rather than ambiguous half-decoration that could be
-misread as the user being literally named `clever`. Bracket marks
-"this name traveled" without inventing a new word, and now does so
-without splitting the original handle visually.
+Final lock on the bracket question. Brackets move from storage to
+render time, and apply to every imported handle — not only on
+collision. The signal a live reader needs ("this user is from
+another instance, replies won't reach them") now surfaces wherever
+an imported pseudonym appears: post author, comment author, modlog
+mod_handle, /memlog actor cell.
 
-- **`pseudonymForImport`** in `src/archive/import.js` simplified —
-  the lexical-split regex is gone; we just bracket the whole
-  pseudonym. Numeric disambiguation: `[clever-tiger]-2`,
-  `[clever-tiger]-3`, etc.
-- PRD §Cross-instance imports updated to lock the full-bracket
-  form; archive-format.md updated; operator-guide + plato.context
-  updated. Existing tests updated for the new shape.
+- **`pseudonymForImport`** simplified: no brackets at storage
+  time; on collision append a numeric suffix
+  (`alice-tiger-2`, `alice-tiger-3`, …) so the UNIQUE constraint
+  holds. The `bracketed` field on the return shape is renamed
+  `disambiguated` since brackets are no longer stored. Internal
+  API only — no caller change beyond the rename + the counts
+  field name.
+- **`pseudonymsByHandle`** in `src/web/app.js` now selects
+  `imported_from_fingerprint` and pre-bracket-wraps the display
+  pseudonym for imported handles. Every render site that already
+  consumed this Map gets the bracket signal automatically — no
+  per-template change needed. The chrome's logged-in-user
+  pseudonym (which is always native) goes through `pseudonymFor`
+  (single-handle) and stays unbracketed.
+- DB pseudonym stays canonical: URLs, search filters, future
+  @-mentions all see `alice-tiger`, not `[alice-tiger]`.
+- PRD §Cross-instance imports → Identity model rewritten to lock
+  render-time bracketing; archive-format.md, operator-guide,
+  plato.context updated. +1 test verifies the wrap surfaces in
+  /sub/<name>/modlog (763 → 764 green).
+
+### Fixed — POSTS_DIR honored in bin/server.js
+
+Server.js had `POSTS_DIR` hardcoded to `ROOT/posts`, ignoring the
+env var that workers and the manual-smoke scripts already use.
+On any deployment with `POSTS_DIR` pointed elsewhere (multi-
+instance dev pair, custom production install layout) the running
+server would 500 on `/sub/<name>/post/<id>` with ENOENT because it
+read from the dev repo's directory instead of the configured one.
+Now reads `process.env.POSTS_DIR` like `DB_PATH` and
+`EXPORTS_DIR` already did.
 
 ### Added — M7 followup: sub-archive export surfaces in public modlog
 

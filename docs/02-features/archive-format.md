@@ -351,11 +351,18 @@ destination's secret differs from the source's.
   `imported_from_fingerprint = manifest.instance.pubkey_fingerprint`
   (or `null` for unsigned archives). These handles have no email
   derivation path on the destination — nobody can ever log in as them.
-- **Pseudonyms** are preserved verbatim *unless* they collide with an
-  existing pseudonym on the destination. On collision the **whole
-  pseudonym** is wrapped in brackets (M7 followup lock): `clever-tiger`
-  → `[clever-tiger]`. Further collisions get numeric disambiguators
-  (`[clever-tiger]-2`).
+- **Pseudonyms** are preserved verbatim. On collision with an existing
+  native pseudonym, a numeric suffix is appended at storage time so
+  the destination's UNIQUE constraint holds (`clever-tiger` →
+  `clever-tiger-2` → `clever-tiger-3` …). The DB pseudonym is
+  unbracketed in either case.
+- **Rendering**: every handle with non-null `imported_from_fingerprint`
+  renders bracketed in the destination UI (`alice-tiger` →
+  `[alice-tiger]`, disambiguated case → `[alice-tiger-2]`). The
+  bracket is render-time only — applied by `pseudonymsByHandle` —
+  so live readers always see "this user is from another instance"
+  without polluting the canonical pseudonym. M7 followup lock; see
+  PRD §Cross-instance imports → Identity model.
 
 ### Sub on import
 
