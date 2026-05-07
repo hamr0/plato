@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — `bin/health-watch.sh` cron-side `/healthz` watcher (M8/B4)
+
+Pairs with the B2 readiness probe. Curls `/healthz` from cron; silent
+on `200` so cron mail stays quiet. On non-2xx (or curl-level failure,
+pseudo-status `000`):
+
+- Appends one structured line to `$BACKUP_DIR/health.log` —
+  `<ISO ts> host=<h> status=<code> reason=<...>`. If the response was
+  JSON the reason names which checks failed (e.g.
+  `db_writable=false,exports_dir_writable=false`); if not, it tags
+  `unparseable_body`.
+- If `$HEALTH_ALERT_EMAIL` is set, sends an email via `mail` or
+  `sendmail` (whichever is on PATH; if neither, the alert is logged
+  to stderr instead of swallowed). Email body has five sections —
+  failure summary, response-body excerpt (first 20 lines so HTML 404
+  pages don't drown the message), last 30 lines of `$PLATO_LOG`,
+  last 5 rows of `health.log`, and a paste-ready GitHub issue
+  template. The intent: when something breaks at 3am, the operator
+  wakes up with a ready-to-paste issue body, not a raw stack trace.
+
+Tunables: `PLATO_URL` (default `http://localhost:8080`),
+`HEALTH_TIMEOUT_S` (curl `--max-time`, default 5). Sample crontab in
+the operator-guide.
+
 ### Added — `bin/backup.sh` local snapshot script (M8/B3)
 
 `bin/backup.sh` writes a single tarball per run to `$BACKUP_DIR`

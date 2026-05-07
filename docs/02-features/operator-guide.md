@@ -429,7 +429,14 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
   ```
 
   Importers / auditors verify with `ots verify <archive>.tar.gz.ots` (requires the .tar.gz alongside; see opentimestamps.org). Archives without a .ots are not "broken" — they just predate operator opt-in or the binary failed at stamp time. Verification falls back to the Ed25519 signature alone in that case.
-- **Health probe (M8/B2).** `GET /healthz` is a public, unauthenticated route that returns JSON `{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}` with `Cache-Control: no-store`. Returns `200` when both writability checks pass, `503` when either fails. Monitor by curling it from any external watcher — non-2xx is an alarm trigger. The companion watcher cron (B4, not yet shipped) will tail this and email on failure. Sample one-liner: `curl -fsS http://localhost:8080/healthz || mail -s 'plato down' op@example.com`.
+- **Health probe (M8/B2).** `GET /healthz` is a public, unauthenticated route that returns JSON `{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}` with `Cache-Control: no-store`. Returns `200` when both writability checks pass, `503` when either fails. Monitor by curling it from any external watcher — non-2xx is an alarm trigger.
+- **Health watcher (M8/B4).** `bin/health-watch.sh` is the companion cron. Curls `/healthz`, silent on 200 (no cron mail), on non-2xx writes a one-line stamp to `$BACKUP_DIR/health.log` and (if `HEALTH_ALERT_EMAIL` is set) emails the operator via `mail` or `sendmail` (whichever is on PATH; alert dropped to stderr if neither). Email body: failure type, response body, last 30 lines of `$PLATO_LOG`, last 5 rows of `health.log`, and a paste-ready GitHub issue template (title, version, repro template, diagnostic block). Sample crontab entry — every 5 minutes, alongside the daily backup line:
+
+  ```
+  */5 * * * * cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups HEALTH_ALERT_EMAIL=op@example.com PLATO_LOG=/var/log/plato.log bin/health-watch.sh
+  ```
+
+  Tunables: `PLATO_URL` (default `http://localhost:8080`), `HEALTH_TIMEOUT_S` (curl timeout, default `5`). The intent is "when something breaks at 3am, you wake up with a paste-ready issue body, not just a stack trace."
 - **Backups (M8/B3).** `bin/backup.sh` writes `BACKUP_DIR/plato-backup-<YYYY-MM-DD-HHMMSS>.tar.gz` containing an atomic SQLite snapshot of `forum.db` (via `sqlite3 .backup` — online, lock-safe, no need to stop the server) plus `posts/`, `exports/`, `config.json`, `spam-patterns.txt`, `data/urlhaus.txt`, and `disposable-domains.txt`. Tunables (env vars): `BACKUP_DIR` (default `./backups`), `BACKUP_KEEP` (default `7` — newest N kept, older deleted). Sample crontab entry — daily at 03:30, drops a tarball under `/var/lib/plato-backups/`:
 
   ```
