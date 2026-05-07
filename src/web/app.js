@@ -3651,12 +3651,23 @@ async function handleModlogResolve(req, res, { db, auth }) {
 // in read history (kept for 90 days, lazily pruned on every GET). Mark-
 // all-read respects the active filter so users can clear one kind without
 // losing visibility on others.
+// Two chip families:
+//   side: 'notif'    — narrows the notifications half (filters by
+//                      notification kind).
+//   side: 'activity' — narrows the activity half (filters by content
+//                      type — `post` vs `comment`). The activity-side
+//                      slugs are namespaced `my-*` so they can't be
+//                      confused with the notification-side `comments`
+//                      chip (which is "people commenting on my posts",
+//                      not "comments I authored").
 const MEMLOG_KIND_FILTERS = [
-  { slug: 'comments',    kinds: ['comment_on_post'],            label: 'comments' },
-  { slug: 'replies',     kinds: ['reply_to_comment'],           label: 'replies' },
-  { slug: 'mod-actions', kinds: ['mod_action'],                 label: 'mod actions' },
-  { slug: 'archives',    kinds: ['export_ready', 'export_failed'], label: 'archives' },
-  { slug: 'imports',     kinds: ['import_ready', 'import_failed'], label: 'imports' },
+  { slug: 'comments',    side: 'notif',    kinds: ['comment_on_post'],               label: 'comments' },
+  { slug: 'replies',     side: 'notif',    kinds: ['reply_to_comment'],              label: 'replies' },
+  { slug: 'mod-actions', side: 'notif',    kinds: ['mod_action'],                    label: 'mod actions' },
+  { slug: 'archives',    side: 'notif',    kinds: ['export_ready', 'export_failed'], label: 'archives' },
+  { slug: 'imports',     side: 'notif',    kinds: ['import_ready', 'import_failed'], label: 'imports' },
+  { slug: 'my-posts',    side: 'activity', contentKinds: ['post'],                   label: 'my posts' },
+  { slug: 'my-comments', side: 'activity', contentKinds: ['comment'],                label: 'my comments' },
 ];
 
 const MEMLOG_MODES = ['notifications', 'activity', 'all'];
@@ -3687,15 +3698,31 @@ function memlogHref({ mode, show, kindSlugs }) {
   return qs ? `/memlog?${qs}` : '/memlog';
 }
 
-// Flatten an array of kind-filter slugs to the underlying notification
-// kinds. Returns null when no slugs (means "every kind passes" — caller
-// shape matches listNotifications's `kinds` arg).
+// Flatten the user's selected slugs to the underlying notification
+// kinds. Only notif-side slugs contribute; activity-side slugs are
+// ignored here (they're handled by memlogActivityKindsFromSlugs).
+// Returns null when no notif-side slug is selected — caller passes
+// null straight through to listNotifications meaning "every kind".
 function memlogKindsFromSlugs(slugs) {
   if (!slugs || slugs.length === 0) return null;
   const kinds = [];
   for (const slug of slugs) {
     const f = MEMLOG_KIND_FILTERS.find((x) => x.slug === slug);
-    if (f) kinds.push(...f.kinds);
+    if (f && f.side === 'notif') kinds.push(...f.kinds);
+  }
+  return kinds.length > 0 ? kinds : null;
+}
+
+// Flatten activity-side slugs to listActivityForHandle's content-kind
+// shape (`['post']`, `['comment']`, or both). Returns null when no
+// activity-side slug is selected; caller substitutes the default
+// `['post', 'comment']`.
+function memlogActivityKindsFromSlugs(slugs) {
+  if (!slugs || slugs.length === 0) return null;
+  const kinds = [];
+  for (const slug of slugs) {
+    const f = MEMLOG_KIND_FILTERS.find((x) => x.slug === slug);
+    if (f && f.side === 'activity') kinds.push(...f.contentKinds);
   }
   return kinds.length > 0 ? kinds : null;
 }
@@ -3761,36 +3788,55 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   }
   pruneOldNotifications(db);
   const filters = memlogParseFilters(searchParams);
-  const kinds = memlogKindsFromSlugs(filters.kindSlugs);
+  const notifKinds = memlogKindsFromSlugs(filters.kindSlugs);
+  const activityContentKinds = memlogActivityKindsFromSlugs(filters.kindSlugs);
+  const hasNotifSlug = notifKinds !== null;
+  const hasActivitySlug = activityContentKinds !== null;
   // Pull the rows for the active mode. notifications = received-events
   // table; activity = my-authored posts + comments; all = both merged
-  // by created_at desc. Kind/show narrow the notification-side; activity
-  // rows pass through untouched (no read-state, no kind subfilter yet).
+  // by created_at desc. Notif-side slugs (archives/imports/...) narrow
+  // the notification half; activity-side slugs (my-posts/my-comments)
+  // narrow the activity half. The two are independent — selecting one
+  // family hides the other in `all` mode, mirroring the user's
+  // expressed intent.
   //
-  // Auto-flip: in notifications/all modes, if a `show: unread` query
-  // returns nothing but `show: all` would have rows, flip to `all` and
-  // surface a hint. Saves the user from chasing why a filter "didn't
-  // work" when the matching rows were just already-read.
+  // Auto-flip: in notifications mode, if a `show: unread` query
+  // returns nothing but `show: all` would have rows, flip to `all`
+  // and surface a hint. Saves the user from chasing why a filter
+  // "didn't work" when the matching rows were just already-read.
   let rows = [];
   let autoFlipped = false;
   if (filters.mode === 'notifications') {
-    rows = listNotifications(db, handle, { show: filters.show, kinds, limit: 200 });
+    rows = listNotifications(db, handle, { show: filters.show, kinds: notifKinds, limit: 200 });
     if (rows.length === 0 && filters.show === 'unread') {
-      const allRows = listNotifications(db, handle, { show: 'all', kinds, limit: 200 });
+      const allRows = listNotifications(db, handle, { show: 'all', kinds: notifKinds, limit: 200 });
       if (allRows.length > 0) { rows = allRows; autoFlipped = true; }
     }
   } else if (filters.mode === 'activity') {
-    rows = listActivityForHandle(db, handle, { limit: 200 });
+    // activityContentKinds defaults to both when no activity slug is
+    // selected, so the unfiltered view still pulls posts + comments.
+    rows = listActivityForHandle(db, handle, {
+      kinds: activityContentKinds ?? ['post', 'comment'],
+      limit: 200,
+    });
   } else {
-    // all mode: notifications + activity merged by time. When the user
-    // narrows by kind, the activity half can't match (its kinds are
-    // my_post/my_comment, not notification kinds) so dropping activity
-    // is the only honest interpretation — otherwise activity rows
-    // dominate and the filter looks broken.
-    const notifs = listNotifications(db, handle, { show: 'all', kinds, limit: 200 });
-    const activity = kinds
-      ? []
-      : listActivityForHandle(db, handle, { limit: 200 });
+    // all mode: notifications + activity merged by time. Each half is
+    // included only when the user hasn't narrowed exclusively to the
+    // other family — selecting `archives` (notif) drops activity;
+    // selecting `my-posts` (activity) drops notifs; selecting one of
+    // each shows both halves filtered. No selection → both halves
+    // unfiltered (the original "everything in time order" semantics).
+    const wantNotifs = !hasActivitySlug || hasNotifSlug;
+    const wantActivity = !hasNotifSlug || hasActivitySlug;
+    const notifs = wantNotifs
+      ? listNotifications(db, handle, { show: 'all', kinds: notifKinds, limit: 200 })
+      : [];
+    const activity = wantActivity
+      ? listActivityForHandle(db, handle, {
+          kinds: activityContentKinds ?? ['post', 'comment'],
+          limit: 200,
+        })
+      : [];
     rows = [...notifs, ...activity].sort((a, b) => b.created_at - a.created_at).slice(0, 200);
   }
   const actorHandles = [...new Set(rows.map((r) => r.actor_handle).filter(Boolean))];
@@ -3838,7 +3884,7 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     <span class="filter-sep">·</span>
     show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
     <span class="filter-sep">·</span>
-    kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
+    kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.filter((f) => f.side === 'notif' ? filters.mode !== 'activity' : filters.mode !== 'notifications').map((f) => filterLink(f.slug, f.label))}
     <span class="filter-sep">·</span>
     ${markAllForm}
   </div>`;
@@ -3851,9 +3897,15 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   ).join(' + ');
   let emptyText;
   if (filters.mode === 'activity') {
-    emptyText = hasKindNarrow
-      ? 'activity mode ignores kind filters — switch to notifications or all to apply them.'
-      : 'no posts or comments yet.';
+    if (hasActivitySlug) {
+      emptyText = `no ${kindLabels} yet.`;
+    } else if (hasNotifSlug) {
+      // Only notif-side chips selected in activity mode — activity rows
+      // can't match notification kinds, so the result is empty.
+      emptyText = `${kindLabels} are notification kinds — pick "my posts" or "my comments" to filter activity.`;
+    } else {
+      emptyText = 'no posts or comments yet.';
+    }
   } else if (hasKindNarrow) {
     emptyText = `no ${kindLabels} notifications.`;
   } else if (filters.mode === 'all') {
