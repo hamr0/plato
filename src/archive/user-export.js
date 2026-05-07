@@ -428,8 +428,14 @@ export function buildUserArchiveBytes(db, handle, { postsDir, branding, platoVer
 
 // Filename for the user archive. Uses the first 8 hex chars of the handle
 // as a stable but non-reversible identifier so the filename doesn't leak
-// the full handle on disk listings or download URLs.
-export function userArchiveFilenameFor(handle, exportedAt = new Date()) {
+// the full handle on disk listings or download URLs. Optional `jobId`
+// (first 8 chars used) prevents two same-day builds for the same user
+// from overwriting each other if the queue-side dedupe ever misses
+// — defense-in-depth; the dedupe should normally make this redundant.
+export function userArchiveFilenameFor(handle, exportedAt = new Date(), { jobId = null } = {}) {
   const yyyymmdd = exportedAt.toISOString().slice(0, 10);
-  return `plato-export-user-${handle.slice(0, 8)}-${yyyymmdd}.tar.gz`;
+  const tag = typeof jobId === 'string' && jobId.length >= 8
+    ? `-${jobId.slice(0, 8)}`
+    : '';
+  return `plato-export-user-${handle.slice(0, 8)}-${yyyymmdd}${tag}.tar.gz`;
 }

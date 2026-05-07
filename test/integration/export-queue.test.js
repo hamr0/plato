@@ -30,6 +30,12 @@ function memDb() {
   return db;
 }
 
+function ensureHandle(db, handle, pseudonym) {
+  db.prepare(
+    'INSERT OR IGNORE INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)'
+  ).run(handle, pseudonym, Date.now());
+}
+
 function ts(d) { return Date.UTC(2026, 4, 6) + d * 1000; }
 
 // In-memory tar reader, ustar regular files only.
@@ -508,6 +514,141 @@ test('buildSubArchiveBytes: throws on missing post .md so worker can retry', () 
 test('archiveFilenameFor: shape', () => {
   const f = archiveFilenameFor('lobby', new Date('2026-05-06T12:00:00Z'));
   assert.equal(f, 'plato-export-lobby-2026-05-06.tar.gz');
+});
+
+// --- M7 followup: shared-artifact dedupe + sentinel fan-out ---
+
+test('enqueueSubExport: second user requesting same sub with completed-non-expired archive reuses bytes (fresh token)', () => {
+  const db = memDb();
+  const ALICE = 'a'.repeat(64);
+  const BOB = 'b'.repeat(64);
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  ensureHandle(db, BOB, 'bob-pseudo');
+  // Alice enqueues + completes.
+  const j1 = enqueueSubExport(db, { subName: 'lobby', requestedBy: ALICE, now: ts(0) });
+  claimNextPendingJob(db, { now: ts(1) });
+  completeJob(db, j1.id, {
+    archiveFilename: 'plato-export-lobby-2026-05-07-aaaa1111.tar.gz',
+    archiveSizeBytes: 1024,
+    downloadToken: 'a'.repeat(64),
+    now: ts(2),
+  });
+  // Bob requests now, while Alice's archive is still downloadable.
+  const j2 = enqueueSubExport(db, { subName: 'lobby', requestedBy: BOB, now: ts(3) });
+  // Bob's row should be insta-completed pointing at the same file.
+  assert.notEqual(j2.id, j1.id, 'should be a fresh row');
+  assert.equal(j2.archive_filename, 'plato-export-lobby-2026-05-07-aaaa1111.tar.gz', 'reuses on-disk file');
+  assert.equal(j2.archive_size_bytes, 1024);
+  assert.notEqual(j2.download_token, 'a'.repeat(64), 'Bob gets a fresh bearer token');
+  assert.match(j2.download_token, /^[0-9a-f]{64}$/);
+  assert.ok(j2.completed_at, 'Bob is completed without going through the worker');
+  // Both rows share expires_at — pruner unlinks the file when both windows close.
+  const j1Row = db.prepare('SELECT expires_at FROM export_jobs WHERE id = ?').get(j1.id);
+  assert.equal(j2.expires_at, j1Row.expires_at, 'shared expires_at');
+});
+
+test('enqueueSubExport: second user while parent is in-flight gets a sentinel row', () => {
+  const db = memDb();
+  const ALICE = 'a'.repeat(64);
+  const BOB = 'b'.repeat(64);
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  ensureHandle(db, BOB, 'bob-pseudo');
+  const parent = enqueueSubExport(db, { subName: 'lobby', requestedBy: ALICE, now: ts(0) });
+  claimNextPendingJob(db, { now: ts(1) }); // parent now in-progress
+  const sentinel = enqueueSubExport(db, { subName: 'lobby', requestedBy: BOB, now: ts(2) });
+  assert.notEqual(sentinel.id, parent.id);
+  assert.equal(sentinel.started_at, -1, 'sentinel marker on started_at');
+  assert.equal(sentinel.completed_at, null);
+  // Worker's claim should not pick the sentinel.
+  const next = claimNextPendingJob(db, { now: ts(3) });
+  assert.equal(next, null, 'sentinel must not be claimable as a real job');
+});
+
+test('completeJob: fan-out completes sentinel siblings with fresh tokens + shared expires_at', () => {
+  const db = memDb();
+  const ALICE = 'a'.repeat(64);
+  const BOB = 'b'.repeat(64);
+  const CHARLIE = 'c'.repeat(64);
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  ensureHandle(db, BOB, 'bob-pseudo');
+  ensureHandle(db, CHARLIE, 'charlie-pseudo');
+  const parent = enqueueSubExport(db, { subName: 'lobby', requestedBy: ALICE, now: ts(0) });
+  claimNextPendingJob(db, { now: ts(1) });
+  // Two sentinels for different users join while parent is in-flight.
+  const s1 = enqueueSubExport(db, { subName: 'lobby', requestedBy: BOB,     now: ts(2) });
+  const s2 = enqueueSubExport(db, { subName: 'lobby', requestedBy: CHARLIE, now: ts(3) });
+  assert.equal(s1.started_at, -1);
+  assert.equal(s2.started_at, -1);
+  // Worker completes parent.
+  completeJob(db, parent.id, {
+    archiveFilename: 'plato-export-lobby-2026-05-07-aaaa1111.tar.gz',
+    archiveSizeBytes: 9999,
+    downloadToken: 'a'.repeat(64),
+    now: ts(4),
+  });
+  const rows = db.prepare('SELECT id, completed_at, archive_filename, archive_size_bytes, download_token, expires_at, started_at FROM export_jobs WHERE kind = ? AND scope = ? ORDER BY requested_at').all('sub', 'lobby');
+  assert.equal(rows.length, 3);
+  for (const r of rows) {
+    assert.ok(r.completed_at, `${r.id} should be completed`);
+    assert.equal(r.archive_filename, 'plato-export-lobby-2026-05-07-aaaa1111.tar.gz');
+    assert.equal(r.archive_size_bytes, 9999);
+    assert.equal(r.expires_at, rows[0].expires_at, 'all share parent\'s expires_at');
+    assert.notEqual(r.started_at, -1, 'sentinels filled in');
+  }
+  const tokens = new Set(rows.map((r) => r.download_token));
+  assert.equal(tokens.size, 3, 'each requester gets a unique download token');
+});
+
+test('failJob terminal: fans out to sentinels too', () => {
+  const db = memDb();
+  const ALICE = 'a'.repeat(64);
+  const BOB = 'b'.repeat(64);
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  ensureHandle(db, BOB, 'bob-pseudo');
+  const parent = enqueueSubExport(db, { subName: 'lobby', requestedBy: ALICE, now: ts(0) });
+  claimNextPendingJob(db, { now: ts(1) });
+  const sentinel = enqueueSubExport(db, { subName: 'lobby', requestedBy: BOB, now: ts(2) });
+  assert.equal(sentinel.started_at, -1);
+  // Burn through retries.
+  for (let i = 1; i < MAX_ATTEMPTS; i++) {
+    failJob(db, parent.id, { errorMessage: `attempt ${i}` });
+    claimNextPendingJob(db);
+  }
+  const result = failJob(db, parent.id, { errorMessage: 'final boom', now: ts(99) });
+  assert.equal(result, 'failed');
+  const sentinelRow = db.prepare('SELECT failed_at, error_message FROM export_jobs WHERE id = ?').get(sentinel.id);
+  assert.equal(sentinelRow.failed_at, ts(99));
+  assert.equal(sentinelRow.error_message, 'final boom');
+});
+
+test('archiveFilenameFor: includes 8-hex jobId disambiguator when supplied', () => {
+  const f1 = archiveFilenameFor('foo', new Date(Date.UTC(2026, 4, 7)));
+  const f2 = archiveFilenameFor('foo', new Date(Date.UTC(2026, 4, 7)), { jobId: 'aaaa1111deadbeef' });
+  assert.equal(f1, 'plato-export-foo-2026-05-07.tar.gz');
+  assert.equal(f2, 'plato-export-foo-2026-05-07-aaaa1111.tar.gz');
+});
+
+test('pruneExpiredJobs: returns deduped filename list when many rows share one artifact', () => {
+  const db = memDb();
+  const ALICE = 'a'.repeat(64);
+  const BOB = 'b'.repeat(64);
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  ensureHandle(db, BOB, 'bob-pseudo');
+  const j1 = enqueueSubExport(db, { subName: 'lobby', requestedBy: ALICE, now: ts(0) });
+  claimNextPendingJob(db);
+  completeJob(db, j1.id, {
+    archiveFilename: 'plato-export-lobby-2026-05-07-aaaa1111.tar.gz',
+    archiveSizeBytes: 1, downloadToken: 'a'.repeat(64), now: ts(1),
+  });
+  // Bob reuses while still downloadable.
+  enqueueSubExport(db, { subName: 'lobby', requestedBy: BOB, now: ts(2) });
+  // Move clock past TTL.
+  const future = ts(1) + DOWNLOAD_TTL_MS.sub + 1000;
+  const filenames = pruneExpiredJobs(db, { now: future });
+  assert.deepEqual(filenames, ['plato-export-lobby-2026-05-07-aaaa1111.tar.gz']);
+  // Both rows are gone.
+  const remaining = db.prepare('SELECT COUNT(*) AS n FROM export_jobs').get().n;
+  assert.equal(remaining, 0);
 });
 
 test('buildSubArchiveBytes: pubkeyFingerprint defaults to null in manifest', () => {

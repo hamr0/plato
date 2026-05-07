@@ -56,11 +56,91 @@ function assertHandle(label, value) {
   }
 }
 
-// Enqueue (or return the existing pending) per-sub export for `requestedBy`.
-// Returns the job row. Idempotent: a second call while a job is pending or
-// in-progress returns the same row, not a new one. Once a job has
-// completed_at or failed_at set, the unique partial index releases the
-// (kind, scope, requested_by) tuple and the next call enqueues anew.
+// Sentinel value for `started_at` on rows that share an artifact with
+// another in-flight job. The worker's claim query filters on
+// `started_at IS NULL` so sentinels are skipped automatically; the
+// fan-out logic in completeJob/failJob is what eventually closes them.
+const SHARES_ARTIFACT_SENTINEL = -1;
+
+// Find a previously-built archive for `(kind, scope)` whose download
+// window is still open. Used by the enqueue helpers to dedupe — if the
+// bytes are still on disk and reachable, the second requester gets a
+// fresh bearer token pointing at the same file rather than a fresh
+// build. Returns the canonical (oldest completed_at) job row or null.
+function findReusableArtifact(db, kind, scope, now) {
+  return db.prepare(
+    `SELECT * FROM export_jobs
+      WHERE kind = ? AND scope = ?
+        AND completed_at IS NOT NULL AND failed_at IS NULL
+        AND archive_filename IS NOT NULL
+        AND expires_at > ?
+      ORDER BY completed_at ASC
+      LIMIT 1`
+  ).get(kind, scope, now) ?? null;
+}
+
+// Find an in-flight (pending OR claimed) PRIMARY job (not a sentinel
+// row that's already waiting for someone else) for `(kind, scope)`.
+// New requests for an in-flight sub piggyback on this row via a
+// sentinel. Returns null when none exists.
+function findInFlightPrimary(db, kind, scope) {
+  return db.prepare(
+    `SELECT * FROM export_jobs
+      WHERE kind = ? AND scope = ?
+        AND completed_at IS NULL AND failed_at IS NULL
+        AND (started_at IS NULL OR started_at > 0)
+      ORDER BY requested_at ASC
+      LIMIT 1`
+  ).get(kind, scope) ?? null;
+}
+
+// Insert a freshly-completed row that reuses an existing archive on
+// disk. Same archive_filename + size, fresh download_token, shared
+// expires_at (so the pruner can unlink the file once the LAST holder
+// has expired). Returns the new row.
+function insertSharedCompletedRow(db, { kind, scope, requestedBy, parent, now }) {
+  const id = randomBytes(ID_BYTES).toString('hex');
+  const token = newDownloadToken();
+  db.prepare(
+    `INSERT INTO export_jobs (
+       id, kind, scope, requested_by, requested_at,
+       started_at, completed_at,
+       archive_filename, archive_size_bytes, download_token, expires_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, kind, scope, requestedBy, now,
+    now, now,
+    parent.archive_filename, parent.archive_size_bytes, token, parent.expires_at,
+  );
+  return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
+}
+
+// Insert a sentinel row that waits for an in-flight primary job to
+// complete. The row's started_at is the SHARES_ARTIFACT_SENTINEL value
+// (-1) so the worker's claim query (started_at IS NULL) skips it.
+// Fan-out at completeJob / terminal failJob fills it in.
+function insertSentinelRow(db, { kind, scope, requestedBy, now }) {
+  const id = randomBytes(ID_BYTES).toString('hex');
+  db.prepare(
+    `INSERT INTO export_jobs (id, kind, scope, requested_by, requested_at, started_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, kind, scope, requestedBy, now, SHARES_ARTIFACT_SENTINEL);
+  return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
+}
+
+// Enqueue (or reuse) a per-sub export.
+//
+// Three-tier dedupe:
+//   1) Same user already has a pending/in-progress request for this sub
+//      → return that row (existing behavior; handled by the partial
+//      unique index on (kind, scope, requested_by) WHERE pending).
+//   2) An archive for this sub is already completed and downloadable
+//      → create a new completed row pointing at the same on-disk file
+//      with a fresh bearer token. No worker run.
+//   3) A primary build is in-flight for this sub
+//      → create a sentinel row (started_at = -1) that fan-out will
+//      complete when the parent finishes.
+//   4) Else regular pending insert.
 export function enqueueSubExport(db, { subName, requestedBy, now = Date.now() }) {
   if (typeof subName !== 'string' || subName.length === 0) {
     throw new Error('enqueueSubExport: subName required');
@@ -73,6 +153,15 @@ export function enqueueSubExport(db, { subName, requestedBy, now = Date.now() })
   ).get(subName, requestedBy);
   if (existing) return existing;
 
+  const reusable = findReusableArtifact(db, 'sub', subName, now);
+  if (reusable) {
+    return insertSharedCompletedRow(db, { kind: 'sub', scope: subName, requestedBy, parent: reusable, now });
+  }
+  const inFlight = findInFlightPrimary(db, 'sub', subName);
+  if (inFlight) {
+    return insertSentinelRow(db, { kind: 'sub', scope: subName, requestedBy, now });
+  }
+
   const id = randomBytes(ID_BYTES).toString('hex');
   db.prepare(
     `INSERT INTO export_jobs (id, kind, scope, requested_by, requested_at)
@@ -81,10 +170,10 @@ export function enqueueSubExport(db, { subName, requestedBy, now = Date.now() })
   return db.prepare('SELECT * FROM export_jobs WHERE id = ?').get(id);
 }
 
-// Enqueue (or return existing pending) per-user export. scope == requestedBy
-// so the unique partial dedupe index naturally caps one pending job per
-// user. No tenure gate at this layer — the caller (route handler) decides
-// whether the user is allowed to ask.
+// Enqueue (or reuse) a per-user export. Same three-tier dedupe as
+// enqueueSubExport — a user re-requesting their personal archive while
+// a previous one is still downloadable gets a fresh bearer URL pointing
+// at the existing bytes, not a re-build.
 export function enqueueUserExport(db, { requestedBy, now = Date.now() }) {
   assertHandle('enqueueUserExport', requestedBy);
   const existing = db.prepare(
@@ -93,6 +182,15 @@ export function enqueueUserExport(db, { requestedBy, now = Date.now() }) {
         AND completed_at IS NULL AND failed_at IS NULL`
   ).get(requestedBy, requestedBy);
   if (existing) return existing;
+
+  const reusable = findReusableArtifact(db, 'user', requestedBy, now);
+  if (reusable) {
+    return insertSharedCompletedRow(db, { kind: 'user', scope: requestedBy, requestedBy, parent: reusable, now });
+  }
+  const inFlight = findInFlightPrimary(db, 'user', requestedBy);
+  if (inFlight) {
+    return insertSentinelRow(db, { kind: 'user', scope: requestedBy, requestedBy, now });
+  }
 
   const id = randomBytes(ID_BYTES).toString('hex');
   db.prepare(
@@ -135,6 +233,13 @@ export function claimNextPendingJob(db, { now = Date.now() } = {}) {
 // Mark job as completed. Caller passes the on-disk filename, byte size,
 // and the freshly-generated download token. expires_at uses the kind's
 // TTL (looked up from the row, so the worker doesn't have to thread it).
+//
+// Fan-out: any sentinel rows (started_at = SHARES_ARTIFACT_SENTINEL)
+// for the same (kind, scope) are also completed atomically, each with
+// a FRESH download_token but the same archive_filename + size +
+// expires_at. Sharing the parent's expires_at means all bearer URLs
+// expire together, so the pruner can unlink the file when its window
+// closes without orphaning rows that still reference it.
 export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, downloadToken, now = Date.now() }) {
   if (typeof archiveFilename !== 'string' || archiveFilename.length === 0) {
     throw new Error('completeJob: archiveFilename required');
@@ -145,23 +250,55 @@ export function completeJob(db, jobId, { archiveFilename, archiveSizeBytes, down
   if (typeof downloadToken !== 'string' || !/^[0-9a-f]{64}$/.test(downloadToken)) {
     throw new Error('completeJob: downloadToken must be 64-char hex');
   }
-  const row = db.prepare('SELECT kind FROM export_jobs WHERE id = ?').get(jobId);
+  const row = db.prepare('SELECT kind, scope FROM export_jobs WHERE id = ?').get(jobId);
   if (!row) throw new Error(`completeJob: job ${jobId} not found`);
   const ttl = DOWNLOAD_TTL_MS[row.kind];
   if (ttl == null) throw new Error(`completeJob: unknown kind ${row.kind}`);
-  db.prepare(
-    `UPDATE export_jobs
-        SET completed_at = ?, archive_filename = ?, archive_size_bytes = ?,
-            download_token = ?, expires_at = ?
-      WHERE id = ?`
-  ).run(now, archiveFilename, archiveSizeBytes, downloadToken, now + ttl, jobId);
+  const expiresAt = now + ttl;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(
+      `UPDATE export_jobs
+          SET completed_at = ?, archive_filename = ?, archive_size_bytes = ?,
+              download_token = ?, expires_at = ?
+        WHERE id = ?`
+    ).run(now, archiveFilename, archiveSizeBytes, downloadToken, expiresAt, jobId);
+
+    // Fan out to sentinel siblings sharing this artifact.
+    const siblings = db.prepare(
+      `SELECT id FROM export_jobs
+        WHERE kind = ? AND scope = ?
+          AND started_at = ?
+          AND completed_at IS NULL AND failed_at IS NULL`
+    ).all(row.kind, row.scope, SHARES_ARTIFACT_SENTINEL);
+    const fanOutUpdate = db.prepare(
+      `UPDATE export_jobs
+          SET completed_at = ?, started_at = ?,
+              archive_filename = ?, archive_size_bytes = ?,
+              download_token = ?, expires_at = ?
+        WHERE id = ?`
+    );
+    for (const s of siblings) {
+      fanOutUpdate.run(
+        now, now, archiveFilename, archiveSizeBytes,
+        newDownloadToken(), expiresAt, s.id,
+      );
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
 // Record a failure. If retry_count < MAX_ATTEMPTS, re-queue the job (clear
 // started_at) so the next worker tick retries. Otherwise terminal-fail
-// with the error message. Returns 'requeued' | 'failed'.
+// with the error message. Sentinel siblings sharing the (kind, scope)
+// terminal-fail too so they don't sit forever waiting on a parent that
+// won't deliver. Returns 'requeued' | 'failed'.
 export function failJob(db, jobId, { errorMessage, now = Date.now() }) {
-  const job = db.prepare('SELECT retry_count FROM export_jobs WHERE id = ?').get(jobId);
+  const job = db.prepare('SELECT kind, scope, retry_count FROM export_jobs WHERE id = ?').get(jobId);
   if (!job) throw new Error(`failJob: job ${jobId} not found`);
   if (job.retry_count < MAX_ATTEMPTS) {
     db.prepare(
@@ -171,11 +308,25 @@ export function failJob(db, jobId, { errorMessage, now = Date.now() }) {
     ).run(errorMessage ?? null, jobId);
     return 'requeued';
   }
-  db.prepare(
-    `UPDATE export_jobs
-        SET failed_at = ?, error_message = ?
-      WHERE id = ?`
-  ).run(now, errorMessage ?? null, jobId);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare(
+      `UPDATE export_jobs
+          SET failed_at = ?, error_message = ?
+        WHERE id = ?`
+    ).run(now, errorMessage ?? null, jobId);
+    db.prepare(
+      `UPDATE export_jobs
+          SET failed_at = ?, error_message = ?
+        WHERE kind = ? AND scope = ?
+          AND started_at = ?
+          AND completed_at IS NULL AND failed_at IS NULL`
+    ).run(now, errorMessage ?? null, job.kind, job.scope, SHARES_ARTIFACT_SENTINEL);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
   return 'failed';
 }
 
@@ -231,8 +382,11 @@ export function findLatestJob(db, { kind, scope, requestedBy }) {
   ).get(kind, scope, requestedBy) ?? null;
 }
 
-// Delete jobs whose download window has passed. Returns the list of
-// archive filenames the caller should also unlink from disk.
+// Delete jobs whose download window has passed. Returns a deduped list
+// of archive filenames the caller should unlink from disk. With the
+// shared-artifact dedupe (M7 followup), several expired rows can
+// reference the same file; we deduplicate so the caller doesn't try to
+// unlink the same path twice.
 export function pruneExpiredJobs(db, { now = Date.now() } = {}) {
   const expired = db.prepare(
     `SELECT id, archive_filename FROM export_jobs
@@ -242,7 +396,9 @@ export function pruneExpiredJobs(db, { now = Date.now() } = {}) {
   const ids = expired.map((j) => j.id);
   const placeholders = ids.map(() => '?').join(',');
   db.prepare(`DELETE FROM export_jobs WHERE id IN (${placeholders})`).run(...ids);
-  return expired.map((j) => j.archive_filename).filter(Boolean);
+  const unique = new Set();
+  for (const j of expired) if (j.archive_filename) unique.add(j.archive_filename);
+  return [...unique];
 }
 
 export function newDownloadToken() {

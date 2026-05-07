@@ -433,7 +433,19 @@ export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVer
   return writeTar(tarEntries, { defaultMtime: exportedAt.getTime() });
 }
 
-export function archiveFilenameFor(subName, exportedAt = new Date()) {
+// Filename shape: plato-export-<sub>-<YYYY-MM-DD>-<8hex>.tar.gz.
+// The 8-hex disambiguator (caller passes `jobId` — first 8 chars of the
+// 16-hex job id is the convention) prevents two same-day builds for the
+// same sub from overwriting each other on disk. With the queue-side
+// dedupe (M7 followup), simultaneous same-sub requests land on a shared
+// artifact rather than racing to write the same file, but the
+// disambiguator is defense-in-depth: if the dedupe ever misses (e.g., a
+// previous archive expired between the dedupe check and the worker
+// build), the on-disk filename still differs.
+export function archiveFilenameFor(subName, exportedAt = new Date(), { jobId = null } = {}) {
   const yyyymmdd = exportedAt.toISOString().slice(0, 10);
-  return `plato-export-${subName}-${yyyymmdd}.tar.gz`;
+  const tag = typeof jobId === 'string' && jobId.length >= 8
+    ? `-${jobId.slice(0, 8)}`
+    : '';
+  return `plato-export-${subName}-${yyyymmdd}${tag}.tar.gz`;
 }

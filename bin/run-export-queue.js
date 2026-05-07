@@ -112,13 +112,13 @@ try {
       postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
       pubkeyFingerprint: instanceKey.fingerprint,
     });
-    filename = archiveFilenameFor(job.scope, exportedAt);
+    filename = archiveFilenameFor(job.scope, exportedAt, { jobId: job.id });
   } else if (job.kind === 'user') {
     tarBytes = buildUserArchiveBytes(db, job.scope, {
       postsDir: POSTS_DIR, branding, platoVersion, exportedAt,
       pubkeyFingerprint: instanceKey.fingerprint,
     });
-    filename = userArchiveFilenameFor(job.scope, exportedAt);
+    filename = userArchiveFilenameFor(job.scope, exportedAt, { jobId: job.id });
   } else {
     throw new Error(`unsupported job kind: ${job.kind}`);
   }
