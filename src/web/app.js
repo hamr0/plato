@@ -143,7 +143,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=28">
+<link rel="stylesheet" href="/static/style.css?v=29">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -1656,7 +1656,7 @@ function renderSubCreate(req, res, { db, auth }, searchParams) {
       <a href="/sub/create?mode=import" class="${mode === 'import' ? 'active' : ''}">import from URL</a>
     </nav>`;
   const createForm = html`
-    <form method="POST" action="/sub/create">
+    <form method="POST" action="/sub/create" class="sub-create-form">
       <input name="name" placeholder="name (lowercase, 3–30, hyphens ok)" required pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
       <input name="description" placeholder="one-line description (optional, ≤200 chars)" maxlength="200">
       <fieldset class="sub-thresholds">
@@ -1688,7 +1688,7 @@ function renderSubCreate(req, res, { db, auth }, searchParams) {
     </form>
     <p class="muted">name is locked at creation. reserved: ${[...RESERVED_SUB_NAMES].join(', ')}.</p>`;
   const importForm = html`
-    <form method="POST" action="/sub/import">
+    <form method="POST" action="/sub/import" class="sub-create-form">
       <input name="sourceUrl" type="url" placeholder="https://other-instance.com/export/...tar.gz" required>
       <input name="renameTo" placeholder="import as (optional — only if name is taken here)" pattern="[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])?">
       <button>import</button>

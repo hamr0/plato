@@ -42,32 +42,55 @@
  * Both resolve to the same variable values. data-theme="dark" is
  * the sticky-dark override for users on a light-default OS who
  * clicked the toggle to dark — wins back over the media query. */
+/* DEFAULT: zinc-cool — soft cool gray, low brightness for long sessions. */
 [data-theme="light"]:root {
-  --bg: #f6f8fa;        /* off-white — natural inverse of #0d1117 dark default; gentler than pure paper for long sessions */
-  --bg-soft: #eaeef2;
-  --border: #d0d7de;
-  --text: #1f2328;      /* slightly softer than near-black so the page doesn't punch */
-  --text-dim: #57606a;
-  --accent: #0969da;
-  --accent-warm: #9a6700;
-  --up: #1a7f37;
-  --down: #0969da;
+  --bg: #eef0f2;
+  --bg-soft: #e3e6ea;
+  --border: #c7ccd2;
+  --text: #202428;
+  --text-dim: #4d545b;
+  --accent: #0066cc;
+  --accent-warm: #955800;
+  --up: #117833;
+  --down: #0066cc;
   --flair-text: #ffffff;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f6f8fa;
-    --bg-soft: #eaeef2;
-    --border: #d0d7de;
-    --text: #1f2328;
-    --text-dim: #57606a;
-    --accent: #0969da;
-    --accent-warm: #9a6700;
-    --up: #1a7f37;
-    --down: #0969da;
+    --bg: #eef0f2;
+    --bg-soft: #e3e6ea;
+    --border: #c7ccd2;
+    --text: #202428;
+    --text-dim: #4d545b;
+    --accent: #0066cc;
+    --accent-warm: #955800;
+    --up: #117833;
+    --down: #0066cc;
     --flair-text: #ffffff;
   }
 }
+
+/* ---------- LIGHT PALETTE PRESETS ----------
+ * Operators: copy any block over the [data-theme="light"]:root + media
+ * blocks above to swap. Mirror the same values into both blocks so the
+ * post-click and OS-hint paths stay aligned.
+ *
+ * github-light — cool gray, neutral, brightest. Industry-familiar.
+ * --bg:#f6f8fa; --bg-soft:#eaeef2; --border:#d0d7de; --text:#1f2328; --text-dim:#57606a;
+ * --accent:#0969da; --accent-warm:#9a6700; --up:#1a7f37; --down:#0969da; --flair-text:#ffffff;
+ *
+ * notion-cream — warm off-white, ink-feel.
+ * --bg:#f9f7f0; --bg-soft:#f0ede4; --border:#d8d4c8; --text:#37352f; --text-dim:#787570;
+ * --accent:#1a73e8; --accent-warm:#b06000; --up:#0f7b35; --down:#1a73e8; --flair-text:#ffffff;
+ *
+ * solarized-light — warm cream, paper-feel.
+ * --bg:#fdf6e3; --bg-soft:#eee8d5; --border:#93a1a1; --text:#586e75; --text-dim:#93a1a1;
+ * --accent:#268bd2; --accent-warm:#b58900; --up:#859900; --down:#268bd2; --flair-text:#fdf6e3;
+ *
+ * stone-warm — slight warm gray, less yellow than solarized.
+ * --bg:#f5f4ed; --bg-soft:#ebe9e0; --border:#cfccc1; --text:#1c1917; --text-dim:#57534e;
+ * --accent:#1564c0; --accent-warm:#a05a00; --up:#137034; --down:#1564c0; --flair-text:#ffffff;
+ */
 
 /* ------------------------------------------------------------
  * THEME PRESETS — copy any block over the :root above to swap.
@@ -89,8 +112,17 @@
 /* :root { --bg:#2d2a2e; --bg-soft:#221f22; --border:#403e41; --text:#fcfcfa; --text-dim:#939293; --accent:#78dce8; --accent-warm:#fc9867; --up:#a9dc76; --down:#78dce8; } */
 /* monokai-pro — vibrant accents on warm dark bg. Closer to a code-editor aesthetic.                                                                           */
 
-/* :root { --bg:#fafafa; --bg-soft:#f4f4f5; --border:#d4d4d8; --text:#18181b; --text-dim:#71717a; --accent:#0066cc; --accent-warm:#b45309; --up:#15803d; --down:#0066cc; } */
-/* paper-light — light mode preview. M8 will auto-switch via prefers-color-scheme; for now, paste manually.                                                    */
+/* :root { --bg:#2e3440; --bg-soft:#3b4252; --border:#4c566a; --text:#d8dee9; --text-dim:#81a1c1; --accent:#88c0d0; --accent-warm:#d08770; --up:#a3be8c; --down:#88c0d0; } */
+/* nord — frosty arctic palette, calm cool blues. Lower vibrancy, easy on eyes for marathon read sessions.                                                       */
+
+/* :root { --bg:#282828; --bg-soft:#3c3836; --border:#504945; --text:#ebdbb2; --text-dim:#a89984; --accent:#83a598; --accent-warm:#d79921; --up:#b8bb26; --down:#83a598; } */
+/* gruvbox-dark — retro warm earth tones, popular among vim/terminal users. Yellow-amber accent + muted greens.                                                  */
+
+/* :root { --bg:#1a1b26; --bg-soft:#24283b; --border:#414868; --text:#c0caf5; --text-dim:#a9b1d6; --accent:#7aa2f7; --accent-warm:#ff9e64; --up:#9ece6a; --down:#7aa2f7; } */
+/* tokyo-night — modern deep navy with soft blues. Sits between github-dark and mocha-purple in saturation.                                                      */
+
+/* :root { --bg:#011627; --bg-soft:#0b2942; --border:#1d3b53; --text:#d6deeb; --text-dim:#7e8aa0; --accent:#82aaff; --accent-warm:#ffcb6b; --up:#a6e22e; --down:#82aaff; } */
+/* night-owl — cobalt-deep blue, popular for streamers/recordings. Highest contrast accent against the deepest bg.                                               */
 
 
 * { box-sizing: border-box; }
@@ -1477,6 +1509,25 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   color: var(--text);
   border-color: var(--accent);
   background: var(--bg-soft);
+}
+
+/* Sub create / import submit — pill-shape to match the tab strip
+ * above. Width is auto (overrides form { display: grid }) so the
+ * button doesn't stretch full-width like a primary CTA. */
+.sub-create-form button {
+  justify-self: start;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: normal;
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.sub-create-form button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  filter: none;
 }
 
 /* Inline subscribe / unsubscribe form on /sub/<name>. Sits in the top
