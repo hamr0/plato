@@ -6,6 +6,72 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — sub-archive paginated reader mirrors personal archive
+
+The offline static reader inside per-sub archive tarballs now scales
+the same way the personal-archive reader does. When `posts.length`
+crosses 100, `index.html` becomes a chip navigator (`posts (N, Mp)` +
+one chip per `<year> (N)`) plus a "// recent activity" preview of the
+20 newest posts; subpages `posts.html` (paginated 100 per page) and
+`<year>.html` render the filtered lists. Below the threshold the
+single-page render is preserved unchanged. Comments stay nested
+inside per-post HTML pages — sub archives are post-centric, not flat
+streams of comments.
+
+The pagination primitives (`PAGINATION_THRESHOLD`/`PAGE_SIZE`,
+`bucketByYear`, `paginateBucket`, `pagerHtml`, `PAGINATION_CSS`) are
+extracted into `src/archive/reader-pagination.js` and shared between
+`user-export.js` and `sub-export.js` so future tweaks land in lockstep.
+The `.tar.gz` shape is unchanged from an importer's perspective: the
+new HTML subpages are just additional inert files alongside the
+existing `index.html`/`posts/<id>.html`. URL-import remains the same
+URL — importers consume `*.json` + `posts/<id>.md` and ignore the
+HTML.
+
+Adds `bin/m7-seed-bigsub.sh` smoke seed (120 posts + 60 threaded
+comments) so the reader's round-trip can be eyeballed end-to-end
+without reconstructing inline node from a stash.
+
+### Memlog filters: cross-side chips + auto-flip + showing/clear-all footer
+
+Three changes that compose into a much friendlier `/memlog`:
+
+- **Multi-select kind chips with cross-side semantics**. Each chip
+  declares both halves it touches: `notifKinds` (notification kinds)
+  and `contentKinds` (activity content types — `post` / `comment`).
+  The `comments` chip is cross-side: in any mode it matches both
+  received-comment notifications AND comments the user authored.
+  Same for `posts` (activity-only). Mode-specific chips (`replies`,
+  `mod-actions`, `archives`, `imports`) narrow only their half.
+  URLs encode the multi-select as `?kind=archives,comments`.
+- **Auto-flip empty unread**. When `show: unread` returns 0 rows but
+  read history exists, `/memlog` flips to `show: all` and surfaces a
+  "no unread match — showing read history. <back to unread>" hint.
+  Saves the user from chasing a "broken" filter that was actually
+  just narrowing past read items.
+- **Filter-aware empty state**. "no `<comments + archives>`
+  notifications." beats the misleading "no unread notifications."
+  when a filter genuinely has zero matches.
+- **Modlog-style "showing: X · clear all" footer** below the chip row
+  whenever the selection differs from defaults. One click clears.
+- **Filter chips stay visible across all modes**. Was: hidden in
+  activity mode, which read as vanishing. Now: chips always render;
+  visibility per-chip narrows to those that touch the active mode's
+  half (notifications mode hides activity-only chips, activity mode
+  hides notification-only chips, all mode shows everything).
+- **all-mode inclusion rule keys on side-touching**. Selecting a chip
+  that touches only one half drops the other half (otherwise activity
+  rows dominate and notif filters look ineffective). Selecting a
+  cross-side chip shows both halves filtered.
+
+`my-posts` / `my-comments` slugs collapse to plain `posts` / `comments`
+— the `my-` namespacing was the source of the conflict the user
+flagged ("comments" was ambiguous between received vs authored).
+Single migration: pre-v1, no compat shim; old URLs with `my-posts`
+silently degrade to no filter (the slug isn't recognized).
+
+772 green; tests cover the new chip rendering and filter combos.
+
 ### Polish — [i] chip on sub index header + listing surfaces; titleHtml split; manage-sub layout
 
 Round of small fixes after the C-render lock and pagination shipped:
