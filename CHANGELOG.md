@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — `bin/backup.sh` local snapshot script (M8/B3)
+
+`bin/backup.sh` writes a single tarball per run to `$BACKUP_DIR`
+(default `./backups`) named `plato-backup-<YYYY-MM-DD-HHMMSS>.tar.gz`.
+The DB is snapshotted via `sqlite3 .backup`, which uses SQLite's
+online-backup API — concurrent writers continue, the copy is
+internally consistent, the server doesn't need to stop. Auxiliary
+files (`posts/`, `exports/`, `config.json`, `spam-patterns.txt`,
+`data/urlhaus.txt`, `disposable-domains.txt`) are staged and tarred
+alongside; missing optional files are skipped silently so fresh
+installs work.
+
+Rotation keeps the newest `$BACKUP_KEEP` archives (default 7) and
+deletes older ones. Off-host copy is operator-opt-in via a commented
+`rsync` stanza at the bottom — we don't bake SSH key management into
+plato.
+
+Operator-guide gets a sample crontab entry (`30 3 * * * cd /opt/plato
+&& BACKUP_DIR=/var/lib/plato-backups bin/backup.sh ...`) and the
+restore procedure (stop → unpack → copy `forum.db` + `posts/` into
+place → ensure `KNOWLESS_SECRET` matches the original deploy → start).
+
 ### Added — `/healthz` operator probe (M8/B2)
 
 New public, unauthenticated `GET /healthz` returns JSON

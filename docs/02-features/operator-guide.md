@@ -430,8 +430,14 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 
   Importers / auditors verify with `ots verify <archive>.tar.gz.ots` (requires the .tar.gz alongside; see opentimestamps.org). Archives without a .ots are not "broken" — they just predate operator opt-in or the binary failed at stamp time. Verification falls back to the Ed25519 signature alone in that case.
 - **Health probe (M8/B2).** `GET /healthz` is a public, unauthenticated route that returns JSON `{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}` with `Cache-Control: no-store`. Returns `200` when both writability checks pass, `503` when either fails. Monitor by curling it from any external watcher — non-2xx is an alarm trigger. The companion watcher cron (B4, not yet shipped) will tail this and email on failure. Sample one-liner: `curl -fsS http://localhost:8080/healthz || mail -s 'plato down' op@example.com`.
-- **Backups** — copy `forum.db` and `posts/`. SQLite WAL means a hot copy works; for safety, use `sqlite3 forum.db ".backup forum.db.bak"`.
-- **Restoring** — drop the files in place, ensure `KNOWLESS_SECRET` is the same as before (otherwise users look like new accounts), `npm start`.
+- **Backups (M8/B3).** `bin/backup.sh` writes `BACKUP_DIR/plato-backup-<YYYY-MM-DD-HHMMSS>.tar.gz` containing an atomic SQLite snapshot of `forum.db` (via `sqlite3 .backup` — online, lock-safe, no need to stop the server) plus `posts/`, `exports/`, `config.json`, `spam-patterns.txt`, `data/urlhaus.txt`, and `disposable-domains.txt`. Tunables (env vars): `BACKUP_DIR` (default `./backups`), `BACKUP_KEEP` (default `7` — newest N kept, older deleted). Sample crontab entry — daily at 03:30, drops a tarball under `/var/lib/plato-backups/`:
+
+  ```
+  30 3 * * * cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups bin/backup.sh >> /var/log/plato-backup.log 2>&1
+  ```
+
+  Off-host copy is **not** automatic. The script ships with a commented-out `rsync` stanza at the bottom — uncomment it and point at your own host + SSH key. We don't bake key management into plato.
+- **Restoring from a backup.** stop the server → `tar -xzf plato-backup-*.tar.gz -C /opt/plato/restore` → copy `restore/forum.db` into place over the live one → copy `restore/posts/` into place → (optional) restore the operator-edited config + spam patterns → make sure `KNOWLESS_SECRET` matches the original deploy (otherwise identity hashes shift and every user looks like a new account) → `npm start`.
 
 ### When something goes wrong
 
