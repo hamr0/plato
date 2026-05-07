@@ -91,9 +91,13 @@ const HANDLE_RE = /^[0-9a-f]{64}$/;
 // from a renderer — use page() so the rule that "every page reads the
 // same as home, with the forum name replaced by the page action" holds
 // in code, not in convention.
-function pageView({ db, currentHandle = null, title, subtitle, description = null, canonical = null, ogType = 'website', feed = null }, body) {
+function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle, description = null, canonical = null, ogType = 'website', feed = null }, body) {
+  // `title` is the plain-text page title — used in <title> and og:title
+  // attributes where raw HTML is invalid. `titleHtml` is the body-side
+  // rendering, used in the brand-row h1 where decorations like the
+  // imported-sub [i] chip live. Falls back to title if not given.
   return layout(title, html`
-    ${siteHeader({ db, currentHandle, title, subtitle })}
+    ${siteHeader({ db, currentHandle, title: titleHtml ?? title, subtitle })}
     ${body}
   `, { description, canonical, ogType, feed });
 }
@@ -1544,7 +1548,8 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
     200,
     pageView({
       db, currentHandle,
-      title: html`//${subName}${importedSubChip({ sub })}`,
+      title: `//${subName}`,
+      titleHtml: html`//${subName}${importedSubChip({ sub })}`,
       subtitle: sub.description || null,
       description: sub.description || `//${subName} on ${branding.forumName}: ${defaultSiteDescription()}`,
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}`,
