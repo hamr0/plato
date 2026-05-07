@@ -41,12 +41,12 @@ import { recordSubImport } from '../content/mod.js';
 // numeric suffix at storage time so the UNIQUE handles.pseudonym
 // constraint holds: donkey-tiger → donkey-tiger-2 → donkey-tiger-3 …
 //
-// The render layer (pseudonymsByHandle in src/web/app.js) marks every
-// imported pseudonym with a trailing dagger (`alice-tiger†`) and an
-// aria-label, so a reader can tell that replies won't reach the
-// archived author. The numeric suffix is stripped at display time —
-// it's plumbing for the UNIQUE constraint, not user-facing. The dagger
-// is the user-facing signal.
+// The render layer (pseudonymsByHandle in src/web/app.js) wraps every
+// imported pseudonym in a span with class="imported-author" (dim +
+// italic) and aria-label="imported author <name>" so a reader can
+// tell at a glance that replies won't reach the archived author.
+// The numeric suffix is stripped at display time — it's plumbing for
+// the UNIQUE constraint, not user-facing.
 //
 // PRD §Cross-instance imports — Identity model.
 //

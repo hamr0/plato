@@ -464,10 +464,10 @@ function subColorIndex(subName) {
 // Returns a Map<handle, AuthorView>. Native handles map to a plain
 // pseudonym string. Imported handles (handles.imported_from_fingerprint
 // non-null) map to a render object that:
-//   - in html`` interpolation, emits a span carrying aria-label and a
-//     trailing dagger glyph: `<span aria-label="imported author alice-tiger">alice-tiger†</span>`
-//   - in string concat / String() coercion, returns the dagger-suffixed
-//     text `alice-tiger†` (toString fallback)
+//   - in html`` interpolation, emits a span carrying class="imported-author"
+//     (dim + italic styling) plus aria-label for assistive tech
+//   - in string concat / String() coercion, returns the bare display name
+//     (suffix-stripped, no extra glyph) via the toString fallback
 //
 // Display strip: any trailing `-N` numeric suffix is removed for imported
 // pseudonyms only — the suffix exists in the DB to satisfy the UNIQUE
@@ -475,10 +475,14 @@ function subColorIndex(subName) {
 // shouldn't see it. The strip is gated on imported_from_fingerprint
 // because native HMAC pseudonyms can legitimately end in `-2`.
 //
-// Three signals carry the same meaning, one render rule:
-//   1. visual: trailing `†`
+// Two signals carry the same meaning, one render rule:
+//   1. visual: opacity + italic styling (CSS handles both)
 //   2. assistive tech: aria-label="imported author <name>"
-//   3. plain text (copy/paste): the dagger persists outside the page
+//
+// Plain-text contexts (RSS, mod-filter summary lines) get the bare name —
+// no extra glyph — by design: option C is visual-styling-only. The
+// imported-banner on the sub index and the persistent [i] chip on inner
+// pages carry the provenance signal where styling can't reach.
 //
 // PRD §Cross-instance imports — Identity model.
 function pseudonymsByHandle(db, handles) {
@@ -497,10 +501,9 @@ function pseudonymsByHandle(db, handles) {
 function authorView(canonicalPseudonym, isImported) {
   if (!isImported) return canonicalPseudonym;
   const display = canonicalPseudonym.replace(/-\d+$/, '');
-  const text = `${display}†`;
   const safe = escapeHTML(display);
-  const v = raw(`<span aria-label="imported author ${safe}">${safe}†</span>`);
-  v.toString = () => text;
+  const v = raw(`<span class="imported-author" aria-label="imported author ${safe}">${safe}</span>`);
+  v.toString = () => display;
   return v;
 }
 
@@ -1709,7 +1712,7 @@ function importedBanner({ sub, db }) {
     ? html` · imported by <strong>${importer}</strong>`
     : html``;
   const dateLine = importedAt ? html` on <strong>${importedAt}</strong>` : html``;
-  return html`<div class="imported-banner">[imported] from <a href="${sub.imported_from_url}">${sourceHost}</a>${dateLine}${importerLine} · historical authors marked †. posts, comments, votes, and modlog are preserved verbatim from the source archive.</div>`;
+  return html`<div class="imported-banner">[imported] from <a href="${sub.imported_from_url}">${sourceHost}</a>${dateLine}${importerLine}. posts, comments, votes, and modlog are preserved verbatim from the source archive.</div>`;
 }
 
 // Compact `[i]` chip for sub-scoped pages other than the index (post
@@ -1722,7 +1725,7 @@ function importedSubChip({ sub }) {
   const sourceHost = (() => {
     try { return new URL(sub.imported_from_url).host; } catch { return sub.imported_from_url; }
   })();
-  const tip = `imported from ${sourceHost}${importedAt ? ` on ${importedAt}` : ''} · historical authors marked †`;
+  const tip = `imported from ${sourceHost}${importedAt ? ` on ${importedAt}` : ''}`;
   return html`<span class="imported-chip" title="${tip}">[i]</span>`;
 }
 

@@ -1355,6 +1355,18 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
   margin-right: 0.2em;
 }
 
+/* Imported author label — every pseudonym whose handle came from an
+   archive (handles.imported_from_fingerprint non-null). Two visual
+   channels: opacity for the at-a-glance "background / inactive"
+   posture, italic as the non-color hook so colorblind / high-contrast
+   readers still get a signal. The aria-label on the span carries the
+   meaning to assistive tech. The imported-banner + imported-chip carry
+   provenance to readers who don't know the convention yet. */
+.imported-author {
+  opacity: 0.6;
+  font-style: italic;
+}
+
 /* Compact [i] chip on inner sub-scoped pages (post detail, modlog,
    sub-edit). The full imported-banner only renders on the sub index;
    this chip carries the same provenance via its title attribute on

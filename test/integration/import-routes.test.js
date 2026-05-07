@@ -271,11 +271,11 @@ test('GET /sub/<name>/modlog: imported_from_fingerprint rows render with [import
   assert.match(body, /imported-tag[^>]*>\[imported\]/);
 });
 
-test('imported handle pseudonyms render with † + aria-label; native render bare', async (t) => {
+test('imported handle pseudonyms render with imported-author class + aria-label; native render bare', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   // Two handles with the same pseudonym shape — one native, one imported.
-  // Imported must render with trailing dagger and aria-label; native must
-  // render bare without either.
+  // Imported must render wrapped in <span class="imported-author"
+  // aria-label="imported author <name>">; native must render bare.
   const native = 'a'.repeat(64);
   const imported = 'b'.repeat(64);
   ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(native, 'native-fox', Date.now());
@@ -293,21 +293,21 @@ test('imported handle pseudonyms render with † + aria-label; native render bar
   ).run('m-imported', 'archive', imported, Date.now());
   const res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
   const body = await res.text();
-  // Imported: dagger + aria-label.
-  assert.match(body, /aria-label="imported author imported-bear"/);
-  assert.match(body, /imported-bear†/);
-  // Native: bare, no dagger, no aria-label of this shape.
+  // Imported: class + aria-label, name unchanged.
+  assert.match(body, /<span class="imported-author" aria-label="imported author imported-bear">imported-bear<\/span>/);
+  // Native: bare, no class, no aria-label of this shape.
   assert.ok(body.includes('native-fox'), 'native pseudonym must appear');
-  assert.ok(!body.includes('native-fox†'), 'native pseudonym must NOT have a dagger');
+  assert.ok(!/<span class="imported-author"[^>]*>native-fox</.test(body), 'native pseudonym must NOT carry imported-author class');
   assert.ok(!body.includes('aria-label="imported author native-fox"'), 'native pseudonym must NOT carry imported aria-label');
-  // Bracket render is gone.
+  // Bracket render is gone; dagger render is gone.
   assert.ok(!body.includes('[imported-bear]'), 'old bracket render must be removed');
+  assert.ok(!body.includes('imported-bear†'), 'dagger render must be removed');
 });
 
-test('imported pseudonym with -N suffix in DB renders as bare name + dagger', async (t) => {
+test('imported pseudonym with -N suffix in DB renders as bare stripped name', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   // The DB stores `clever-tiger-2` (collision suffix). The display should
-  // strip the suffix and append the dagger: `clever-tiger†`.
+  // strip the suffix and wrap in the imported-author span.
   const importedHandle = 'c'.repeat(64);
   ctx.db.prepare(
     `INSERT INTO handles (handle, pseudonym, first_seen_at, imported_from_fingerprint) VALUES (?, ?, ?, 'sha256:src')`
@@ -319,16 +319,15 @@ test('imported pseudonym with -N suffix in DB renders as bare name + dagger', as
   ).run('m1', 'archive', importedHandle, Date.now());
   const res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
   const body = await res.text();
-  // Display shows the stripped name, not the canonical -2.
-  assert.match(body, /clever-tiger†/);
-  assert.match(body, /aria-label="imported author clever-tiger"/);
-  assert.ok(!body.includes('clever-tiger-2†'), 'display must strip the -N suffix');
+  // Display shows the stripped name in the imported-author span.
+  assert.match(body, /<span class="imported-author" aria-label="imported author clever-tiger">clever-tiger<\/span>/);
+  assert.ok(!body.includes('clever-tiger-2</span>'), 'display must strip the -N suffix from the inner text');
 });
 
-test('native pseudonym ending in -2 is NOT stripped', async (t) => {
+test('native pseudonym ending in -2 is NOT stripped or wrapped', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
-  // A native HMAC pseudonym could legitimately end in -2; strip rule
-  // must be gated on imported_from_fingerprint.
+  // A native HMAC pseudonym could legitimately end in -2; strip + wrap
+  // are gated on imported_from_fingerprint.
   const nativeHandle = 'd'.repeat(64);
   ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(nativeHandle, 'odd-name-2', Date.now());
   ctx.db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)').run('lobby', null, Date.now());
@@ -339,11 +338,11 @@ test('native pseudonym ending in -2 is NOT stripped', async (t) => {
   const res = await fetch(ctx.baseUrl + '/sub/lobby/modlog');
   const body = await res.text();
   assert.ok(body.includes('odd-name-2'), 'native -N pseudonym must render verbatim');
-  assert.ok(!body.includes('odd-name-2†'), 'native pseudonym must not get a dagger');
   assert.ok(!body.includes('aria-label="imported author odd-name"'), 'native pseudonym must not be stripped');
+  assert.ok(!/<span class="imported-author"[^>]*>odd-name/.test(body), 'native pseudonym must not be wrapped');
 });
 
-test('imported sub renders [i] chip on post detail and modlog pages', async (t) => {
+test('imported sub renders [i] chip on modlog page; native sub does not', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const importerHandle = 'e'.repeat(64);
   ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(importerHandle, 'importer-pseudo', Date.now());
@@ -352,17 +351,13 @@ test('imported sub renders [i] chip on post detail and modlog pages', async (t) 
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run('archive', importerHandle, Date.now(), 'https://source.example.com/x.tar.gz', 'sha256:fp', Date.UTC(2026, 4, 7), Date.UTC(2026, 4, 6));
   ctx.db.prepare(`INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, 'owner')`).run('archive', importerHandle);
-  // Seed a post so /sub/archive/post/<id> resolves.
-  ctx.db.prepare(
-    `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, score)
-     VALUES (?, ?, ?, ?, ?, ?, 0)`
-  ).run('p-imp', 'archive', importerHandle, 'a post', 'posts/2026-05-07-p-imp.md', Date.now());
 
-  // Modlog page: chip present.
+  // Modlog page: chip present, title carries source + date (no dagger explanation).
   let res = await fetch(ctx.baseUrl + '/sub/archive/modlog');
   let body = await res.text();
   assert.match(body, /class="imported-chip"/);
-  assert.match(body, /title="imported from source\.example\.com on 2026-05-07 · historical authors marked †"/);
+  assert.match(body, /title="imported from source\.example\.com on 2026-05-07"/);
+  assert.ok(!body.includes('historical authors marked'), 'chip title must not reference the dagger convention');
 
   // Native sub: chip absent on its modlog page.
   ctx.db.prepare('INSERT INTO subs (name, owner_handle, created_at) VALUES (?, ?, ?)').run('lobby', null, Date.now());
@@ -371,7 +366,7 @@ test('imported sub renders [i] chip on post detail and modlog pages', async (t) 
   assert.doesNotMatch(body, /class="imported-chip"/);
 });
 
-test('imported-banner copy includes "historical authors marked †"', async (t) => {
+test('imported-banner copy: provenance only, no dagger explainer', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const importerHandle = 'f'.repeat(64);
   ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(importerHandle, 'importer-pseudo', Date.now());
@@ -383,7 +378,8 @@ test('imported-banner copy includes "historical authors marked †"', async (t) 
   const res = await fetch(ctx.baseUrl + '/sub/archive2');
   const body = await res.text();
   assert.match(body, /\[imported\] from <a/);
-  assert.match(body, /historical authors marked †/);
+  assert.match(body, /imported by <strong>importer-pseudo<\/strong>/);
+  assert.ok(!body.includes('historical authors marked'), 'banner must not reference the dagger convention');
 });
 
 // --- /memlog rendering for import_ready / import_failed ---

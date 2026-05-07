@@ -6,47 +6,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-### Changed — M7 followup: imported authors marked with † + aria-label, persistent [i] sub chip
+### Changed — M7 followup: imported authors render dim+italic with aria-label, persistent [i] sub chip
 
-Reverts the bracket-everywhere render lock from earlier this session
-in favor of a more accessible, less typographically loud signal. The
-worry the bracket was solving — a reader replying to an archived
-author whose reply will never arrive — is now carried by three
-parallel signals on every imported pseudonym, all driven from one
-render rule:
+Final lock on the imported-author signal after a side-by-side comparison
+of four render options (brackets, dagger, dim+italic, bracket+dim).
+The worry — a reader replying to an archived author whose reply will
+never arrive — is now carried by two parallel signals on every imported
+pseudonym, driven from one render rule:
 
-1. **Visual.** A trailing dagger glyph: `alice-tiger†`. Historical
-   typography convention for "no longer with us." Survives copy/paste
-   and plain-text contexts (RSS feeds, terminals).
+1. **Visual.** Span wrapped in `class="imported-author"` styled
+   `opacity: 0.6; font-style: italic`. Two channels (color + style)
+   so the signal survives colorblind / high-contrast modes — italic
+   is the non-color hook.
 2. **Assistive tech.** `aria-label="imported author alice-tiger"` on
    the wrapping span. Screen readers announce "imported author
-   alice-tiger" instead of speaking the dagger glyph literally.
-3. **Display strip.** Any trailing `-N` numeric suffix (collision
-   plumbing for the UNIQUE constraint) is stripped at render time
-   *only* for imported handles, so a reader sees `alice-tiger†` not
-   `alice-tiger-2†`. Native HMAC pseudonyms ending in `-N` are
-   unaffected — the strip is gated on `imported_from_fingerprint`.
+   alice-tiger" so the dim styling isn't lost on non-visual readers.
 
-`pseudonymsByHandle` now returns an `AuthorView` value that's
-either a plain string (native) or a raw-html object with a
-`toString` fallback (imported). Templates interpolate the html;
-string concat (`mod=${value}`) and `escapeXml(value)` get the
-dagger-suffixed text. No call-site changes across 23 render points.
+A `-N` numeric suffix on a colliding pseudonym (collision plumbing for
+the UNIQUE constraint) is stripped at render time *only* for imported
+handles. Native HMAC pseudonyms ending in `-N` are unaffected — the
+strip is gated on `imported_from_fingerprint`.
 
-- **Imported-banner copy** on `/sub/<name>` index changed to
-  `[imported] from <host> on <date> · imported by <pseudo> · historical authors marked †. posts, comments, votes, and modlog are preserved verbatim from the source archive.`
-- **Compact `[i]` chip** added to inner sub-scoped pages (post
-  detail, public modlog, sub-edit). `title` carries
-  `imported from <host> on <date> · historical authors marked †`
-  on hover. CSS class `.imported-chip` follows the dim
-  `imported-banner` palette — informational, not warning.
-- **`pseudonymForImport`** unchanged — `-2`/`-3`/… collision
-  suffixes were already correct under the previous lock.
-- Render-time bracket wrap (`[alice-tiger]`) and the
-  bracket-on-modlog-render assertion are removed. Tests rewritten
-  to check for the dagger + aria-label + chip presence + display
-  strip + native-not-stripped guard. +5 tests in
-  `test/integration/import-routes.test.js` (763 → 768 green).
+`pseudonymsByHandle` returns an `AuthorView` value: plain string for
+native handles, raw-html object with a `toString` fallback for imported.
+Templates interpolate the html; string concat and `escapeXml` get the
+bare display name (no extra glyph) by design — option C is
+visual-styling-only. Plain-text contexts (RSS, mod-filter summary
+strings) get the bare name. The imported-banner on the sub index and
+the persistent `[i]` chip on inner pages carry provenance where styling
+can't reach.
+
+- **`.imported-author` CSS class** added — `opacity: 0.6;
+  font-style: italic`. One rule, two visual channels.
+- **Imported-banner copy** on `/sub/<name>` index reads
+  `[imported] from <host> on <date> · imported by <pseudo>. posts, comments, votes, and modlog are preserved verbatim from the source archive.`
+  No symbol-key footnote — the dim/italic styling speaks for itself
+  alongside the explicit banner.
+- **Compact `[i]` chip** persistent on inner sub-scoped pages (post
+  detail, public modlog, sub-edit). `title` attribute carries
+  `imported from <host> on <date>` on hover.
+- **`pseudonymForImport`** unchanged — `-2`/`-3`/… collision suffix
+  storage was already correct.
+- Bracket-everywhere render and dagger-render iterations are both
+  superseded. Tests rewritten to assert
+  `<span class="imported-author" aria-label="imported author <name>">`
+  shape + display strip on imported / no-strip on native + chip
+  presence + native-no-chip + banner copy without dagger explainer.
+  +5 tests in `test/integration/import-routes.test.js` (763 → 768
+  green).
 
 ### Added — M7 followup: sub-archive import surfaces in public modlog
 
