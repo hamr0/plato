@@ -15,6 +15,10 @@ import { resolve } from 'node:path';
 import { buildManifest, sha256Hex } from './manifest.js';
 import { writeTar } from './tar.js';
 import { renderMarkdown } from '../content/markdown.js';
+import {
+  PAGE_SIZE, PAGINATION_THRESHOLD, PAGINATION_CSS,
+  bucketByYear, escapeHtml, fmtTimestamp, htmlPage, paginateBucket,
+} from './reader-pagination.js';
 
 // Default static reader styling — ~80 lines, monospace, plato-voice but
 // reduced (no JS, no interactivity, no theme tokens — archive lives
@@ -53,42 +57,12 @@ ul.posts > li .meta { color: var(--text-dim); font-size: 0.85rem; }
 .comment.removed > .body { color: var(--text-dim); font-style: italic; }
 .comment.collapsed > .body { display: none; }
 .banner { border: 1px solid var(--text-dim); padding: 0.4rem 0.7rem; margin: 0.5rem 0; font-size: 0.85rem; }
-blockquote { border-left: 3px solid var(--border); margin: 0.5rem 0; padding: 0 0.8rem; color: var(--text-dim); }
+${PAGINATION_CSS}blockquote { border-left: 3px solid var(--border); margin: 0.5rem 0; padding: 0 0.8rem; color: var(--text-dim); }
 pre { background: var(--bg-soft); padding: 0.5rem 0.8rem; overflow-x: auto; }
 code { background: var(--bg-soft); padding: 0.1rem 0.3rem; border-radius: 3px; }
 pre > code { background: transparent; padding: 0; }
 img { max-width: 100%; }
 `;
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function htmlPage({ title, cssHref, body }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${escapeHtml(cssHref)}">
-</head>
-<body>
-${body}
-</body>
-</html>
-`;
-}
-
-function fmtTimestamp(ms) {
-  if (ms == null) return '';
-  return new Date(ms).toISOString();
-}
 
 // Render the body of <id>.html: post header + rendered post body +
 // threaded comment tree. Comments are rendered as a flat depth-prefixed
@@ -133,33 +107,93 @@ ${removedBanner}
 ${tree}`;
 }
 
-function renderIndexHtml({ sub, posts, pseudonyms, instance }) {
-  const items = posts
-    .slice()
-    .sort((a, b) => b.created_at - a.created_at)
-    .map((p) => {
-      const ps = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
-      const tags = [];
-      if (p.removed_at) tags.push('[mod removed]');
-      if (p.collapsed_at) tags.push('[mod collapsed]');
-      if (p.sensitive) tags.push('[!]');
-      return `<li>
+function postRowHtml(p, pseudonyms) {
+  const ps = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
+  const tags = [];
+  if (p.removed_at) tags.push('[mod removed]');
+  if (p.collapsed_at) tags.push('[mod collapsed]');
+  if (p.sensitive) tags.push('[!]');
+  return `<li>
   <a href="posts/${escapeHtml(p.id)}.html">${escapeHtml(p.title)}</a> ${tags.length ? `<span class="muted">${escapeHtml(tags.join(' '))}</span>` : ''}
   <div class="meta">${escapeHtml(ps)} · ${fmtTimestamp(p.created_at)} · score ${p.score} · ${p.comment_count} ${p.comment_count === 1 ? 'comment' : 'comments'}</div>
 </li>`;
-    })
-    .join('\n');
+}
 
-  const sourceLine = instance.base_url
-    ? `exported from <a href="${escapeHtml(instance.base_url)}">${escapeHtml(instance.forum_name)}</a> · ${posts.length} posts · format v1`
-    : `exported from ${escapeHtml(instance.forum_name)} · ${posts.length} posts · format v1`;
+function postsListHtml(items, pseudonyms) {
+  if (items.length === 0) return '<p class="muted">no posts.</p>';
+  return `<ul class="posts">${items.map((p) => postRowHtml(p, pseudonyms)).join('\n')}</ul>`;
+}
 
+function sourceLineHtml(instance, postCount) {
+  return instance.base_url
+    ? `exported from <a href="${escapeHtml(instance.base_url)}">${escapeHtml(instance.forum_name)}</a> · ${postCount} posts · format v1`
+    : `exported from ${escapeHtml(instance.forum_name)} · ${postCount} posts · format v1`;
+}
+
+// Single-page render — used when posts.length ≤ PAGINATION_THRESHOLD.
+function renderSingleIndexHtml({ sub, posts, pseudonyms, instance }) {
+  const sorted = posts.slice().sort((a, b) => b.created_at - a.created_at);
   return `<h1>//${escapeHtml(sub.name)} archive</h1>
 <p class="muted">${escapeHtml(sub.description || '')}</p>
-<p class="muted">${sourceLine}</p>
+<p class="muted">${sourceLineHtml(instance, posts.length)}</p>
 <p class="muted">offline static reader. no javascript. read-only. see README.md for the schema.</p>
 <h2 class="section">// posts</h2>
-<ul class="posts">${items}</ul>`;
+${postsListHtml(sorted, pseudonyms)}`;
+}
+
+// Landing page for paginated mode: header + chips (posts + year buckets)
+// + recent activity preview. Mirrors the per-user archive landing.
+function renderLandingHtml({ sub, posts, pseudonyms, instance, yearBuckets }) {
+  const totalPages = (n) => Math.max(1, Math.ceil(n / PAGE_SIZE));
+  const yearChips = [...yearBuckets.keys()].map((y) =>
+    `<a href="${escapeHtml(String(y))}.html">${y} (${yearBuckets.get(y).length})</a>`
+  ).join('');
+  const recent = posts.slice().sort((a, b) => b.created_at - a.created_at).slice(0, 20);
+  return `<h1>//${escapeHtml(sub.name)} archive</h1>
+<p class="muted">${escapeHtml(sub.description || '')}</p>
+<p class="muted">${sourceLineHtml(instance, posts.length)}</p>
+<p class="muted">offline static reader. no javascript. read-only. see README.md for the schema.</p>
+<div class="chips">
+  <a href="posts.html">posts (${posts.length}${totalPages(posts.length) > 1 ? `, ${totalPages(posts.length)}p` : ''})</a>
+  ${yearChips}
+</div>
+<h2 class="section">// recent activity</h2>
+${postsListHtml(recent, pseudonyms)}
+<p class="muted">${posts.length - recent.length} more — use the chips above.</p>`;
+}
+
+function renderIndexHtml({ sub, posts, pseudonyms, instance }) {
+  if (posts.length <= PAGINATION_THRESHOLD) {
+    return renderSingleIndexHtml({ sub, posts, pseudonyms, instance });
+  }
+  const yearBuckets = bucketByYear(posts);
+  return renderLandingHtml({ sub, posts, pseudonyms, instance, yearBuckets });
+}
+
+// Build the paginated subpages (posts.html + <year>.html) when a sub
+// archive crosses the pagination threshold. Empty for small archives —
+// caller skips the loop.
+function buildReaderSubpages({ sub, posts, pseudonyms }) {
+  if (posts.length <= PAGINATION_THRESHOLD) return [];
+  const sorted = posts.slice().sort((a, b) => b.created_at - a.created_at);
+  const yearBuckets = bucketByYear(posts);
+  const renderRows = (items) => postsListHtml(items, pseudonyms);
+  const out = [];
+  out.push(...paginateBucket({
+    items: sorted,
+    baseFilename: 'posts',
+    pageTitle: `//${sub.name} — posts (${posts.length})`,
+    renderRows,
+  }));
+  for (const [year, items] of yearBuckets) {
+    out.push(...paginateBucket({
+      items,
+      baseFilename: String(year),
+      pageTitle: `//${sub.name} — ${year} (${items.length})`,
+      renderRows,
+    }));
+  }
+  return out;
 }
 
 function buildReadme({ sub, instance, exportedAtIso, counts }) {
@@ -401,6 +435,19 @@ export function buildSubArchiveBytes(db, subName, { postsDir, branding, platoVer
   files.push({ path: 'votes.json', body: votesJson });
   files.push({ path: 'subs.json', body: subsJson });
   files.push({ path: 'index.html', body: indexHtml });
+  // Reader subpages — paginated `posts.html` + per-year buckets when
+  // the sub crosses PAGINATION_THRESHOLD. Empty for small archives;
+  // the single-page index covers them.
+  for (const subpage of buildReaderSubpages({ sub: { name: subName }, posts: postsForIndex, pseudonyms })) {
+    files.push({
+      path: subpage.filename,
+      body: htmlPage({
+        title: `//${subName} archive`,
+        cssHref: 'archive.css',
+        body: subpage.body,
+      }),
+    });
+  }
   files.push({ path: 'archive.css', body: ARCHIVE_CSS });
   files.push({ path: 'README.md', body: readmeMd });
 

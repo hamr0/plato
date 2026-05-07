@@ -811,6 +811,94 @@ test('buildSubArchiveBytes: index.html renders sub name, lists posts with links 
   }
 });
 
+test('buildSubArchiveBytes: paginated reader when sub crosses 100 posts', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-paginate-'));
+  try {
+    const ALICE = 'a'.repeat(64);
+    db.prepare(`INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)`).run(ALICE, 'alice-pseudo', ts(0));
+    db.prepare(`INSERT INTO subs (name, description, owner_handle, default_sort, created_at)
+                VALUES ('studio', 'big sub', ?, 'new', ?)`).run(ALICE, ts(0));
+    // 120 posts spread across two years to exercise year buckets + pagination.
+    for (let i = 0; i < 120; i++) {
+      const id = i.toString(16).padStart(16, '0');
+      const filename = `2026-05-06-${id}.md`;
+      writeFileSync(
+        join(postsDir, filename),
+        `---\ntitle: "post ${i}"\nhandle: ${ALICE}\nsub_name: studio\ncreated_at: ${ts(i)}\n---\n\nbody.\n`,
+        'utf8',
+      );
+      const year = i < 60 ? 2025 : 2026;
+      const created = Date.UTC(year, 5, 1) + i * 1000;
+      db.prepare(
+        `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, score)
+         VALUES (?, 'studio', ?, ?, ?, ?, 0)`
+      ).run(id, ALICE, `post ${i}`, `posts/${filename}`, created);
+    }
+
+    const tar = buildSubArchiveBytes(db, 'studio', {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(200)),
+    });
+    const entries = readTar(tar);
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+
+    // Landing page: chips + recent activity preview, no inlined full list.
+    assert.match(indexHtml, /class="chips"/, 'landing page must have filter chips');
+    assert.match(indexHtml, /href="posts\.html">posts \(120/);
+    assert.match(indexHtml, /href="2025\.html">2025 \(60\)/);
+    assert.match(indexHtml, /href="2026\.html">2026 \(60\)/);
+    assert.match(indexHtml, /\/\/ recent activity/);
+
+    // posts.html: page 1, has pagination, contains 100 items.
+    const postsP1 = entryByPath(entries, 'posts.html').body.toString('utf8');
+    assert.match(postsP1, /page 1 of 2/);
+    assert.match(postsP1, /href="posts-2\.html">next →/);
+    assert.match(postsP1, /← index/);
+    assert.equal((postsP1.match(/<li>/g) || []).length, 100, 'posts.html page 1 must hold exactly 100 items');
+
+    // posts-2.html: page 2, prev points back to posts.html (not posts-1.html).
+    const postsP2 = entryByPath(entries, 'posts-2.html').body.toString('utf8');
+    assert.match(postsP2, /page 2 of 2/);
+    assert.match(postsP2, /href="posts\.html">← prev/);
+    assert.ok(!postsP2.includes('next →'), 'last page must not have a next link');
+    assert.equal((postsP2.match(/<li>/g) || []).length, 20);
+
+    // Year buckets — 60 each, single page each.
+    const y2025 = entryByPath(entries, '2025.html').body.toString('utf8');
+    assert.match(y2025, /\/\/studio — 2025 \(60\)/);
+    assert.ok(!y2025.includes('page 1 of'), 'single-page bucket should not render a pager');
+    const y2026 = entryByPath(entries, '2026.html').body.toString('utf8');
+    assert.match(y2026, /\/\/studio — 2026 \(60\)/);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
+test('buildSubArchiveBytes: small archive stays single-page (no pagination subpages)', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-export-small-'));
+  try {
+    seedSubFixture(db, postsDir, 'studio');
+    const tar = buildSubArchiveBytes(db, 'studio', {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+    });
+    const entries = readTar(tar);
+    assert.ok(!entryByPath(entries, 'posts.html'), 'small archive must not produce posts.html');
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+    assert.ok(!indexHtml.includes('class="chips"'), 'small archive index must not render chips');
+    // The single-page render is preserved — full post list inline.
+    assert.match(indexHtml, /\/\/ posts/);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildSubArchiveBytes: gzipped tarball round-trips through gunzip', async () => {
   const { gzipSync, gunzipSync } = await import('node:zlib');
   const db = memDb();

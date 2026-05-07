@@ -24,6 +24,10 @@ import { resolve } from 'node:path';
 import { buildManifest, sha256Hex } from './manifest.js';
 import { writeTar } from './tar.js';
 import { renderMarkdown } from '../content/markdown.js';
+import {
+  PAGE_SIZE, PAGINATION_THRESHOLD, PAGINATION_CSS,
+  bucketByYear, escapeHtml, fmtTimestamp, htmlPage, paginateBucket,
+} from './reader-pagination.js';
 
 // Same minimal monospace styling as the per-sub archive's static reader.
 const ARCHIVE_CSS = `:root {
@@ -55,57 +59,12 @@ ul.posts, ul.comments { list-style: none; padding: 0; }
 ul.posts > li, ul.comments > li { padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
 ul.posts > li .meta, ul.comments > li .meta { color: var(--text-dim); font-size: 0.85rem; }
 .banner { border: 1px solid var(--text-dim); padding: 0.4rem 0.7rem; margin: 0.5rem 0; font-size: 0.85rem; }
-.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0; }
-.chips a { border: 1px solid var(--border); padding: 0.2rem 0.6rem; border-radius: 3px; color: var(--text); font-size: 0.85rem; }
-.chips a:hover { border-color: var(--accent); text-decoration: none; }
-.chips a.muted { color: var(--text-dim); }
-.pager { display: flex; justify-content: space-between; margin: 1rem 0; font-size: 0.85rem; color: var(--text-dim); }
-.pager .spacer { flex: 1; }
-blockquote { border-left: 3px solid var(--border); margin: 0.5rem 0; padding: 0 0.8rem; color: var(--text-dim); }
+${PAGINATION_CSS}blockquote { border-left: 3px solid var(--border); margin: 0.5rem 0; padding: 0 0.8rem; color: var(--text-dim); }
 pre { background: var(--bg-soft); padding: 0.5rem 0.8rem; overflow-x: auto; }
 code { background: var(--bg-soft); padding: 0.1rem 0.3rem; border-radius: 3px; }
 pre > code { background: transparent; padding: 0; }
 img { max-width: 100%; }
 `;
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function htmlPage({ title, cssHref, body }) {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="${escapeHtml(cssHref)}">
-</head>
-<body>
-${body}
-</body>
-</html>
-`;
-}
-
-function fmtTimestamp(ms) {
-  if (ms == null) return '';
-  return new Date(ms).toISOString();
-}
-
-// Reader pagination: when total items > PAGINATION_THRESHOLD, the
-// reader splits into a landing page + filtered/paginated subpages
-// (posts.html, comments.html, <year>.html each paginated to PAGE_SIZE).
-// Below the threshold we keep the single-page render — small archives
-// don't benefit from clicking through. PAGE_SIZE = 100 keeps each page
-// scrollable without ctrl-F becoming useless.
-const PAGINATION_THRESHOLD = 100;
-const PAGE_SIZE = 100;
 
 function postRowHtml(p) {
   const tags = [];
@@ -144,57 +103,15 @@ function commentsListHtml(items) {
   return `<ul class="comments">${items.map(commentRowHtml).join('\n')}</ul>`;
 }
 
-function pagerHtml({ baseFilename, page, totalPages }) {
-  if (totalPages <= 1) return '';
-  const prevHref = page === 1 ? null
-    : page === 2 ? `${baseFilename}.html`
-    : `${baseFilename}-${page - 1}.html`;
-  const nextHref = page === totalPages ? null : `${baseFilename}-${page + 1}.html`;
-  return `<div class="pager">
-  ${prevHref ? `<a href="${escapeHtml(prevHref)}">← prev</a>` : '<span></span>'}
-  <span>page ${page} of ${totalPages}</span>
-  ${nextHref ? `<a href="${escapeHtml(nextHref)}">next →</a>` : '<span></span>'}
-</div>`;
-}
-
-// Returns an array of {filename, body} entries for one filter bucket.
-// `renderRows` is called per page-slice and produces the inner HTML for
-// the items list.
-function paginateBucket({ items, baseFilename, pageTitle, renderRows }) {
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-  const out = [];
-  for (let i = 0; i < totalPages; i++) {
-    const page = i + 1;
-    const filename = page === 1 ? `${baseFilename}.html` : `${baseFilename}-${page}.html`;
-    const slice = items.slice(i * PAGE_SIZE, (i + 1) * PAGE_SIZE);
-    const pager = pagerHtml({ baseFilename, page, totalPages });
-    const body = `<p><a href="index.html">← index</a></p>
-<h1>${escapeHtml(pageTitle)}</h1>
-${pager}
-${renderRows(slice)}
-${pager}`;
-    out.push({ filename, body });
-  }
-  return out;
-}
-
-function yearOf(ms) {
-  return new Date(ms).getUTCFullYear();
-}
-
-// Returns Map<year, items> ordered newest-first.
-function bucketByYear(posts, comments) {
-  const buckets = new Map();
-  const tagged = [
+// Combine posts + comments into a single year-bucketed map. The shared
+// bucketByYear is item-shape-agnostic; we tag each item with `_kind`
+// here so the user-archive year pages can interleave the two types
+// through `mixedRowsHtml`.
+function bucketUserActivityByYear(posts, comments) {
+  return bucketByYear([
     ...posts.map((p) => ({ ...p, _kind: 'post' })),
     ...comments.map((c) => ({ ...c, _kind: 'comment' })),
-  ].sort((a, b) => b.created_at - a.created_at);
-  for (const it of tagged) {
-    const y = yearOf(it.created_at);
-    if (!buckets.has(y)) buckets.set(y, []);
-    buckets.get(y).push(it);
-  }
-  return buckets;
+  ]);
 }
 
 // Single-page render — used when total items ≤ PAGINATION_THRESHOLD.
@@ -241,7 +158,7 @@ function renderIndexHtml({ pseudonym, handle, posts, comments }) {
   if (total <= PAGINATION_THRESHOLD) {
     return renderSingleIndexHtml({ pseudonym, handle, posts, comments, activeLine });
   }
-  const yearBuckets = bucketByYear(posts, comments);
+  const yearBuckets = bucketUserActivityByYear(posts, comments);
   return renderLandingHtml({ pseudonym, handle, posts, comments, activeLine, yearBuckets });
 }
 
@@ -253,7 +170,7 @@ function buildReaderSubpages({ pseudonym, posts, comments }) {
   if (total <= PAGINATION_THRESHOLD) return [];
   const sortedPosts = posts.slice().sort((a, b) => b.created_at - a.created_at);
   const sortedComments = comments.slice().sort((a, b) => b.created_at - a.created_at);
-  const yearBuckets = bucketByYear(posts, comments);
+  const yearBuckets = bucketUserActivityByYear(posts, comments);
   const out = [];
   out.push(...paginateBucket({
     items: sortedPosts,
