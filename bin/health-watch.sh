@@ -13,7 +13,12 @@
 # Env:
 #   PLATO_URL            default http://localhost:8080
 #   BACKUP_DIR           default ./backups (where health.log lives)
-#   HEALTH_ALERT_EMAIL   if set, email is sent via `mail` or `sendmail`
+#   HEALTH_ALERT_EMAIL   if set, alert recipient. If unset, falls back to
+#                        config.json:operator.email (the same address every
+#                        other plato cron job uses). If neither is set,
+#                        the script logs to health.log and exits 0 — no
+#                        email, but the file evidence is still there.
+#   PLATO_CONFIG         path to config.json (default ./config.json)
 #   PLATO_LOG            path to plato's stdout/stderr log; last 30 lines
 #                        included in the email when present
 #   HEALTH_TIMEOUT_S     curl --max-time, default 5
@@ -27,6 +32,20 @@ BACKUP_DIR="${BACKUP_DIR:-$ROOT/backups}"
 HEALTH_LOG="$BACKUP_DIR/health.log"
 HEALTH_TIMEOUT_S="${HEALTH_TIMEOUT_S:-5}"
 PLATO_LOG="${PLATO_LOG:-}"
+PLATO_CONFIG="${PLATO_CONFIG:-$ROOT/config.json}"
+
+# Resolve alert recipient: env override wins, then config.json:operator.email.
+# Resolved value drives the "send mail at all?" branch later.
+ALERT_EMAIL="${HEALTH_ALERT_EMAIL:-}"
+if [ -z "$ALERT_EMAIL" ] && [ -r "$PLATO_CONFIG" ] && command -v node >/dev/null 2>&1; then
+  ALERT_EMAIL=$(node -e '
+    const fs = require("fs");
+    try {
+      const c = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      process.stdout.write((c.operator && c.operator.email) || "");
+    } catch { process.stdout.write(""); }
+  ' "$PLATO_CONFIG" 2>/dev/null) || ALERT_EMAIL=""
+fi
 
 mkdir -p "$BACKUP_DIR"
 
@@ -71,8 +90,9 @@ fi
 # 1. one-line stamp into the rolling log.
 echo "$STAMP host=$HOST status=$HTTP_STATUS $REASON" >> "$HEALTH_LOG"
 
-# 2. if no alert email configured, we're done — the log is the artifact.
-if [ -z "${HEALTH_ALERT_EMAIL:-}" ]; then
+# 2. if no alert email configured (env nor config.json), we're done —
+#    the log is the artifact.
+if [ -z "$ALERT_EMAIL" ]; then
   exit 0
 fi
 
@@ -139,7 +159,7 @@ EMAIL_FILE=$(mktemp -t plato-health-email-XXXXXX)
 SUBJECT="[plato] healthz alert on $HOST: status=$HTTP_STATUS"
 
 if command -v mail >/dev/null 2>&1; then
-  mail -s "$SUBJECT" "$HEALTH_ALERT_EMAIL" < "$EMAIL_FILE"
+  mail -s "$SUBJECT" "$ALERT_EMAIL" < "$EMAIL_FILE"
 elif command -v sendmail >/dev/null 2>&1; then
   {
     echo "To: $HEALTH_ALERT_EMAIL"
@@ -150,7 +170,7 @@ elif command -v sendmail >/dev/null 2>&1; then
   } | sendmail -t
 else
   echo "health-watch: no \`mail\` or \`sendmail\` on PATH; alert dropped" >&2
-  echo "health-watch: would have emailed $HEALTH_ALERT_EMAIL with subject: $SUBJECT" >&2
+  echo "health-watch: would have emailed $ALERT_EMAIL with subject: $SUBJECT" >&2
 fi
 
 rm -f "$EMAIL_FILE"

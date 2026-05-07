@@ -430,10 +430,10 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 
   Importers / auditors verify with `ots verify <archive>.tar.gz.ots` (requires the .tar.gz alongside; see opentimestamps.org). Archives without a .ots are not "broken" — they just predate operator opt-in or the binary failed at stamp time. Verification falls back to the Ed25519 signature alone in that case.
 - **Health probe (M8/B2).** `GET /healthz` is a public, unauthenticated route that returns JSON `{ok, version, uptime_s, db_writable, exports_dir_writable, last_migration}` with `Cache-Control: no-store`. Returns `200` when both writability checks pass, `503` when either fails. Monitor by curling it from any external watcher — non-2xx is an alarm trigger.
-- **Health watcher (M8/B4).** `bin/health-watch.sh` is the companion cron. Curls `/healthz`, silent on 200 (no cron mail), on non-2xx writes a one-line stamp to `$BACKUP_DIR/health.log` and (if `HEALTH_ALERT_EMAIL` is set) emails the operator via `mail` or `sendmail` (whichever is on PATH; alert dropped to stderr if neither). Email body: failure type, response body, last 30 lines of `$PLATO_LOG`, last 5 rows of `health.log`, and a paste-ready GitHub issue template (title, version, repro template, diagnostic block). Sample crontab entry — every 5 minutes, alongside the daily backup line:
+- **Health watcher (M8/B4).** `bin/health-watch.sh` is the companion cron. Curls `/healthz`, silent on 200 (no cron mail), on non-2xx writes a one-line stamp to `$BACKUP_DIR/health.log` and emails the operator via `mail` or `sendmail` (whichever is on PATH; alert dropped to stderr if neither). Recipient resolution: `HEALTH_ALERT_EMAIL` env wins (lets you route alerts to a dedicated PagerDuty / Opsgenie inbox), then falls back to `config.json:operator.email` (the same address every other plato cron uses), then no-email — log stamp still written either way. Email body: failure type, response-body excerpt, last 30 lines of `$PLATO_LOG`, last 5 rows of `health.log`, paste-ready GitHub issue template (title, version, repro template, diagnostic block). Sample crontab — every 5 minutes:
 
   ```
-  */5 * * * * cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups HEALTH_ALERT_EMAIL=op@example.com PLATO_LOG=/var/log/plato.log bin/health-watch.sh
+  */5 * * * * cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups PLATO_LOG=/var/log/plato.log bin/health-watch.sh
   ```
 
   Tunables: `PLATO_URL` (default `http://localhost:8080`), `HEALTH_TIMEOUT_S` (curl timeout, default `5`). The intent is "when something breaks at 3am, you wake up with a paste-ready issue body, not just a stack trace."
@@ -447,6 +447,21 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 - **Restoring from a backup.** stop the server → `tar -xzf plato-backup-*.tar.gz -C /opt/plato/restore` → copy `restore/forum.db` into place over the live one → copy `restore/posts/` into place → (optional) restore the operator-edited config + spam patterns → make sure `KNOWLESS_SECRET` matches the original deploy (otherwise identity hashes shift and every user looks like a new account) → `npm start`.
 
 ### When something goes wrong
+
+**Filing an issue.** plato lives at <https://github.com/hamr0/plato/issues>. The cron-side alert email from `bin/health-watch.sh` already contains a paste-ready issue body — copy it into a new issue and you're done. For other failures (a stack trace from `npm start`, a script erroring under cron) the same template works: include plato version, host, what you did, the diagnostic block. Smaller, specific issues get fixed faster than "everything is broken."
+
+**Logs an experienced admin would grep.** Everything plato writes itself stays small enough that pruning is the system's job, not plato's. Cron-redirected stdout/stderr is operator-managed via `logrotate` (already on every VPS).
+
+| Path | Owner | Shape | Growth | Pruning |
+|---|---|---|---|---|
+| `$BACKUP_DIR/health.log` | `bin/health-watch.sh` | one line per `/healthz` non-2xx | one line per failure event — silent on success | not pruned; trivially `tail -n 1000` if it ever needs it |
+| `$BACKUP_DIR/plato-backup-*.tar.gz` | `bin/backup.sh` | tarball per run | one per cron tick | rotated to newest `BACKUP_KEEP` (default 7) |
+| `data/stats.log` | `bin/stats.js` | append-only JSONL, one line per day | ~365 lines/year, ~30 KB/year | not pruned (read end-to-end by `bin/stats-weekly.js`) |
+| `data/urlhaus.txt` | `bin/refresh-urlhaus.js` | abuse-host cache, full file overwrite | replaced hourly, never grown | n/a |
+| `/var/log/plato.log` (operator-redirected) | `bin/server.js` stdout/stderr | freeform | per-request log lines | **`logrotate` — operator wires this** |
+| `/var/log/plato-{export,import,ots-upgrade,inactivity,urlhaus,backup,stats}.log` | the matching cron job | per-tick output | per-cron log lines | **`logrotate` — operator wires this** |
+
+For the operator-redirected logs, drop a single `logrotate.d` snippet (one entry per glob, daily, 14-day retention, compressed). Sample at the bottom of `cron-jobs.md`.
 
 - **Magic-link emails not arriving.** Check `KNOWLESS_SMTP_*`. In dev, run a local MTA: `python3 -m smtpd -c DebuggingServer -n localhost:1025`. If `KNOWLESS_SMTP_HOST` is unset, knowless prints the link to stdout — useful for testing, but make sure it's set in production.
 - **Server won't start with "missing env".** The boot validator is loud and specific. Read the error.

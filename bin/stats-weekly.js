@@ -81,17 +81,18 @@ function padR(s, n) { return String(s).padEnd(n); }
 function renderTable(weeks) {
   if (weeks.length === 0) return '(no snapshots yet)\n';
   const last4 = weeks.slice(-4).reverse();  // newest first
-  const header = `${padR('week', 8)} | ${pad('users', 6)} ${pad('Δ', 5)} | ${pad('subs', 5)} ${pad('Δ', 5)} | ${pad('posts', 6)} ${pad('Δ', 5)} | ${pad('cmnts', 6)} ${pad('Δ', 5)}`;
+  const header = `${padR('week', 8)} | ${pad('users', 6)} ${pad('Δ', 5)} | ${pad('subs', 5)} ${pad('Δ', 5)} | ${pad('posts', 6)} ${pad('Δ', 5)} | ${pad('cmnts', 6)} ${pad('Δ', 5)} | ${pad('votes', 6)} ${pad('Δ', 5)}`;
   const rule = '-'.repeat(header.length);
   const rows = last4.map((w, i) => {
     const prev = last4[i + 1];  // next-older row
-    const cell = (curr, prev, w1, w2) => `${pad(curr, w1)} ${pad(fmtDelta(curr, prev), w2)}`;
+    const cell = (curr, prev, w1, w2) => `${pad(curr ?? 0, w1)} ${pad(fmtDelta(curr ?? 0, prev), w2)}`;
     return [
       padR(w.week, 8),
       cell(w.users,    prev?.users,    6, 5),
       cell(w.subs,     prev?.subs,     5, 5),
       cell(w.posts,    prev?.posts,    6, 5),
       cell(w.comments, prev?.comments, 6, 5),
+      cell(w.votes,    prev?.votes,    6, 5),
     ].join(' | ');
   });
   return [header, rule, ...rows].join('\n') + '\n';

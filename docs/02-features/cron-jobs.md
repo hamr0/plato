@@ -180,3 +180,23 @@ BACKUP_KEEP_DAYS=4 /opt/plato/scripts/cron-backup-db.sh
 ```
 
 The stats log grows ~120 bytes/day forever; at 10 years it's still under 500KB. Not worth pruning.
+
+## Rotating the operator-redirected cron logs
+
+Each cron line in this guide redirects stdout/stderr to a file under `/var/log/plato-*.log`. Those grow over time. plato doesn't rotate them — that's `logrotate`'s job, and it's already on every VPS. Drop the following at `/etc/logrotate.d/plato`:
+
+```
+/var/log/plato*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+Daily rotation, 14-day retention, gzip-compressed. `copytruncate` means cron jobs don't have to be told to reopen their logs — the truncate happens in place.
+
+`$BACKUP_DIR/health.log` (M8/B4) and `data/stats.log` (M8/B5) are written by plato itself, not by cron-shell-redirect, and stay small by design (one line per failure event / one line per day). No rotation needed.

@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Closed — M8 stats + alert-recipient cleanup (M8/B5 + B4 follow-up)
+
+- `bin/stats.js` daily snapshot now includes `votes` (count of cast
+  votes in `forum.db`; toggle-off DELETEs the row so total-row-count
+  is the right "currently in effect" measure). `bin/stats-weekly.js`
+  table gains a `votes` column with the same WoW Δ formatting; legacy
+  snapshots that pre-date the votes field render as `0` rather than
+  `NaN`.
+- `bin/health-watch.sh` recipient resolution unified with the rest of
+  plato's cron surface: `HEALTH_ALERT_EMAIL` env wins (route alerts
+  to a dedicated PagerDuty / Opsgenie inbox if you want), falls back
+  to `config.json:operator.email` (the same address `bin/stats-weekly.js`
+  + the disposable-domains + URLhaus refresh jobs use). When neither
+  is set, the log stamp at `$BACKUP_DIR/health.log` is the artifact —
+  no email, no swallow.
+- Operator-guide: new "If something breaks" entry at the top of the
+  *When something goes wrong* section points at the GitHub issue
+  tracker and notes that the B4 alert email contains a paste-ready
+  issue body. New logs-reference table covers everything plato writes
+  itself (small, no rotation needed) vs. operator-redirected cron
+  logs (`logrotate.d` snippet in `cron-jobs.md`).
+
+This closes M8.
+
 ### Added — sticky note per sub (M8/B1)
 
 Mods (owner or co) now have a single short text field per sub —
