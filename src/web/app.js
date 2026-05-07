@@ -143,10 +143,11 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=26">
+<link rel="stylesheet" href="/static/style.css?v=27">
 ${feedTag}
 ${headExtra}
-${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
+${themePaletteOverrides()}
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}document.documentElement.classList.add('has-js');})();</script>
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
@@ -154,6 +155,7 @@ ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colo
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
+<script src="/static/theme.js?v=1" defer></script>
 </head>
 <body>${body}${siteFooter()}</body>
 </html>`);
@@ -172,6 +174,7 @@ const branding = {
   tagline: 'a forum that lives at one URL',
   hostedBy: null,
   colors: { up: null, down: null },
+  colorsLight: { up: null, down: null },
   feedbackEmail: null,
   rules: [],
   metaDescription: null,
@@ -181,14 +184,39 @@ const branding = {
 // canonical / og:url. Module-scoped (one process per instance).
 const siteMeta = { baseUrl: '' };
 
+// Operator-supplied vote-color overrides emitted as inline <style> in
+// <head>. Two scopes: the dark palette wins under :root; the light
+// palette wins under both data-theme="light" (post-click) and the
+// media query when the user hasn't clicked yet (and isn't sticky-dark).
+// resolveBrandingColors has already screened the values for CSS
+// injection at boot, so direct interpolation is safe.
+function themePaletteOverrides() {
+  const out = [];
+  const dark = branding.colors;
+  if (dark.up || dark.down) {
+    const decls = `${dark.up ? `--up:${dark.up};` : ''}${dark.down ? `--down:${dark.down};` : ''}`;
+    out.push(`:root{${decls}}`);
+  }
+  const light = branding.colorsLight;
+  if (light.up || light.down) {
+    const decls = `${light.up ? `--up:${light.up};` : ''}${light.down ? `--down:${light.down};` : ''}`;
+    out.push(`[data-theme="light"]:root{${decls}}`);
+    out.push(`@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){${decls}}}`);
+  }
+  return out.length === 0 ? html`` : raw(`<style>${out.join('')}</style>`);
+}
+
 // Blocks CSS injection: reject anything containing ; { } < > " '
 // A valid CSS color (hex, rgb(), named) never needs those characters.
-export function resolveBrandingColors(overrides) {
+// `field` names the source field for error messages — defaults to
+// `branding.colors` (dark palette); the light palette resolver passes
+// `branding.colorsLight`.
+export function resolveBrandingColors(overrides, field = 'branding.colors') {
   const unsafe = /[;{}<>"']/;
   const check = (key, val) => {
     if (val == null || val === '') return null;
-    if (typeof val !== 'string') throw new Error(`branding.colors.${key} must be a string`);
-    if (unsafe.test(val)) throw new Error(`branding.colors.${key} contains invalid characters`);
+    if (typeof val !== 'string') throw new Error(`${field}.${key} must be a string`);
+    if (unsafe.test(val)) throw new Error(`${field}.${key} contains invalid characters`);
     return val.trim();
   };
   return {
@@ -551,6 +579,11 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
   ).all(sinceMs);
 }
 
+// M8/B0 — last item in the right-cluster. Default label is "light"
+// (the action it'll perform from the dark default); theme.js syncs the
+// label to the effective theme on load.
+const themeToggleBtn = html` · <button class="link theme-toggle" type="button" aria-label="toggle theme">light</button>`;
+
 function loginStatusFor(db, currentHandle) {
   if (!currentHandle) {
     // Anonymous: explicit "log in" affordance top-right. Triggers the same
@@ -565,7 +598,7 @@ function loginStatusFor(db, currentHandle) {
           <input type="hidden" name="return_to" value="">
           <button>send link</button>
         </form>
-      </details>
+      </details>${themeToggleBtn}
     </div>`;
   }
   const pseudonym = pseudonymFor(db, currentHandle);
@@ -593,7 +626,7 @@ function loginStatusFor(db, currentHandle) {
     <a class="memlog-link" href="/memlog">${pseudonym}</a>${unreadChip} · <a href="/subs">subs</a>${modLogLink} ·
     <form method="POST" action="/logout" class="inline">
       <button class="link">logout</button>
-    </form>
+    </form>${themeToggleBtn}
   </div>`;
 }
 
@@ -5244,6 +5277,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
   branding.tagline       = (brandingOverrides.tagline   ?? 'a forum that lives at one URL').trim();
   branding.hostedBy      = (brandingOverrides.hostedBy  ?? '').trim() || null;
   branding.colors        = resolveBrandingColors(brandingOverrides.colors ?? {});
+  branding.colorsLight   = resolveBrandingColors(brandingOverrides.colorsLight ?? {}, 'branding.colorsLight');
   branding.feedbackEmail   = resolveBrandingFeedbackEmail(brandingOverrides.feedbackEmail);
   branding.rules           = resolveBrandingRules(brandingOverrides.rules);
   branding.metaDescription = resolveBrandingMetaDescription(brandingOverrides.metaDescription);

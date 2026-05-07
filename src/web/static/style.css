@@ -8,10 +8,16 @@
  * never a literal hex. The one exception is favicon.svg, which
  * is served standalone; copy + recolor it in the same place.
  *
- * Light mode (auto-toggle via prefers-color-scheme) ships with
- * M8 polish. The token shape below is structured so M8 only adds
- * a @media (prefers-color-scheme: light) block here, not a
- * codebase-wide grep audit.
+ * Light mode (M8/B0):
+ *   - Pre-click default: prefers-color-scheme media query picks
+ *     OS theme automatically.
+ *   - Post-click: the toggle stamps data-theme="light" or "dark"
+ *     on <html>; that wins over the OS hint forever (per-browser,
+ *     stored in localStorage). No mid-session reverts.
+ *   - Forks override the dark palette under :root and the light
+ *     palette under [data-theme="light"]:root + the same media
+ *     query. Operator-supplied colorsLight values land via an
+ *     inline <style> in <head> alongside the existing colors.
  * ============================================================ */
 :root {
   /* Surfaces */
@@ -28,6 +34,39 @@
   --up: #3fb950;           /* upvote active — affirming green */
   --down: #58a6ff;         /* downvote active — blue, matches the accent family */
   --flair-text: #ffffff;   /* flair pill text — light by default; owners pick any background */
+}
+
+/* Light palette — paper-light preset. Two activation paths:
+ *   1. OS hint via @media when the user hasn't clicked the toggle.
+ *   2. data-theme="light" stamped by static/theme.js after click.
+ * Both resolve to the same variable values. data-theme="dark" is
+ * the sticky-dark override for users on a light-default OS who
+ * clicked the toggle to dark — wins back over the media query. */
+[data-theme="light"]:root {
+  --bg: #fafafa;
+  --bg-soft: #f4f4f5;
+  --border: #d4d4d8;
+  --text: #18181b;
+  --text-dim: #52525b;
+  --accent: #0066cc;
+  --accent-warm: #b45309;
+  --up: #15803d;
+  --down: #0066cc;
+  --flair-text: #ffffff;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #fafafa;
+    --bg-soft: #f4f4f5;
+    --border: #d4d4d8;
+    --text: #18181b;
+    --text-dim: #52525b;
+    --accent: #0066cc;
+    --accent-warm: #b45309;
+    --up: #15803d;
+    --down: #0066cc;
+    --flair-text: #ffffff;
+  }
 }
 
 /* ------------------------------------------------------------
@@ -579,6 +618,14 @@ button.link {
   cursor: pointer;
 }
 button.link:hover { color: var(--accent); text-decoration: underline dotted; }
+
+/* Theme toggle (M8/B0). Hidden when JS is unavailable — without
+ * JS the click handler can't flip data-theme, so the button would
+ * be dead chrome. The inline anti-flash <script> stamps `has-js`
+ * on <html> before first paint, so this hide rule is invisible to
+ * the JS path. */
+html:not(.has-js) .theme-toggle { display: none; }
+.theme-toggle { font-variant: small-caps; letter-spacing: 0.04em; }
 
 h3.section {
   font-size: 0.78rem;

@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — light/dark theme toggle (M8/B0)
+
+A two-state theme button now sits last in the header right-cluster.
+Default behavior follows the OS hint via `@media (prefers-color-scheme:
+light)`; once the user clicks, that choice is sticky in `localStorage`
+and the OS hint stops applying for that browser. An anti-flash inline
+`<script>` in `<head>` stamps the saved `data-theme` on `<html>` before
+first paint so reloads don't strobe.
+
+Operators can override the light palette the same way they already
+override the dark palette — `branding.colors` (existing) sets `--up`
+and `--down` for dark; the new `branding.colorsLight` sets the same
+variables for light. Both are validated by the same
+`resolveBrandingColors` (CSS-injection guard, ASCII-clean values),
+emitted as inline `<style>` blocks scoped to `:root`,
+`[data-theme="light"]:root`, and the media query. Without JS the
+toggle button is hidden via CSS (`html:not(.has-js) .theme-toggle`),
+so users on no-JS browsers get prefers-color-scheme behavior without
+dead chrome.
+
+Added `src/web/static/theme.js` (~30 LOC, defer-loaded) and a paper-
+light palette block in `src/web/static/style.css`. No schema change.
+
 ### Added — sub-archive paginated reader mirrors personal archive
 
 The offline static reader inside per-sub archive tarballs now scales

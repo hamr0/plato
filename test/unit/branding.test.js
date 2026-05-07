@@ -47,6 +47,25 @@ test('resolveBrandingColors: non-string throws', () => {
   assert.throws(() => resolveBrandingColors({ up: 123 }), /must be a string/);
 });
 
+test('resolveBrandingColors: error message uses field name (light variant uses branding.colorsLight)', () => {
+  assert.throws(
+    () => resolveBrandingColors({ up: 'red; --bg: red' }, 'branding.colorsLight'),
+    /branding\.colorsLight\.up.*invalid characters/,
+  );
+  assert.throws(
+    () => resolveBrandingColors({ down: 99 }, 'branding.colorsLight'),
+    /branding\.colorsLight\.down.*must be a string/,
+  );
+});
+
+test('resolveBrandingColors: light palette validates same shape as dark (both clean)', () => {
+  const dark = resolveBrandingColors({ up: '#3fb950', down: '#58a6ff' });
+  const light = resolveBrandingColors({ up: '#15803d', down: '#0066cc' }, 'branding.colorsLight');
+  assert.equal(dark.up, '#3fb950');
+  assert.equal(light.up, '#15803d');
+  assert.equal(light.down, '#0066cc');
+});
+
 // --- feedbackEmail ---
 
 test('resolveBrandingFeedbackEmail: null/empty returns null', () => {
