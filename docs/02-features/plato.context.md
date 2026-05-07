@@ -143,8 +143,8 @@ These have hardcoded constants because the right value is the same for almost ev
 - **`COLLAPSE_THRESHOLD = -3`** (`src/web/app.js`) — score below which a comment auto-folds.
 - **`MAX_DEPTH = 4`** (`src/web/app.js`) — beyond this, comment replies fold into a `+ N more` summary.
 - **`HARD_DEPTH = 64`** (`src/web/app.js`) — hard recursion guard in `commentNodeView`. Beyond this, replies stop rendering entirely (defense-in-depth against pathological threads or re-parenting bugs).
-- **`TITLE_MAX = 300` / `BODY_MAX = 40000`** (`src/content/post.js`) — server-side caps on draft input. Forms also carry `maxlength` but the server is authoritative.
-- **`COMMENT_BODY_MAX = 10000`** (`src/content/comment.js`) — same shape as the post caps.
+- **`TITLE_MAX = 300` / `BODY_MAX = 40000`** (`src/content/post.js`) — server-side caps on draft input. Forms also carry `maxlength` but the server is authoritative. PRD-locked at Reddit's numbers — see PRD §Content Model → Length limits.
+- **`COMMENT_BODY_MAX = 10000`** (`src/content/comment.js`) — same shape as the post caps. Likely first knob to drop (toward 5 000 = HN/Lobsters direction) if real usage shows runaway thread sprawl. Don't tighten preemptively.
 - **`NOTE_MAX = 280`** (`src/content/flag.js`) — server-side cap on flag notes.
 - **`COMMENT_PREVIEW_CHARS = 280`** (`src/web/app.js`) — long-comment fold threshold; matches the post-preview cap on the home page.
 - **`FLAG_THRESHOLD_FLOOR = 3`** (`src/content/flag.js`) — floor for the per-sub `flagThreshold` setting. Each sub's threshold is set at creation (default 3) and can be raised by the owner but never lowered below this floor.

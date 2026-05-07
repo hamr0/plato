@@ -120,6 +120,26 @@ This shape worked for phpBB-era forums of hundreds to thousands. It does not sca
 - **Flagging**: separate from voting. A flag is "this violates rules / is harmful." Requires selecting a category. Routes to mod queue. See *Anti-Abuse* section for the threshold and weighting rules.
 - **Sorting**: hot (vote velocity), new (chronological), top (all-time votes), old (oldest first). User picks default per sub.
 
+### Length limits — Reddit-shaped, locked
+
+Server-side caps on user input:
+
+| Field | Cap | Rationale |
+|---|---|---|
+| Post title | 300 chars | Reddit's number; long enough to phrase a substantive question, short enough to scan a feed |
+| Post body | 40 000 chars | Reddit's number; ~8 000 words. Plato is a discussion forum, not microblogging — leave room for an essay-length OP when the topic deserves it |
+| Comment body | 10 000 chars | Reddit's number; ~2 000 words. Long-form replies fit; thesis-length replies don't |
+
+These are deliberately at the high end of the forum-shaped peer set. HN/Lobsters are tighter (no hard caps but social pressure keeps things short); Discourse is similar to plato; Mastodon is much shorter (500). Plato matches Reddit because the audience overlap is the largest, and pasting an existing Reddit post over should just work.
+
+The hard cap is the ceiling, not the default. The system already nudges shorter without constraining the cap:
+
+- `COMMENT_PREVIEW_CHARS = 280` auto-folds comments above ~280 chars behind a `read more` / `show less` toggle, so feed scanability stays high regardless of how long a single comment runs.
+- Feed previews truncate post bodies to the first paragraph or 280 chars (`getPostPreview`), so the front page is never a wall of text.
+- Live `data-charcount` counter on every long-form input goes accent-warm at 90% so a long paste reads as deliberate, not accidental.
+
+If after real-world usage the comment cap feels generous (runaway 8 000-char comments, thread sprawl), drop `COMMENT_BODY_MAX` to 5 000 — that's the next stop along the HN/Lobsters direction. Don't tighten without that signal: a tighter cap punishes the rare substantive long reply more than it deters the common-but-still-fine medium-length one.
+
 ### Why links-only, forever
 
 Hosting media means: storage costs that scale with usage, bandwidth bills, CSAM scanning obligations, copyright takedown handling, image-moderation queues, embed-rendering security surface (XSS via iframes), and a 50GB tarball when you export a sub instead of a folder of markdown files. None of that fits the "small, durable, forkable, text-first" goal.

@@ -319,6 +319,8 @@ Every threshold that gates behavior. Floors are PRD-locked safe minimums; you ti
 
 ### Length limits
 
+Body caps match Reddit's exactly (300 / 40 000 / 10 000) — see PRD §Content Model → Length limits for the rationale. Tighter knobs (toward HN/Lobsters) are deliberately deferred until real usage signals thread sprawl. The visual layer already nudges shorter without constraining the cap: comments above 280 chars auto-fold behind a `read more` / `show less` toggle, and feed previews truncate post bodies to one paragraph.
+
 | Field | Max chars |
 |---|---|
 | Post title | 300 |

@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Locked — post + comment length caps stay at Reddit's numbers
+
+Server-side caps `TITLE_MAX = 300` / `BODY_MAX = 40 000` / `COMMENT_BODY_MAX = 10 000` are now PRD-locked at Reddit's exact numbers (PRD §Content Model → Length limits). Plato's audience overlap with Reddit is the largest of the forum-shaped peers, so a Redditor pasting an existing post over should just work. HN/Lobsters tighten via social pressure; plato's visual layer already nudges shorter without constraining the cap (`COMMENT_PREVIEW_CHARS = 280` auto-folds long comments, feed previews truncate post bodies to one paragraph). If real usage shows runaway thread sprawl, drop `COMMENT_BODY_MAX` to 5 000 — that's the next stop along the HN direction. Don't tighten preemptively.
+
+### Added — comment "read more" / "show less" toggle
+
+Long comments fold behind a 280-char preview. Old behavior hid the entire `<summary>` element when expanded, so once a user clicked `read more` there was no visible affordance to fold the comment back — clicking the summary again worked structurally but the click target was invisible. Summary now renders three children (`<span class="comment-preview">…truncated… </span>`, `<span class="read-more">read more</span>`, `<span class="show-less">show less</span>`); CSS toggles which two are visible based on `[open]`. Pure native `<details>` behavior with CSS adornment, no JS.
+
 ### Fixed — import dedupe collision now fails fast instead of retrying
 
 When a sub-import URL points at an archive that's already been imported
