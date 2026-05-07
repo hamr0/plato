@@ -33,23 +33,26 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { sha256Hex, validateManifest } from './manifest.js';
 import { readTar } from './extract.js';
+import { recordSubImport } from '../content/mod.js';
 
 // Pseudonym format from src/identity/pseudonym.js: "<adjective>-<animal>"
 // (two unique-names-generator words separated by a single hyphen). On
 // collision with an existing pseudonym on this instance, wrap the
-// lexical (first) word in brackets — donkey-tiger → [donkey]-tiger.
-// Suffix unchanged. PRD §Exit as the real check (M7/B5 lock).
+// whole pseudonym in brackets — donkey-tiger → [donkey-tiger]. The
+// brackets are the visual signal "this name traveled from another
+// instance"; full-bracket reads cleanly as one bracketed token rather
+// than ambiguous half-decoration. PRD §Exit as the real check
+// (M7 followup lock — full-bracket).
 //
 // Returns { value, bracketed: boolean }. If even the bracketed form
-// collides, append a numeric suffix (e.g. [donkey]-tiger-2). Throws
+// collides, append a numeric suffix (e.g. [donkey-tiger]-2). Throws
 // only on extreme exhaustion (>100 attempts), which is operationally
 // impossible at hobby scale.
 export function pseudonymForImport(db, archivedPseudonym) {
   const existing = db.prepare('SELECT 1 FROM handles WHERE pseudonym = ?').get(archivedPseudonym);
   if (!existing) return { value: archivedPseudonym, bracketed: false };
 
-  const m = archivedPseudonym.match(/^([^-]+)(-.*)$/);
-  const bracketed = m ? `[${m[1]}]${m[2]}` : `[${archivedPseudonym}]`;
+  const bracketed = `[${archivedPseudonym}]`;
   for (let i = 1; i < 100; i++) {
     const candidate = i === 1 ? bracketed : `${bracketed}-${i}`;
     const collide = db.prepare('SELECT 1 FROM handles WHERE pseudonym = ?').get(candidate);
@@ -285,6 +288,13 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
       sourceFp,
     );
   }
+
+  // Native modlog row crediting the importer for the import act
+  // itself. Parallel to the export-side row written by recordSubExport
+  // on completeJob (M7 followup). imported_from_fingerprint stays NULL
+  // because this row was authored on this instance, not in the
+  // incoming archive.
+  recordSubImport(db, { subName: destName, importedBy: importerHandle, now });
 
   return {
     subName: destName,

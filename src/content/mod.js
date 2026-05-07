@@ -250,6 +250,30 @@ export function recordSubExport(db, { subName, requestedBy, now = Date.now() }) 
   return { id };
 }
 
+// Public-modlog audit row for a completed sub-archive import. Parallel
+// to recordSubExport on the destination side; together they record
+// both ends of a sub's migration in their respective modlogs.
+//
+// Called from importSubArchive after the imported sub + handles +
+// posts + comments + (archived) mod_actions land. The row is NATIVE
+// to this instance — imported_from_fingerprint stays NULL — because
+// the act of importing happened here, not in the archive.
+export function recordSubImport(db, { subName, importedBy, now = Date.now() }) {
+  if (typeof subName !== 'string' || subName.length === 0) {
+    throw new Error('recordSubImport: subName required');
+  }
+  if (typeof importedBy !== 'string' || importedBy.length === 0) {
+    throw new Error('recordSubImport: importedBy required');
+  }
+  const id = newId();
+  db.prepare(
+    `INSERT INTO mod_actions
+       (id, sub_name, mod_handle, action, target_type, target_id, reason, created_at)
+     VALUES (?, ?, ?, 'import', 'sub', ?, NULL, ?)`
+  ).run(id, subName, importedBy, subName, now);
+  return { id };
+}
+
 export function listModActions(db, subName, { limit = 100, offset = 0 } = {}) {
   return db.prepare(
     `SELECT id, sub_name, mod_handle, action, target_type, target_id, reason, created_at, imported_from_fingerprint

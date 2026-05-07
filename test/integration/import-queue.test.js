@@ -180,19 +180,19 @@ test('pseudonymForImport: no collision → archived pseudonym verbatim', () => {
   assert.deepEqual(r, { value: 'clever-tiger', bracketed: false });
 });
 
-test('pseudonymForImport: collision wraps lexical part — clever-tiger → [clever]-tiger', () => {
+test('pseudonymForImport: collision wraps the whole pseudonym — clever-tiger → [clever-tiger]', () => {
   const db = memDb();
   ensureHandle(db, ALICE, 'clever-tiger');
   const r = pseudonymForImport(db, 'clever-tiger');
-  assert.deepEqual(r, { value: '[clever]-tiger', bracketed: true });
+  assert.deepEqual(r, { value: '[clever-tiger]', bracketed: true });
 });
 
 test('pseudonymForImport: bracketed form also collides → numeric suffix', () => {
   const db = memDb();
   ensureHandle(db, ALICE, 'clever-tiger');
-  ensureHandle(db, BOB, '[clever]-tiger');
+  ensureHandle(db, BOB, '[clever-tiger]');
   const r = pseudonymForImport(db, 'clever-tiger');
-  assert.deepEqual(r, { value: '[clever]-tiger-2', bracketed: true });
+  assert.deepEqual(r, { value: '[clever-tiger]-2', bracketed: true });
 });
 
 // --- tar reader symmetry ---
@@ -415,7 +415,34 @@ test('importSubArchive: rename_to lets you import past a name conflict', async (
   }
 });
 
-test('importSubArchive: pseudonym collision wraps lexical part on destination handle', async () => {
+test('importSubArchive: writes a native modlog row crediting the importer (M7 followup)', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-mod-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const native = destDb.prepare(
+      `SELECT mod_handle, target_type, target_id, imported_from_fingerprint
+         FROM mod_actions WHERE action = 'import'`
+    ).all();
+    assert.equal(native.length, 1, 'expected exactly one native import row');
+    assert.equal(native[0].mod_handle, importerHandle);
+    assert.equal(native[0].target_type, 'sub');
+    assert.equal(native[0].target_id, 'lobby');
+    assert.equal(native[0].imported_from_fingerprint, null,
+      'native import row must NOT carry the source fingerprint — the act happened on this instance');
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
+test('importSubArchive: pseudonym collision wraps the whole pseudonym on destination handle', async () => {
   const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
   const destDb = memDb();
   const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-dest-'));
@@ -432,7 +459,7 @@ test('importSubArchive: pseudonym collision wraps lexical part on destination ha
     });
     assert.equal(result.counts.bracketed, 1);
     const importedAlice = destDb.prepare('SELECT pseudonym FROM handles WHERE handle = ?').get(ALICE);
-    assert.equal(importedAlice.pseudonym, '[alice]-pseudo');
+    assert.equal(importedAlice.pseudonym, '[alice-pseudo]');
   } finally {
     rmSync(srcPostsDir, { recursive: true, force: true });
     rmSync(destPostsDir, { recursive: true, force: true });

@@ -342,6 +342,7 @@ const MOD_ACTION_LABELS = {
   auto_disable_inactivity:   'auto-disabled (mod inactivity)',
   manual_reactivate:         'reactivated',
   export:                    'archive exported',
+  import:                    'sub imported',
 };
 
 // Modlog cell with the `[imported]` prefix when the row was inserted by
