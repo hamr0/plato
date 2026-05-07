@@ -3661,22 +3661,43 @@ const MEMLOG_KIND_FILTERS = [
 
 const MEMLOG_MODES = ['notifications', 'activity', 'all'];
 
+// Kind filter is multi-select: URL `?kind=archives,imports` activates
+// both chips. Empty / missing / "all" → no kind narrowing (every kind
+// passes). Unknown slugs are silently dropped so old bookmarks degrade
+// gracefully and a typo in the URL doesn't 500 the page.
 function memlogParseFilters(searchParams) {
   const modeParam = searchParams?.get('mode');
   const mode = MEMLOG_MODES.includes(modeParam) ? modeParam : 'notifications';
   const show = searchParams?.get('show') === 'all' ? 'all' : 'unread';
-  const kindParam = searchParams?.get('kind') || 'all';
-  const matched = MEMLOG_KIND_FILTERS.find((f) => f.slug === kindParam);
-  return { mode, show, kindSlug: matched ? matched.slug : 'all', kinds: matched ? matched.kinds : null };
+  const kindParam = searchParams?.get('kind') || '';
+  const validSlugs = new Set(MEMLOG_KIND_FILTERS.map((f) => f.slug));
+  const kindSlugs = kindParam
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => validSlugs.has(s));
+  return { mode, show, kindSlugs };
 }
 
-function memlogHref({ mode, show, kindSlug }) {
+function memlogHref({ mode, show, kindSlugs }) {
   const params = new URLSearchParams();
   if (mode && mode !== 'notifications') params.set('mode', mode);
   if (show !== 'unread') params.set('show', show);
-  if (kindSlug !== 'all') params.set('kind', kindSlug);
+  if (kindSlugs && kindSlugs.length > 0) params.set('kind', kindSlugs.join(','));
   const qs = params.toString();
   return qs ? `/memlog?${qs}` : '/memlog';
+}
+
+// Flatten an array of kind-filter slugs to the underlying notification
+// kinds. Returns null when no slugs (means "every kind passes" — caller
+// shape matches listNotifications's `kinds` arg).
+function memlogKindsFromSlugs(slugs) {
+  if (!slugs || slugs.length === 0) return null;
+  const kinds = [];
+  for (const slug of slugs) {
+    const f = MEMLOG_KIND_FILTERS.find((x) => x.slug === slug);
+    if (f) kinds.push(...f.kinds);
+  }
+  return kinds.length > 0 ? kinds : null;
 }
 
 function memlogTargetLink(db, n) {
@@ -3740,31 +3761,62 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   }
   pruneOldNotifications(db);
   const filters = memlogParseFilters(searchParams);
+  const kinds = memlogKindsFromSlugs(filters.kindSlugs);
   // Pull the rows for the active mode. notifications = received-events
   // table; activity = my-authored posts + comments; all = both merged
-  // by created_at desc. Kind/show filters apply only to notifications;
-  // for activity they're hidden (no read-state, no kind subfilter yet).
+  // by created_at desc. Kind/show narrow the notification-side; activity
+  // rows pass through untouched (no read-state, no kind subfilter yet).
+  //
+  // Auto-flip: in notifications/all modes, if a `show: unread` query
+  // returns nothing but `show: all` would have rows, flip to `all` and
+  // surface a hint. Saves the user from chasing why a filter "didn't
+  // work" when the matching rows were just already-read.
   let rows = [];
+  let autoFlipped = false;
   if (filters.mode === 'notifications') {
-    rows = listNotifications(db, handle, { show: filters.show, kinds: filters.kinds, limit: 200 });
+    rows = listNotifications(db, handle, { show: filters.show, kinds, limit: 200 });
+    if (rows.length === 0 && filters.show === 'unread') {
+      const allRows = listNotifications(db, handle, { show: 'all', kinds, limit: 200 });
+      if (allRows.length > 0) { rows = allRows; autoFlipped = true; }
+    }
   } else if (filters.mode === 'activity') {
     rows = listActivityForHandle(db, handle, { limit: 200 });
   } else {
-    const notifs = listNotifications(db, handle, { show: 'all', limit: 200 });
-    const activity = listActivityForHandle(db, handle, { limit: 200 });
+    // all mode: notifications + activity merged by time. When the user
+    // narrows by kind, the activity half can't match (its kinds are
+    // my_post/my_comment, not notification kinds) so dropping activity
+    // is the only honest interpretation — otherwise activity rows
+    // dominate and the filter looks broken.
+    const notifs = listNotifications(db, handle, { show: 'all', kinds, limit: 200 });
+    const activity = kinds
+      ? []
+      : listActivityForHandle(db, handle, { limit: 200 });
     rows = [...notifs, ...activity].sort((a, b) => b.created_at - a.created_at).slice(0, 200);
   }
   const actorHandles = [...new Set(rows.map((r) => r.actor_handle).filter(Boolean))];
   const pseudonyms = pseudonymsByHandle(db, actorHandles);
+  // Mode chips preserve kindSlugs and show across mode-switches so the
+  // user's filter set survives toggling between notifications/activity/all.
   const modeLink = (slug, label) => {
     const isActive = filters.mode === slug;
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
-    return html`<a class="${cls}" href="${memlogHref({ ...filters, mode: slug, kindSlug: 'all', show: 'unread' })}">${label}</a>`;
+    return html`<a class="${cls}" href="${memlogHref({ ...filters, mode: slug })}">${label}</a>`;
   };
+  // Kind chip is a multi-select toggle: clicking adds the slug if absent,
+  // removes if present. The "all" chip clears the set. This lets the user
+  // mix-and-match (e.g. archives + imports) without being forced to pick
+  // exactly one bucket.
   const filterLink = (slug, label) => {
-    const isActive = (slug === 'all' && filters.kindSlug === 'all') || filters.kindSlug === slug;
+    const isAll = slug === 'all';
+    const isActive = isAll
+      ? filters.kindSlugs.length === 0
+      : filters.kindSlugs.includes(slug);
     const cls = isActive ? 'filter-btn filter-btn-active' : 'filter-btn';
-    return html`<a class="${cls}" href="${memlogHref({ ...filters, kindSlug: slug })}">${label}</a>`;
+    let nextSlugs;
+    if (isAll) nextSlugs = [];
+    else if (isActive) nextSlugs = filters.kindSlugs.filter((s) => s !== slug);
+    else nextSlugs = [...filters.kindSlugs, slug];
+    return html`<a class="${cls}" href="${memlogHref({ ...filters, kindSlugs: nextSlugs })}">${label}</a>`;
   };
   const showLink = (val, label) => {
     const isActive = filters.show === val;
@@ -3772,33 +3824,53 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
     return html`<a class="${cls}" href="${memlogHref({ ...filters, show: val })}">${label}</a>`;
   };
   const markAllForm = html`<form method="POST" action="/memlog/mark-read" class="filter-form">
-    <input type="hidden" name="kind" value="${filters.kindSlug}">
+    <input type="hidden" name="kind" value="${filters.kindSlugs.join(',')}">
     <input type="hidden" name="return_to" value="${memlogHref(filters)}">
     <button class="filter-btn" title="mark all visible as read">mark all read</button>
   </form>`;
-  // show/kind/mark-read only meaningful for notification rows. Hide them
-  // when the active mode is activity (own posts/comments aren't unread,
-  // and the notification kind axis doesn't apply).
-  const showsNotificationFilters = filters.mode !== 'activity';
+  // Filter chips stay visible in every mode so the user can mix and
+  // match without watching the row vanish on mode-switch. In activity
+  // mode the show/kind narrows are no-ops (activity rows ignore kind
+  // and have no read-state) but the URL records the user's intent so
+  // the same set applies the moment they flip back to notifications.
   const filterBar = html`<div class="modlog-filters muted">
     mode: ${modeLink('notifications', 'notifications')} ${modeLink('activity', 'activity')} ${modeLink('all', 'all')}
-    ${showsNotificationFilters ? html`
-      <span class="filter-sep">·</span>
-      show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
-      <span class="filter-sep">·</span>
-      kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
-      <span class="filter-sep">·</span>
-      ${markAllForm}
-    ` : html``}
+    <span class="filter-sep">·</span>
+    show: ${showLink('unread', 'unread')} ${showLink('all', 'all')}
+    <span class="filter-sep">·</span>
+    kind: ${filterLink('all', 'all')} ${MEMLOG_KIND_FILTERS.map((f) => filterLink(f.slug, f.label))}
+    <span class="filter-sep">·</span>
+    ${markAllForm}
   </div>`;
-  const emptyText = filters.mode === 'activity'
-    ? 'no posts or comments yet.'
-    : filters.mode === 'all'
-      ? 'nothing in your memlog yet.'
-      : (filters.show === 'unread' ? 'no unread notifications.' : 'nothing in your memlog yet.');
+  // Empty-state copy is filter-aware so the user can tell "filter
+  // matches no rows" apart from "you have no memlog at all". Without
+  // this, a filter that genuinely has zero matches reads as broken.
+  const hasKindNarrow = filters.kindSlugs.length > 0;
+  const kindLabels = filters.kindSlugs.map((s) =>
+    MEMLOG_KIND_FILTERS.find((f) => f.slug === s)?.label ?? s
+  ).join(' + ');
+  let emptyText;
+  if (filters.mode === 'activity') {
+    emptyText = hasKindNarrow
+      ? 'activity mode ignores kind filters — switch to notifications or all to apply them.'
+      : 'no posts or comments yet.';
+  } else if (hasKindNarrow) {
+    emptyText = `no ${kindLabels} notifications.`;
+  } else if (filters.mode === 'all') {
+    emptyText = 'nothing in your memlog yet.';
+  } else {
+    emptyText = filters.show === 'unread'
+      ? 'no unread notifications.'
+      : 'nothing in your memlog yet.';
+  }
+  // When the auto-flip kicked in, surface a one-liner so the user knows
+  // they're looking at read history rather than a fresh unread list.
+  const autoFlipHint = autoFlipped
+    ? html`<p class="muted">no unread match — showing read history. <a href="${memlogHref({ ...filters, show: 'unread' })}">back to unread</a></p>`
+    : html``;
   const body = rows.length === 0
     ? html`<p class="muted">${emptyText}</p>`
-    : html`<table class="modlog">
+    : html`${autoFlipHint}<table class="modlog">
         <thead><tr><th>type</th><th>when</th><th>kind</th><th>from</th><th>where</th><th>snippet</th></tr></thead>
         <tbody>${rows.map((n) => {
           const link = memlogTargetLink(db, n);
@@ -3943,9 +4015,12 @@ async function handleMemlogMarkRead(req, res, { db, auth }) {
   }
   const body = await readBody(req);
   const form = parseForm(body);
-  const kindSlug = form.kind || 'all';
-  const matched = MEMLOG_KIND_FILTERS.find((f) => f.slug === kindSlug);
-  markAllNotificationsRead(db, handle, { kinds: matched ? matched.kinds : null });
+  // Multi-select: form `kind` is a comma-list of slugs. Empty/missing
+  // means "every kind" (mark all unread). Each slug expands to its
+  // notification kinds; unknown slugs are silently dropped.
+  const kindSlugs = (form.kind || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const kinds = memlogKindsFromSlugs(kindSlugs);
+  markAllNotificationsRead(db, handle, { kinds });
   redirect(res, safeLocalRedirect(form.return_to, '/memlog'));
 }
 
