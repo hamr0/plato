@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — personal-archive reader: filter chips + pagination
+
+The offline static reader now scales to large archives without a single
+giant index page. When total items (posts + comments) exceeds 100, the
+landing page becomes a chip-based navigator and the actual lists move
+into pre-rendered subpages. Below the threshold, the reader keeps the
+single-page render — small archives don't benefit from clicking through.
+
+- **Landing page (paginated mode)**: pseudonym + active-in line +
+  filter chips: `posts (N, Mp)` / `comments (N, Mp)` / one chip per
+  year `<YYYY> (N)`. Plus a "// recent activity" preview of the last
+  20 items mixed. No JS, all chips are plain `<a>` links.
+- **Subpages**: `posts.html`, `comments.html`, `<year>.html` —
+  paginated to 100 items per page (`posts-2.html`, `posts-3.html`, …
+  when needed). Each page links back to `index.html` and carries
+  prev/next pagination at top and bottom. Year pages mix posts +
+  comments authored in that year, ordered newest-first.
+- **No text search** — the static reader's "no JavaScript, fully
+  offline" lock holds. Browser ctrl-F still works within a page.
+- **Page size 100, threshold 100**: archives with 1 post and 1
+  comment render the same as before; 1000-item archives get ~10
+  pages per filter. +2 tests in `test/integration/user-export.test.js`
+  (768 → 770 green).
+
 ### Changed — M7 followup: imported authors render dim+italic with aria-label, persistent [i] sub chip
 
 Final lock on the imported-author signal after a side-by-side comparison

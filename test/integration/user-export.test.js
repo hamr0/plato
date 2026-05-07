@@ -326,6 +326,114 @@ test('buildUserArchiveBytes: index.html renders pseudonym, lists posts with link
   }
 });
 
+test('buildUserArchiveBytes: paginated reader when archive crosses 100 items', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-paginate-'));
+  try {
+    db.prepare(`INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)`).run(ALICE, 'alice-pseudo', ts(0));
+    db.prepare(`INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)`).run(BOB, 'bob-pseudo', ts(0));
+    db.prepare(`INSERT INTO subs (name, description, owner_handle, default_sort, created_at)
+                VALUES ('lobby', '', ?, 'new', ?)`).run(BOB, ts(0));
+
+    // 120 posts spread across 2 years to exercise year buckets + pagination.
+    const PER_POST_BODY = 'body.\n';
+    for (let i = 0; i < 120; i++) {
+      const id = `${i.toString(16).padStart(16, '0')}`;
+      const filename = `2026-05-06-${id}.md`;
+      writeFileSync(
+        join(postsDir, filename),
+        `---\ntitle: "post ${i}"\nhandle: ${ALICE}\nsub_name: lobby\ncreated_at: ${ts(i)}\n---\n\n${PER_POST_BODY}`,
+        'utf8',
+      );
+      // Half the posts in 2025, half in 2026 — drives two year buckets.
+      const year = i < 60 ? 2025 : 2026;
+      const created = Date.UTC(year, 5, 1) + i * 1000;
+      db.prepare(
+        `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, score)
+         VALUES (?, 'lobby', ?, ?, ?, ?, 0)`
+      ).run(id, ALICE, `post ${i}`, `posts/${filename}`, created);
+    }
+    // 50 comments — total = 170 items, well over the 100 threshold.
+    const parentPostId = '0000000000000000';
+    for (let i = 0; i < 50; i++) {
+      db.prepare(
+        `INSERT INTO comments (id, post_id, parent_comment_id, handle, body, created_at, score)
+         VALUES (?, ?, NULL, ?, ?, ?, 0)`
+      ).run(`c${i.toString(16).padStart(15, '0')}`, parentPostId, ALICE, `comment ${i}`, ts(i));
+    }
+
+    const tar = buildUserArchiveBytes(db, ALICE, {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(200)),
+    });
+    const entries = readTar(tar);
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+
+    // Landing page: chips, recent activity preview, no inlined full lists.
+    assert.match(indexHtml, /class="chips"/, 'landing page must have filter chips');
+    assert.match(indexHtml, /href="posts\.html">posts \(120/);
+    assert.match(indexHtml, /href="comments\.html">comments \(50/);
+    // All 50 comments were seeded with timestamps in 2026, so 2026 has
+    // 60 posts + 50 comments = 110, while 2025 has 60 posts and no comments.
+    assert.match(indexHtml, /href="2025\.html">2025 \(60\)/);
+    assert.match(indexHtml, /href="2026\.html">2026 \(110\)/);
+    assert.match(indexHtml, /\/\/ recent activity/);
+
+    // posts.html: page 1, has pagination links, contains 100 items.
+    const postsP1 = entryByPath(entries, 'posts.html').body.toString('utf8');
+    assert.match(postsP1, /page 1 of 2/);
+    assert.match(postsP1, /href="posts-2\.html">next →/);
+    assert.match(postsP1, /← index/);
+    assert.equal((postsP1.match(/<li>/g) || []).length, 100, 'posts.html page 1 must hold exactly 100 items');
+
+    // posts-2.html: page 2, prev link points back to posts.html (not posts-1.html).
+    const postsP2 = entryByPath(entries, 'posts-2.html').body.toString('utf8');
+    assert.match(postsP2, /page 2 of 2/);
+    assert.match(postsP2, /href="posts\.html">← prev/);
+    assert.ok(!postsP2.includes('next →'), 'last page must not have a next link');
+    assert.equal((postsP2.match(/<li>/g) || []).length, 20, 'posts-2.html must hold remaining 20 items');
+
+    // comments.html: 50 items, single page → no pagination links.
+    const commentsP1 = entryByPath(entries, 'comments.html').body.toString('utf8');
+    assert.ok(!commentsP1.includes('page 1 of'), 'single-page bucket should not render a pager');
+    assert.equal((commentsP1.match(/<li>/g) || []).length, 50);
+
+    // 2025.html: combined posts+comments authored in 2025.
+    const y2025 = entryByPath(entries, '2025.html').body.toString('utf8');
+    assert.match(y2025, /alice-pseudo — 2025 \(60\)/);
+    // 2026.html: combined posts+comments authored in 2026 (60 posts + 50 comments = 110).
+    const y2026 = entryByPath(entries, '2026.html').body.toString('utf8');
+    assert.match(y2026, /alice-pseudo — 2026 \(110\)/);
+    assert.match(y2026, /page 1 of 2/);
+    assert.ok(entryByPath(entries, '2026-2.html'), '2026 must paginate to a second page');
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
+test('buildUserArchiveBytes: small archive stays single-page (no pagination subpages)', () => {
+  const db = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-small-'));
+  try {
+    seedUserFixture(db, postsDir);
+    const tar = buildUserArchiveBytes(db, ALICE, {
+      postsDir,
+      branding: { forumName: 'testforum', baseUrl: 'http://localhost' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+    });
+    const entries = readTar(tar);
+    assert.ok(!entryByPath(entries, 'posts.html'), 'small archive must not produce posts.html');
+    assert.ok(!entryByPath(entries, 'comments.html'), 'small archive must not produce comments.html');
+    const indexHtml = entryByPath(entries, 'index.html').body.toString('utf8');
+    assert.ok(!indexHtml.includes('class="chips"'), 'small archive index must not render chips');
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+  }
+});
+
 test('buildUserArchiveBytes: votes.json doesn\'t leak OTHER users\' handles (only own)', () => {
   const db = memDb();
   const postsDir = mkdtempSync(join(tmpdir(), 'plato-uexport-'));
