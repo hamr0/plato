@@ -405,11 +405,19 @@ function errorPage(req, { db, auth }, { title, message, links }) {
 }
 
 function relativeTime(ms) {
-  const d = Math.floor((Date.now() - ms) / 1000);
-  if (d < 60) return `${d}s ago`;
-  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
-  return `${Math.floor(d / 86400)}d ago`;
+  // Future timestamps render as "in 5m" / "in 25d" rather than negative
+  // seconds. Comes up when a destination instance imports a sub whose
+  // posts were authored in the source's local future (e.g. clock skew,
+  // or seed fixtures that span calendar dates).
+  const delta = Math.floor((Date.now() - ms) / 1000);
+  const future = delta < 0;
+  const d = Math.abs(delta);
+  let unit;
+  if (d < 60) unit = `${d}s`;
+  else if (d < 3600) unit = `${Math.floor(d / 60)}m`;
+  else if (d < 86400) unit = `${Math.floor(d / 3600)}h`;
+  else unit = `${Math.floor(d / 86400)}d`;
+  return future ? `in ${unit}` : `${unit} ago`;
 }
 
 // Pick black or white text for a given hex/named flair color so labels stay

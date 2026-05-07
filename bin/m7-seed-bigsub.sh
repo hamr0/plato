@@ -51,7 +51,13 @@ if (exists) {
   process.exit(0);
 }
 
-const subCreatedAt = Date.UTC(2025, 0, 1);
+// Seed dates are anchored relative to "today" so the smoke fixture
+// never produces future-dated rows (which render as "in N d" in the
+// feed). 60 posts ~13–11 months ago, 60 posts ~6–4 months ago — keeps
+// both year buckets but stays comfortably in the past.
+const NOW = Date.now();
+const MONTH = 30 * 86_400_000;
+const subCreatedAt = NOW - 14 * MONTH;
 db.prepare('INSERT INTO subs (name, description, owner_handle, created_at) VALUES (?,?,?,?)')
   .run('bigstudio', 'paginated-reader smoke fixture — 120 posts across 2 years', ALICE, subCreatedAt);
 db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?,?,?)').run('bigstudio', ALICE, 'owner');
@@ -62,9 +68,12 @@ const ins = db.prepare(
 const postIds = [];
 for (let i = 0; i < 120; i++) {
   const id = `bs${i.toString(16).padStart(14, '0')}`;
-  // 60 in 2025-Jun, 60 in 2026-Jun — drives both year buckets.
-  const year = i < 60 ? 2025 : 2026;
-  const created = Date.UTC(year, 5, 1) + i * 60_000;
+  // First 60 posts ~13 months ago (older year bucket); next 60 ~5
+  // months ago (newer year bucket). One-minute gaps within each
+  // batch so the per-post ordering is stable. Both batches stay in
+  // the past so feed rows never render as "in N d".
+  const baseAgo = i < 60 ? 13 * MONTH : 5 * MONTH;
+  const created = NOW - baseAgo + (i % 60) * 60_000;
   const fp = `posts/bigstudio-${id}.md`;
   writeFileSync(
     `${ROOT_TMP}/a/${fp}`,
