@@ -442,6 +442,31 @@ test('importSubArchive: writes a native modlog row crediting the importer (M7 fo
   }
 });
 
+test('importSubArchive: auto-subscribes the importer (mirrors createSub lock so mem >= 1)', async () => {
+  const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
+  const destDb = memDb();
+  const destPostsDir = mkdtempSync(join(tmpdir(), 'plato-importtest-sub-'));
+  const importerHandle = 'c'.repeat(64);
+  ensureHandle(destDb, importerHandle, 'importer-pseudo');
+  try {
+    const parsed = parseAndVerifyArchive(tar);
+    importSubArchive(destDb, { parsed, postsDir: destPostsDir, importerHandle });
+    const subbed = destDb.prepare(
+      'SELECT 1 FROM subscriptions WHERE user_handle = ? AND sub_name = ?'
+    ).get(importerHandle, 'lobby');
+    assert.ok(subbed, 'importer should be auto-subscribed to the imported sub');
+    const memCount = destDb.prepare(
+      'SELECT COUNT(*) AS n FROM subscriptions WHERE sub_name = ?'
+    ).get('lobby').n;
+    assert.equal(memCount, 1, 'newly imported sub renders mem=1, not 0');
+  } finally {
+    rmSync(srcPostsDir, { recursive: true, force: true });
+    rmSync(destPostsDir, { recursive: true, force: true });
+    sourceDb.close();
+    destDb.close();
+  }
+});
+
 test('importSubArchive: pseudonym collision disambiguates with -2 at storage time', async () => {
   const { tar, postsDir: srcPostsDir, sourceDb } = await buildFixtureArchive('lobby');
   const destDb = memDb();

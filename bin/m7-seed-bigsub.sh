@@ -61,6 +61,9 @@ const subCreatedAt = NOW - 14 * MONTH;
 db.prepare('INSERT INTO subs (name, description, owner_handle, created_at) VALUES (?,?,?,?)')
   .run('bigstudio', 'paginated-reader smoke fixture — 120 posts across 2 years', ALICE, subCreatedAt);
 db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?,?,?)').run('bigstudio', ALICE, 'owner');
+// Mirror the createSub lock: mod role implies subscribership. Without
+// this, the active-subs strip would render alice's bigstudio as 0 mem.
+db.prepare('INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?,?,?)').run(ALICE, 'bigstudio', subCreatedAt);
 
 const ins = db.prepare(
   'INSERT INTO posts (id, sub_name, handle, title, file_path, created_at, score) VALUES (?,?,?,?,?,?,?)'

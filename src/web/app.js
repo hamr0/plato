@@ -92,15 +92,17 @@ const HANDLE_RE = /^[0-9a-f]{64}$/;
 // from a renderer — use page() so the rule that "every page reads the
 // same as home, with the forum name replaced by the page action" holds
 // in code, not in convention.
-function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle, description = null, canonical = null, ogType = 'website', feed = null }, body) {
+function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle, description = null, canonical = null, ogType = 'website', feed = null, headExtra = null }, body) {
   // `title` is the plain-text page title — used in <title> and og:title
   // attributes where raw HTML is invalid. `titleHtml` is the body-side
   // rendering, used in the brand-row h1 where decorations like the
   // imported-sub [i] chip live. Falls back to title if not given.
+  // `headExtra` is opt-in raw <head> markup — currently used only by
+  // /memlog to emit a meta-refresh while in-flight jobs are pending.
   return layout(title, html`
     ${siteHeader({ db, currentHandle, title: titleHtml ?? title, subtitle })}
     ${body}
-  `, { description, canonical, ogType, feed });
+  `, { description, canonical, ogType, feed, headExtra });
 }
 
 // One-line error/notice pages. Kept terse so the call sites stay readable
@@ -123,6 +125,7 @@ function layout(title, body, seo = {}) {
   const feedTag = seo.feed
     ? html`<link rel="alternate" type="application/atom+xml" href="${seo.feed.href}" title="${seo.feed.title}">`
     : html``;
+  const headExtra = seo.headExtra ?? html``;
   return render(html`<!doctype html>
 <html lang="en">
 <head>
@@ -142,6 +145,7 @@ function layout(title, body, seo = {}) {
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css?v=26">
 ${feedTag}
+${headExtra}
 ${branding.colors.up || branding.colors.down ? html`<style>:root{${branding.colors.up ? `--up:${branding.colors.up};` : ''}${branding.colors.down ? `--down:${branding.colors.down};` : ''}}</style>` : ''}
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
@@ -4022,7 +4026,14 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
   // disables the button; recent-completed shows expiry.
   const exportBlock = personalExportBlock({ db, handle, queuedHint: searchParams?.get('export') === 'queued' });
   const inFlightBlock = inFlightRequestsBlock({ db, handle });
-  send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog' }, html`
+  // Auto-refresh while jobs are pending/in-progress — workers tick on
+  // off-peak crontab so 30s is the smallest cadence that's likely to
+  // surface a state change. The block self-clears once the state
+  // machine moves past in-progress, so the meta-refresh stops with it.
+  const headExtra = inFlightBlock
+    ? raw('<meta http-equiv="refresh" content="30">')
+    : null;
+  send(res, 200, pageView({ db, currentHandle: handle, title: 'memlog', headExtra }, html`
     <div class="memlog-page">
       <p><a href="/">← home</a></p>
       <h2>// memlog</h2>
@@ -4047,9 +4058,10 @@ function renderMemlog(req, res, { db, auth }, searchParams) {
 // rows fire memlog notifications; this block bows out as soon as the
 // state machine moves past in-progress, so the banner self-clears.
 //
-// A "refresh" link gives the user manual feedback without JS polling
-// (the page itself is plain HTML — auto-refresh would need a head-tag
-// plumbing we don't have today).
+// /memlog also emits a 30s <meta http-equiv="refresh"> when this block
+// is non-null (see renderMemlog → headExtra) so the page reloads on its
+// own while jobs are pending/in-progress. The "refresh" link below is
+// the no-JS-needed manual override / immediate refetch.
 function inFlightRequestsBlock({ db, handle }) {
   const jobs = listInFlightJobsForRequester(db, handle);
   if (jobs.length === 0) return null;

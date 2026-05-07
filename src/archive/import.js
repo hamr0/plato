@@ -234,6 +234,12 @@ export function importSubArchive(db, { parsed, postsDir, importerHandle, renameT
   db.prepare(
     `INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, 'owner')`
   ).run(destName, importerHandle);
+  // Mod role implies subscribership (same lock as createSub) — without
+  // this row the imported sub would render as 0 mem on the active-subs
+  // strip even though its only mod is the active importer.
+  db.prepare(
+    `INSERT OR IGNORE INTO subscriptions (user_handle, sub_name, created_at) VALUES (?, ?, ?)`
+  ).run(importerHandle, destName, now);
 
   // 4. Posts. Preserve IDs, scores, all flags. Files written to disk.
   mkdirSync(postsDir, { recursive: true });
