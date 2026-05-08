@@ -460,6 +460,7 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 ## Production usage
 
 - One Node process. No clustering needed at hobby scale; SQLite WAL handles concurrent readers fine.
+- Tested on **RackNerd KVM VPS** (~$20/year, 1 GB / 1 vCPU is plenty). Port 25 + PTR are unblocked via a one-paragraph support ticket — paste-ready text in [operator-guide § Hosting](operator-guide.md#hosting--budget-vps-recommendation). Hetzner / OVH / Linode / Vultr also work; avoid DigitalOcean (port-25 unblock is harder to get).
 - Reverse proxy (Caddy/nginx) for TLS. M8 adds opinionated Caddy config.
 - Backups: `cp forum.db forum.db.bak` and rsync `posts/`. SQLite WAL means you can copy the live file (`.backup` is safer for hot copies).
 - Logging: plato writes to stdout/stderr. The deploy-shipped systemd unit redirects both to `/var/log/plato.log` (so journalctl shows lifecycle only; app output is in plato.log). knowless's mail-outcome hooks land here as `[plato mail.submit]` / `[plato mail.fail]` / `[plato mail.suppressed]` — grep-friendly observability without a metrics endpoint.

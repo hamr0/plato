@@ -403,6 +403,45 @@ The recommended production path is: **systemd unit + cron + logrotate + the `bin
 
 A separate "evaluation Docker image" is on the roadmap (`docker run -p 8080:8080 plato/plato:latest` for kicking the tires). That's a marketing/onboarding surface, not a deploy path; production posture stays no-docker.
 
+### Hosting — budget VPS recommendation
+
+plato is one node process + one SQLite file + one HTTP port; it runs comfortably on any 1 GB / 1 vCPU / 25 GB VPS. Hosting cost should be under $30/year for a hobby instance.
+
+**What plato has been tested on:** **RackNerd** ($10–$25/year for a KVM VPS, varies by promo). Not the prettiest control panel, but the spec/price ratio is unmatched at this tier and they unblock port 25 + set PTR via support ticket within hours of asking. AlmaLinux 9 is a one-click OS template.
+
+**Two configuration changes you'll need to ask RackNerd for** (paste-ready ticket — file both in one ticket):
+
+```
+Subject: Request: unblock port 25 outbound + set PTR (rDNS) for VPS
+
+Hi RackNerd team,
+
+Could you please make two configuration changes on my VPS:
+
+1. Unblock outbound TCP port 25 for SMTP delivery.
+   Use case: I'm running a small self-hosted discussion forum
+   (open-source, hobby/personal). The application sends magic-link
+   login emails directly via postfix on the VPS, signed with DKIM
+   from my own domain. No mailing-list software, no marketing email,
+   no bulk sending — just transactional auth emails to opt-in users.
+
+2. Set the PTR (reverse DNS) record for my VPS IPv4 to:
+       <yourdomain.com>
+   I've already pointed the A record for <yourdomain.com> at the VPS
+   IP so forward-confirmed reverse DNS will match.
+
+VPS details:
+- Hostname / Service ID: <YOUR_HOSTNAME_OR_VPS_ID>
+- IPv4: <YOUR_IPV4>
+- Domain: <yourdomain.com>
+
+Thanks!
+```
+
+Replace `<yourdomain.com>`, `<YOUR_HOSTNAME_OR_VPS_ID>`, and `<YOUR_IPV4>` with your actuals before submitting. Both changes typically land within a few hours and don't cost extra.
+
+**Other providers that work:** Hetzner CX11 (€4.50/mo, EU), OVH VPS Starter, Linode Nanode 1GB, Vultr Cloud Compute. Same story — port 25 + PTR via support ticket. Avoid DigitalOcean for plato (port 25 unblock is harder to get) and avoid AWS EC2 unless you want to file the request-form dance.
+
 ### First-time install
 
 For a **production deploy** to a fresh VPS (AlmaLinux + nginx + Let's Encrypt + postfix + opendkim + systemd + cron), follow [`deploy-guide.md`](deploy-guide.md) — it's a single opinionated path with every choice made and a troubleshooting section. The notes below are for **local development** only.

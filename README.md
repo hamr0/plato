@@ -45,8 +45,8 @@ The modern web has trained us to accept that what you see isn't what you get —
   Each sub keeps its own color so feeds are scannable.
   No algorithm decides what you see — there isn't one to game.
 
-- **Runs on a $5 VPS.** One Node process, one SQLite file, one HTTP port. No build step, no frontend framework, no clustering.
-  Backup = `sqlite3 .backup` + `tar`; healthcheck = `curl /healthz`. Apache 2.0, fork without asking.
+- **Runs on a $20/year VPS.** One Node process, one SQLite file, one HTTP port. No build step, no frontend framework, no clustering.
+  Tested on RackNerd (~$20/year KVM, port 25 + PTR via support ticket); Hetzner / OVH / Linode / Vultr also work. Backup = `sqlite3 .backup` + `tar`; healthcheck = `curl /healthz`. Apache 2.0, fork without asking.
 
 ---
 

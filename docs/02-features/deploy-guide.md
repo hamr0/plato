@@ -53,10 +53,11 @@ Two consequences worth internalizing:
 
 Before you start:
 
-- [ ] AlmaLinux 9 VPS with public IPv4. 1 GB RAM, 25 GB disk, 1 vCPU is plenty for a hobby forum. Hetzner CX11 / DigitalOcean basic / OVH VPS Starter — any will do.
+- [ ] AlmaLinux 9 VPS with public IPv4. 1 GB RAM, 25 GB disk, 1 vCPU is plenty for a hobby forum. Budget: **RackNerd ~$20/year** (KVM, full control, port 25 + PTR available via support ticket — what plato is tested on). Mid-tier: Hetzner CX11 (€4.50/mo, EU). Higher-touch: DigitalOcean / Linode / OVH / Vultr — all work, but check the port-25 row below before committing.
 - [ ] Domain you control with DNS access (for the `A` record AND for SPF/DKIM/DMARC TXT records). **Point an `A` record at the VPS IP before step 11**; certbot needs to resolve `$DOMAIN` to the VPS to issue the cert.
-- [ ] **VPS provider doesn't block port 25 outbound.** Most provider's anti-spam policy blocks it on new accounts; some unblock on request, some never do. Check before you commit:
-  - **Hetzner, OVH, Linode, Vultr** — usually need a support ticket to unblock 25 outbound. Approve within hours, free.
+- [ ] **VPS provider doesn't block port 25 outbound.** Most providers' anti-spam policy blocks it on new accounts; some unblock on request, some never do. Check before you commit:
+  - **RackNerd** — blocked by default, unblocked on request via a 1-paragraph support ticket. Approves in hours, free. The port-25 + PTR tickets can go in together; there's a paste-ready template in [operator-guide.md § Hosting](operator-guide.md#hosting--budget-vps-recommendation).
+  - **Hetzner, OVH, Linode, Vultr** — same shape, support ticket to unblock 25. Hours, free.
   - **DigitalOcean** — historically restrictive; you may need to use a different provider.
   - **AWS EC2** — blocked by default; request limit removal via the form.
   - Test from the VPS itself: `nc -zv gmail-smtp-in.l.google.com 25` should connect.
