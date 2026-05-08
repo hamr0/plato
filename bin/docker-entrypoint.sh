@@ -28,5 +28,13 @@ fi
 echo "[entrypoint] running migrations..." >&2
 node bin/migrate.js
 
+# Curated demo content for the eval image. The seed is itself
+# idempotent (skips if //lobby already exists) so a restart with a
+# persistent volume preserves whatever the evaluator did.
+if [ "${PLATO_EVAL_SEED:-0}" = "1" ]; then
+  echo "[entrypoint] seeding eval content..." >&2
+  node bin/eval-seed.js || echo "[entrypoint] eval seed failed (non-fatal)" >&2
+fi
+
 echo "[entrypoint] starting plato on :${PORT:-8080}" >&2
 exec node bin/server.js

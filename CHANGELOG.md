@@ -6,6 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — eval-image curated seed + README "What plato gives you" rewrite (post-M8)
+
+- **`bin/eval-seed.js`** runs from the docker entrypoint when
+  `PLATO_EVAL_SEED=1` AND `//lobby` doesn't already exist. Coverage
+  is shaped to put every visible plato concept on the front page
+  for an evaluator. Creates:
+  - 4 native personas (alice/bob/carol/dave) + 2 imported personas
+    (zed/yann) — pseudonymized handles derived from the container's
+    `KNOWLESS_SECRET`, so a visitor who types `alice@plato.eval`
+    lands in alice's populated session.
+  - 3 subs: `//lobby` (sticky note set), `//field-notes` (with
+    project / question / writeup flairs), and `//ham-archive` (an
+    *imported* sub — `imported_from_url` + `imported_from_fingerprint`
+    + `imported_at` set, imported handles render with the muted-italic
+    treatment, [imported] chip on the sub link, imported-banner on
+    the sub page).
+  - 13 native posts + 3 imported posts, with realistic content
+    covering markdown (bold/italic/inline code/code blocks), links,
+    and the auto-link rendering for outbound URLs.
+  - 8 comments including 2-deep reply threads.
+  - 17 votes for score variance.
+  - **1 soft-removal + 1 hard-removal** (with reasons) so the
+    public `/modlog` shows both moderation tiers; soft = collapsed
+    with body still expandable, hard = removed with a stub.
+  - **5 notifications and 3 posts of activity** for alice — when a
+    visitor logs in as `alice@plato.eval`, `/memlog?mode=notifications`
+    is non-empty (header unread chip is non-zero), `?mode=activity`
+    shows her posts, `?mode=all` shows the union.
+  Sticky note on `//lobby` documents the alice@plato.eval login path.
+  Idempotent: re-running on a persistent volume skips because
+  `//lobby` already exists. Production deploys never set the env
+  var, so the seed never executes there.
+- **README "What plato gives you" rewrite.** The section was prose-
+  heavy with multi-sentence value propositions buried inside long
+  paragraphs. Rewritten to one bolded headline + 2-3 supporting
+  lines per item. Same set of values, faster to skim.
+
 ### Added — evaluation Docker image (post-M8)
 
 `docker run --rm -p 8080:8080 ghcr.io/hamr0/plato:latest` boots a

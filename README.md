@@ -16,15 +16,37 @@ The modern web has trained us to accept that what you see isn't what you get —
 
 ## What plato gives you
 
-- **Plain text.** Markdown for posts, hyperlinks for everything else. No image / video / file hosting. The forum loads on any device, on any connection, in any decade.
-- **Magic-link sign-in, no identity lock.** Click an emailed link → you're in. No password, no profile, no captcha, no second factor. The moment the link is sent, the email is forgotten — only a one-way fingerprint, scoped to this site, remains. Same email on two plato sites = two different pseudonyms.
-- **Mods own their sub, members hold them accountable.** Every action — soft removal (fold-behind-a-chip, body still readable), hard removal (stub, reason required), ban, transfer — lands in a public log per sub. The audit trail is the social pressure. Members have symmetric levers: flag a target → 3 distinct flaggers auto-collapse it for review; upvote a soft-removed target → community auto-lifts it once the threshold is met. The mod doesn't have to be convinced; the community overrules.
-- **Subs that go quiet go read-only, not zombie.** If a mod steps down with no co-mods, or if no mod has been active in a sub for 30 days (with a 28-day warning banner before that), the sub becomes read-only — content stays viewable, no new posts. Any current mod can flip it back. The operator does NOT assign new mods or override sub state; communities reactivate themselves or members migrate by creating a successor sub. This is plato's load-bearing defense against authority-coercion: a "lawful order to install a chosen mod" has no admin path in plato to attach to.
-- **One dashboard for mods, one public log for everyone.** `/modlog` with three modes — open (pending flags, expand any row to decide inline), inbox (deduped current state), audit (every event flat). The audit mode is **public** — instance-wide, no login required, linked from the footer of every page. open / inbox stay mod-only. Per-sub `/sub/<name>/modlog` is also public.
-- **RSSvp.** Three pull-only feed tiers, no email digests, no push, no app: every sub publishes `/sub/<name>/rss` (public Atom); each logged-in user gets two token-gated personal feeds at `/u/<token>/subs.rss` (everything across the subs they follow) and `/u/<token>/rss` (the above plus replies + mod actions on their own content) — token shown on `/memlog` with a regenerate button. Drop the URLs into [NetNewsWire](https://netnewswire.com), [Miniflux](https://miniflux.app), [FreshRSS](https://freshrss.org), or any reader. No notification system to fight, no app to install, no algorithm. **Plato will never email you about activity** — magic-link login is the only outbound mail, deliberately.
-- **Interoperable from day one.** Posts are plain markdown files on disk; the database is an index, regenerable. **Personal archive** — request your own contribution as a signed `.tar.gz` from `/memlog`; no tenure gate, your data is yours from day one. **Sub archive** — mods (or any 60-day continuous subscriber) can request a sub's full history from `/sub/<name>/manage`; downloadable as a signed `.tar.gz`, importable into any other plato instance via URL paste. Both archive kinds bundle a self-contained no-JS `index.html` static reader — openable from disk in any browser; above 100 items the reader auto-paginates with kind + per-year chips. Plain markdown bodies, JSON metadata, Ed25519 signature, optional OpenTimestamps proof — readable with `cat`, verifiable with `ots`, no plato install required.
-- **You pick the feed.** Home page top-nav: Posts / Comments tabs, sort by new / old / top / hot, filter by 24h / week / all. `/subs` lists every sub at a glance. Each sub keeps its own color in the feed so you can scan-and-skim. No algorithm decides what you see.
-- **Runs on a $5 VPS.** One process, one SQLite file, one HTTP port. Backups = two `cp` commands. No build step, no frontend framework. Apache 2.0, fork without asking.
+- **Plain text, loads anywhere.** Markdown for posts, hyperlinks for everything else.
+  No image / video hosting; image markdown becomes a clickable link. Renders on any device, any connection, any decade.
+
+- **Magic-link sign-in, no identity lock.** Click an emailed link, you're in — no password, no profile, no captcha.
+  Email is hashed on receipt and never stored; only a one-way fingerprint scoped to this site remains.
+  Same email on two plato instances = two unrelated pseudonyms.
+
+- **Public modlog, symmetric community recourse.** Every mod action — soft removal, hard removal, ban, transfer — lands in `/sub/<name>/modlog` for everyone to see.
+  Members aren't passive: 3 distinct flags auto-collapse a target for review; enough upvotes after a soft removal auto-lifts it. The mod doesn't have to be convinced — the community can overrule.
+
+- **Subs that go quiet go read-only, not zombie.** No mod activity for 30 days (with a 28-day warning banner) → sub becomes read-only. Any current mod flips it back.
+  The operator never assigns mods or unfreezes a sub. Communities reactivate themselves or fork a successor.
+  Net effect: a "lawful order to install a chosen mod" has no admin path to attach to.
+
+- **One mod dashboard, one public audit.** `/modlog` has three modes: *open* (pending flags, decide inline), *inbox* (current state), *audit* (every event flat, instance-wide, public, no login).
+  Per-sub `/sub/<name>/modlog` is public too. Audit by default beats trust by default.
+
+- **RSSvp — feeds, not notifications.** Every sub publishes `/sub/<name>/rss`; each logged-in user gets two token-gated personal feeds (`/u/<token>/subs.rss` for subs they follow; `/u/<token>/rss` adds replies + mod actions on their content).
+  Drop the URLs into [NetNewsWire](https://netnewswire.com) / [Miniflux](https://miniflux.app) / [FreshRSS](https://freshrss.org). No app, no push, no algorithm.
+  **Plato will never email you about activity** — magic-link login is the only outbound mail, deliberately.
+
+- **Your data is yours from day one.** Posts are plain `.md` files on disk; the database is an index, regenerable.
+  Request a personal archive from `/memlog` (no tenure gate) or a full sub archive from `/sub/<name>/manage` (mod or 60-day subscriber). Both are signed `.tar.gz` with markdown + JSON + an Ed25519 sig + optional OpenTimestamps proof — readable with `cat`, verifiable with `ots`, no plato install required.
+  Sub archives import into any other plato instance via URL paste.
+
+- **You pick the feed.** Home: Posts / Comments tabs, sort by new / old / top / hot, filter by 24h / week / all.
+  Each sub keeps its own color so feeds are scannable.
+  No algorithm decides what you see — there isn't one to game.
+
+- **Runs on a $5 VPS.** One Node process, one SQLite file, one HTTP port. No build step, no frontend framework, no clustering.
+  Backup = `sqlite3 .backup` + `tar`; healthcheck = `curl /healthz`. Apache 2.0, fork without asking.
 
 ---
 

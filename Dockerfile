@@ -47,6 +47,7 @@ ENV PORT=8080 \
     POSTS_DIR=/app/data/posts \
     EXPORTS_DIR=/app/data/exports \
     PLATO_EVAL_BANNER=1 \
+    PLATO_EVAL_SEED=1 \
     NODE_ENV=production
 
 USER node
