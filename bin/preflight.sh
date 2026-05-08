@@ -62,18 +62,28 @@ echo
 echo "mail:"
 if [ -x /usr/sbin/sendmail ]; then
   ok "/usr/sbin/sendmail present"
-  if [ -r /etc/msmtprc ]; then
+  if [ -e /etc/msmtprc ]; then
     PERMS=$(stat -c '%a' /etc/msmtprc 2>/dev/null || stat -f '%Lp' /etc/msmtprc 2>/dev/null)
     if [ "$PERMS" = "600" ]; then
       ok "/etc/msmtprc exists, mode 600"
     else
       warn "/etc/msmtprc exists but mode is $PERMS (msmtp REFUSES non-600; chmod 600 /etc/msmtprc)"
     fi
+    # Only root can read 600-locked /etc/msmtprc; check for unreplaced
+    # placeholders (the most common new-deploy mistake).
+    if [ -r /etc/msmtprc ]; then
+      if grep -qE 'YOUR_EMAIL@gmail\.com|APP_PASSWORD_GOES_HERE|xxxx-xxxx-xxxx-xxxx' /etc/msmtprc; then
+        fail "/etc/msmtprc still contains placeholder values — edit it before starting plato"
+      fi
+      if ! grep -qE '^account[[:space:]]+default' /etc/msmtprc; then
+        fail "/etc/msmtprc has no uncommented \`account default\` block — msmtp will error \"account default not found\""
+      fi
+    fi
   else
-    warn "/etc/msmtprc not present or not readable (production needs it; see deploy/msmtprc.example)"
+    warn "/etc/msmtprc not present (production needs it; see deploy/msmtprc.example)"
   fi
 else
-  warn "/usr/sbin/sendmail not present (production needs msmtp-mta; OK in dev — knowless falls back to stderr)"
+  warn "/usr/sbin/sendmail not present (production needs msmtp; OK in dev — knowless falls back to stderr)"
 fi
 
 # ─── .env ─────────────────────────────────────────────────────────────

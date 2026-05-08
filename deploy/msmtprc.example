@@ -1,19 +1,25 @@
 # /etc/msmtprc — outbound mail config for plato.
 #
-# Pick ONE account block below, replace the placeholders, then:
+# This file ships with Gmail wired up as the default. To use it:
 #
 #   sudo cp deploy/msmtprc.example /etc/msmtprc
-#   sudo $EDITOR /etc/msmtprc        # uncomment + fill in your block
+#   sudo $EDITOR /etc/msmtprc        # replace YOUR_EMAIL@gmail.com + APP_PASSWORD
 #   sudo chown root:root /etc/msmtprc
 #   sudo chmod 600 /etc/msmtprc      # msmtp REFUSES group/world-readable creds
 #
 # Smoke test BEFORE plato exists:
 #   echo -e "Subject: msmtprc preflight\n\nhello" | sendmail you@example.com
+#   tail -5 /var/log/msmtp.log       # SMTP-level errors surface here
 #
-# msmtp logs every attempt to /var/log/msmtp.log; that's where SMTP-level
-# errors (auth failure, DNS, cert verification) surface.
+# To use a different relay (Fastmail, Proton Bridge, generic), comment
+# out the active Gmail block below and uncomment the alternative block
+# you want at the bottom of this file.
+#
+# IMPORTANT: msmtp errors with "account default not found" if there is
+# no uncommented `account default` block. There can be at most ONE
+# `account default` active at a time.
 
-# ─── Defaults applied to every account block below ────────────────────
+# ─── Defaults applied to every account block ──────────────────────────
 defaults
 auth           on
 tls            on
@@ -21,17 +27,24 @@ tls_starttls   on
 tls_trust_file /etc/pki/tls/certs/ca-bundle.crt
 logfile        /var/log/msmtp.log
 
-# ─── Gmail (free account, with 2FA + App Password) ────────────────────
+# ─── Gmail (active default) ───────────────────────────────────────────
 # Generate the App Password at https://myaccount.google.com/apppasswords
-# (2FA must be on for App Passwords to be available).
-#
-# account        default
-# host           smtp.gmail.com
-# port           587
-# from           you@gmail.com
-# user           you@gmail.com
-# password       xxxx-xxxx-xxxx-xxxx
+# (2FA must be on for App Passwords to be available). Replace BOTH the
+# `from` and `user` lines with your full Gmail address; replace the
+# password with the 16-char App Password (with or without dashes works).
+account        default
+host           smtp.gmail.com
+port           587
+from           YOUR_EMAIL@gmail.com
+user           YOUR_EMAIL@gmail.com
+password       APP_PASSWORD_GOES_HERE
 
+
+# ─── Alternatives — uncomment ONE if you swap away from Gmail ─────────
+#
+# Don't leave more than one `account default` block uncommented at a
+# time; msmtp will use the last one but the situation is brittle.
+#
 # ─── Fastmail (any plan, App Password) ────────────────────────────────
 # Generate the App Password at:
 #   https://app.fastmail.com/settings/security/devicekeys
@@ -42,7 +55,7 @@ logfile        /var/log/msmtp.log
 # from           you@fastmail.com
 # user           you@fastmail.com
 # password       xxxxxxxxxxxxxxxx
-
+#
 # ─── Proton Mail (via Proton Bridge running on the same box) ──────────
 # Proton requires you to run their Bridge daemon — Proton Mail does
 # not expose plain SMTP on the public internet. Bridge listens on
@@ -57,10 +70,8 @@ logfile        /var/log/msmtp.log
 # password       <bridge-generated password>
 # tls            off
 # auth           plain
-
-# ─── Generic SMTP relay ───────────────────────────────────────────────
-# Any STARTTLS-on-587 relay works. Examples: your work email,
-# self-hosted mailcow, postfix-as-relay-on-another-box, ISP webmail.
+#
+# ─── Generic STARTTLS relay (work email, self-hosted, ISP) ────────────
 #
 # account        default
 # host           smtp.example.com
