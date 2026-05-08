@@ -99,9 +99,9 @@ if [ -r "$ENV_FILE" ]; then
 
   SECRET=$(read_env KNOWLESS_SECRET)
   if [ -z "$SECRET" ]; then
-    fail "KNOWLESS_SECRET is empty (generate: node -e \"process.stdout.write(require('crypto').randomBytes(32).toString('hex'))\")"
+    fail "KNOWLESS_SECRET is empty — run: bin/gen-secret.sh"
   elif [ "${#SECRET}" -lt 32 ]; then
-    fail "KNOWLESS_SECRET is shorter than 32 chars (got ${#SECRET}; need at least 32 hex chars)"
+    fail "KNOWLESS_SECRET is shorter than 32 chars (got ${#SECRET}); regenerate via bin/gen-secret.sh"
   else
     ok "KNOWLESS_SECRET set (${#SECRET} chars)"
   fi

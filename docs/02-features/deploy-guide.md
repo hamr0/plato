@@ -190,12 +190,16 @@ If `sendmail` exits non-zero, look at `/var/log/msmtp.log` for the SMTP-level re
 
 ## Step 6 — Clone plato
 
+`useradd --create-home` may have seeded `/opt/plato` with shell rc files, so `git clone … .` would refuse on a non-empty target. Clone to a temp path, copy in, fix ownership:
+
 ```bash
-sudo -u plato -H bash <<'EOF'
-cd /opt/plato
-git clone https://github.com/hamr0/plato.git .
-npm ci --omit=dev
-EOF
+sudo -u plato -H git clone https://github.com/hamr0/plato.git /tmp/plato-src
+sudo cp -a /tmp/plato-src/. /opt/plato/
+sudo cp -a /tmp/plato-src/.git /opt/plato/
+sudo chown -R plato:plato /opt/plato
+sudo rm -rf /tmp/plato-src
+
+sudo -u plato -H bash -c 'cd /opt/plato && npm ci --omit=dev'
 ```
 
 `--omit=dev` skips test-only deps; the runtime tree stays small (knowless, marked, dicebear, unique-names-generator).
@@ -204,28 +208,26 @@ EOF
 
 The `KNOWLESS_SECRET` is the **only** plato secret. Identity hashes derive from it; if it changes after launch, every user looks like a new account. **Generate it once. Back it up. Never rotate.**
 
+Use the helper script — pasting `node -e "..."` from memory is fragile across terminal-paste boundaries:
+
 ```bash
-sudo -u plato -H bash <<EOF
-cd /opt/plato
-SECRET=\$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))")
+SECRET=$(sudo -u plato /opt/plato/bin/gen-secret.sh)
+echo "secret length: ${#SECRET}"   # expect: 64
 
-cat > /opt/plato/.env <<ENV
-KNOWLESS_SECRET=\$SECRET
-
-KNOWLESS_BASE_URL=https://${DOMAIN}
-KNOWLESS_FROM=auth@${DOMAIN}
-
-# Magic-link mail and cron alerts both pipe through this binary.
-# Relay creds live in /etc/msmtprc, never here.
+sudo tee /opt/plato/.env > /dev/null <<ENV
+KNOWLESS_SECRET=$SECRET
+KNOWLESS_BASE_URL=https://$DOMAIN
+KNOWLESS_FROM=auth@$DOMAIN
 PLATO_SENDMAIL_PATH=/usr/sbin/sendmail
-
 PORT=$PLATO_PORT
 DB_PATH=/opt/plato/forum.db
 ENV
 
-chmod 600 /opt/plato/.env
-EOF
+sudo chown plato:plato /opt/plato/.env
+sudo chmod 600 /opt/plato/.env
 ```
+
+> **Homeserver / self-signed test note.** `KNOWLESS_FROM=auth@$DOMAIN` works on a real VPS where you control DNS for `$DOMAIN`. For a homeserver test where `$DOMAIN` is just your hostname (`federver`, `homelab.local`, etc.), Gmail will accept the message but render the From header awkwardly to recipients. For the test, set `KNOWLESS_FROM=$ADMIN_EMAIL` — your actual relay address — instead. On the production VPS, point it back at your domain after configuring SPF/DKIM upstream.
 
 ## Step 8 — Write `config.json`
 
