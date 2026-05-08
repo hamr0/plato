@@ -162,7 +162,7 @@ if command -v mail >/dev/null 2>&1; then
   mail -s "$SUBJECT" "$ALERT_EMAIL" < "$EMAIL_FILE"
 elif command -v sendmail >/dev/null 2>&1; then
   {
-    echo "To: $HEALTH_ALERT_EMAIL"
+    echo "To: $ALERT_EMAIL"
     echo "Subject: $SUBJECT"
     echo "Content-Type: text/plain; charset=utf-8"
     echo
