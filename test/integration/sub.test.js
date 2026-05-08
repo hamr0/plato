@@ -115,10 +115,11 @@ test('getSubByName: returns null for unknown', () => {
   assert.equal(getSubByName(db, 'nothing'), null);
 });
 
-test('getSubByName: finds general (from migration)', () => {
+test('getSubByName: finds an existing sub', () => {
   const db = freshDb();
-  const sub = getSubByName(db, 'general');
-  assert.equal(sub.name, 'general');
+  createSub(db, { name: 'cooking', ownerHandle: HANDLE_A });
+  const sub = getSubByName(db, 'cooking');
+  assert.equal(sub.name, 'cooking');
 });
 
 test('listActiveSubs: includes only subs with posts in window, ordered by post_count DESC', () => {

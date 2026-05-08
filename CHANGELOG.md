@@ -6,6 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — drop empty `general` sub on fresh installs (post-M8, schema/general)
+
+PRD §Permanently out has always said "no default catch-all sub" — and
+the route layer has always enforced it (POST /draft rejects
+`subName=general`, home/sub-picker queries filter `WHERE name !=
+'general'`). But migration 002 still INSERTed a `general` sub row as
+the FK target for backfilling M1-era posts, so every fresh install
+ended up carrying a NULL-owner row that nothing pointed at and that
+every code path had to special-case. Cruft, with archaeology value
+only on instances that actually have M1 archives.
+
+- **NEW migration `024_drop_empty_general.sql`** — DELETEs `general`
+  if no `posts` / `drafts` / `sub_mods` reference it. Fresh installs:
+  002 creates the row → 024 immediately drops it → no `general` sub
+  exists. Archive-bearing installs (real M1-era posts in `general`):
+  024 sees real references, leaves the row alone. Idempotent.
+- **`submitDraft` no longer defaults `subName` to `'general'`.** Made
+  the parameter required; throws "submitDraft: subName is required"
+  if missing. Production callers (`src/web/app.js`, `bin/eval-seed.js`)
+  always passed it explicitly; the default was a footgun masking
+  test-only usage.
+- **Route-layer carve-outs preserved.** `WHERE name != 'general'`
+  filters and `subName === 'general'` rejection in POST /draft stay
+  in place — they're still load-bearing for archive-bearing installs
+  and harmless on fresh ones (always-pass / dead-branch respectively).
+- **PRD §Permanently out tightened.** Now reads "fresh installs have
+  no `general` sub at all" + the archaeology carve-out for legacy
+  archive-bearing installs. operator-guide and plato.context.md
+  match.
+- **Tests updated** (~25 assertions): schema/post/app/sub integration
+  tests now seed a `'test'` sub in their `freshDb()` helpers; INSERTs
+  into posts/drafts pass `sub_name='test'` explicitly. Three obsolete
+  tests deleted (the schema-default test, the "general exists with
+  NULL owner" test, the "getSubByName finds general" test); replaced
+  with one new "general does NOT exist after migrations on a fresh
+  DB" assertion. Suite size 807 → 806.
+
 ### Changed — deploy-guide polish; ship disable-nginx-default-server.sh (post-M8, deploy/4)
 
 Postmortem from a homeserver smoke against the new deploy/3 stack

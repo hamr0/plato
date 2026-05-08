@@ -6,6 +6,10 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 function freshDb() {
   const db = openDb(':memory:');
   applyAllMigrations(db);
+  // Migration 024 drops 'general' on fresh installs (no M1 archive); tests
+  // that need a sub for FK satisfaction seed a 'test' sub here.
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)')
+    .run('test', Date.now());
   return db;
 }
 
@@ -30,8 +34,8 @@ test('handles: pseudonym is UNIQUE', () => {
 test('posts: requires existing handle (FK enforcement)', () => {
   const db = freshDb();
   assert.throws(() => {
-    db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run('p1', 'nonexistent-handle', 'hi', 'posts/p1.md', Date.now());
   }, /FOREIGN KEY/);
 });
@@ -40,25 +44,14 @@ test('posts: file_path is UNIQUE', () => {
   const db = freshDb();
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run('h1', 'usual-caribou', Date.now());
-  db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-              VALUES (?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, 'test', ?, ?, ?, ?)`)
     .run('p1', 'h1', 'first', 'posts/p1.md', Date.now());
   assert.throws(() => {
-    db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run('p2', 'h1', 'second', 'posts/p1.md', Date.now());
   }, /UNIQUE/);
-});
-
-test('posts: sub_name defaults to general', () => {
-  const db = freshDb();
-  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
-    .run('h1', 'usual-caribou', Date.now());
-  db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-              VALUES (?, ?, ?, ?, ?)`)
-    .run('p1', 'h1', 'hi', 'posts/p1.md', Date.now());
-  const row = db.prepare('SELECT sub_name FROM posts WHERE id = ?').get('p1');
-  assert.equal(row.sub_name, 'general');
 });
 
 test('drafts: insert + finalize round-trip works', () => {
@@ -66,12 +59,12 @@ test('drafts: insert + finalize round-trip works', () => {
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run('h1', 'usual-caribou', Date.now());
 
-  db.prepare(`INSERT INTO drafts (id, title, body, created_at)
-              VALUES (?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at)
+              VALUES (?, 'test', ?, ?, ?)`)
     .run('d1', 'hello', '# hi', Date.now());
 
-  db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-              VALUES (?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, 'test', ?, ?, ?, ?)`)
     .run('p1', 'h1', 'hello', 'posts/p1.md', Date.now());
 
   db.prepare('UPDATE drafts SET finalized_post_id = ? WHERE id = ?').run('p1', 'd1');
@@ -84,17 +77,17 @@ test('drafts: finalized_post_id is UNIQUE (one draft per post)', () => {
   const db = freshDb();
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run('h1', 'usual-caribou', Date.now());
-  db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-              VALUES (?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+              VALUES (?, 'test', ?, ?, ?, ?)`)
     .run('p1', 'h1', 'hi', 'posts/p1.md', Date.now());
 
-  db.prepare(`INSERT INTO drafts (id, title, body, created_at, finalized_post_id)
-              VALUES (?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at, finalized_post_id)
+              VALUES (?, 'test', ?, ?, ?, ?)`)
     .run('d1', 't', 'b', Date.now(), 'p1');
 
   assert.throws(() => {
-    db.prepare(`INSERT INTO drafts (id, title, body, created_at, finalized_post_id)
-                VALUES (?, ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at, finalized_post_id)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run('d2', 't', 'b', Date.now(), 'p1');
   }, /UNIQUE/);
 });
@@ -102,34 +95,33 @@ test('drafts: finalized_post_id is UNIQUE (one draft per post)', () => {
 test('drafts: finalized_post_id FK rejects non-existent post', () => {
   const db = freshDb();
   assert.throws(() => {
-    db.prepare(`INSERT INTO drafts (id, title, body, created_at, finalized_post_id)
-                VALUES (?, ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at, finalized_post_id)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run('d1', 't', 'b', Date.now(), 'nonexistent-post');
   }, /FOREIGN KEY/);
 });
 
 test('drafts: NULL finalized_post_id is fine (unfinalized draft)', () => {
   const db = freshDb();
-  db.prepare(`INSERT INTO drafts (id, title, body, created_at)
-              VALUES (?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO drafts (id, sub_name, title, body, created_at)
+              VALUES (?, 'test', ?, ?, ?)`)
     .run('d1', 't', 'b', Date.now());
   const row = db.prepare('SELECT finalized_post_id FROM drafts WHERE id = ?').get('d1');
   assert.equal(row.finalized_post_id, null);
 });
 
-test('subs: general sub exists after migration with NULL owner', () => {
+test('subs: general sub does NOT exist on a fresh install (migration 024)', () => {
   const db = freshDb();
   const row = db.prepare('SELECT * FROM subs WHERE name = ?').get('general');
-  assert.equal(row.name, 'general');
-  assert.equal(row.owner_handle, null);
-  assert.equal(row.default_sort, 'new');
+  assert.equal(row, undefined);
 });
 
 test('subs: name is PRIMARY KEY (UNIQUE)', () => {
   const db = freshDb();
+  // freshDb seeded a 'test' sub; re-inserting must fail.
   assert.throws(() => {
     db.prepare(`INSERT INTO subs (name, created_at) VALUES (?, ?)`)
-      .run('general', Date.now());
+      .run('test', Date.now());
   }, /UNIQUE|PRIMARY/);
 });
 
@@ -166,10 +158,10 @@ test('sub_mods: composite PK on (sub_name, handle)', () => {
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run('h1', 'usual-caribou', Date.now());
   db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)')
-    .run('general', 'h1', 'owner');
+    .run('test', 'h1', 'owner');
   assert.throws(() => {
     db.prepare('INSERT INTO sub_mods (sub_name, handle, role) VALUES (?, ?, ?)')
-      .run('general', 'h1', 'co');
+      .run('test', 'h1', 'co');
   }, /UNIQUE|PRIMARY/);
 });
 
@@ -179,7 +171,7 @@ test('comments: insert + read works', () => {
     .run('h1', 'commenter-one', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
 
   db.prepare(`INSERT INTO comments (id, post_id, handle, body, created_at)
               VALUES (?, ?, ?, ?, ?)`)
@@ -196,7 +188,7 @@ test('comments: parent_comment_id self-reference works (replies)', () => {
     .run('h1', 'commenter-one', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
 
   db.prepare('INSERT INTO comments (id, post_id, handle, body, created_at) VALUES (?, ?, ?, ?, ?)')
     .run('c1', 'p1', 'h1', 'parent', Date.now());
@@ -224,7 +216,7 @@ test('votes: composite PK on (target_type, target_id, handle)', () => {
     .run('h1', 'voter-one', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
 
   db.prepare(`INSERT INTO votes (target_type, target_id, handle, value, created_at)
               VALUES (?, ?, ?, ?, ?)`)
@@ -243,7 +235,7 @@ test('votes: value CHECK rejects illegal magnitudes', () => {
     .run('h1', 'voter-one', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
 
   for (const bad of [0, 2, -2, 0.25, 1.5]) {
     assert.throws(() => {
@@ -271,7 +263,7 @@ test('posts: score column defaults to 0', () => {
     .run('h1', 'one', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
   const row = db.prepare('SELECT score FROM posts WHERE id = ?').get('p1');
   assert.equal(row.score, 0);
 });
@@ -282,8 +274,8 @@ test('STRICT enforcement: type mismatches reject', () => {
     .run('h1', 'usual-caribou', Date.now());
 
   assert.throws(() => {
-    db.prepare(`INSERT INTO posts (id, handle, title, file_path, created_at)
-                VALUES (?, ?, ?, ?, ?)`)
+    db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run('p1', 'h1', 'hi', 'posts/p1.md', 'not-an-integer');
   }, /TYPE|cannot store|datatype/i);
 });
@@ -372,7 +364,7 @@ test('posts: collapsed_at and removed_at default NULL after migration', () => {
     .run('h1', 'two', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('p1', 'general', 'h1', 't', 'posts/p1.md', Date.now());
+    .run('p1', 'test', 'h1', 't', 'posts/p1.md', Date.now());
   const row = db.prepare('SELECT collapsed_at, removed_at FROM posts WHERE id = ?').get('p1');
   assert.equal(row.collapsed_at, null);
   assert.equal(row.removed_at, null);

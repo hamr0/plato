@@ -445,7 +445,7 @@ Importable with `forum import-user user-export/`. New instance:
 - Engagement metrics surfaced to users (no view counts, no time-on-page).
 - Profile photos, custom avatars, avatar uploads.
 - Real names, phone numbers, any PII collection.
-- **Default catch-all sub.** No `general`, no `subzero`, no built-in lobby. Posts must land in a sub with a real owner-mod. A default sub becomes the path of least resistance for spam and erodes the "subs are universes" principle. First-run UX shows an empty state until the operator (or any logged-in user) creates the first sub. A 30-second cost on day zero buys lifetime principle integrity. The legacy `general` sub from the M1 schema is hidden from new-post pickers; existing posts there remain readable for archaeology.
+- **Default catch-all sub.** No `general`, no `subzero`, no built-in lobby. Posts must land in a sub with a real owner-mod. A default sub becomes the path of least resistance for spam and erodes the "subs are universes" principle. First-run UX shows an empty state until the operator (or any logged-in user) creates the first sub. A 30-second cost on day zero buys lifetime principle integrity. **Fresh installs have no `general` sub at all** (migration 024 drops the empty backfill row that 002 inserts as a FK target). Instances that backfilled real M1-era posts into `general` keep the row for archaeology — those posts remain readable, but the sub is hidden from new-post pickers and POST /draft rejects it.
 
 ### Age verification and NSFW: operator-layer concern, not forum feature
 

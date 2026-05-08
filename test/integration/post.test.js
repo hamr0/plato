@@ -12,6 +12,9 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 function freshDb() {
   const db = openDb(':memory:');
   applyAllMigrations(db);
+  // Migration 024 drops 'general' on fresh installs; tests seed a 'test' sub.
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)')
+    .run('test', Date.now());
   return db;
 }
 
@@ -23,13 +26,13 @@ const HANDLE = 'a'.repeat(64); // 64-char hex; mimics knowless HMAC output
 
 test('submitDraft: inserts a draft, returns id', () => {
   const db = freshDb();
-  const { draftId } = submitDraft(db, { title: 'hello', body: 'world' });
+  const { draftId } = submitDraft(db, { title: 'hello', body: 'world', subName: 'test' });
   assert.match(draftId, /^[0-9a-f]{16}$/);
 
   const row = db.prepare('SELECT * FROM drafts WHERE id = ?').get(draftId);
   assert.equal(row.title, 'hello');
   assert.equal(row.body, 'world');
-  assert.equal(row.sub_name, 'general');
+  assert.equal(row.sub_name, 'test');
   assert.equal(row.finalized_post_id, null);
 });
 
@@ -60,7 +63,7 @@ test('finalizeDraft: creates post, writes file, marks draft finalized', (t) => {
   const postsDir = freshPostsDir();
   t.after(() => rmSync(postsDir, { recursive: true, force: true }));
 
-  const { draftId } = submitDraft(db, { title: 'hello', body: '# hi\n\nworld' });
+  const { draftId } = submitDraft(db, { title: 'hello', body: '# hi\n\nworld', subName: 'test' });
   const { postId, alreadyFinalized } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
   assert.equal(alreadyFinalized, false);
@@ -69,7 +72,7 @@ test('finalizeDraft: creates post, writes file, marks draft finalized', (t) => {
   const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId);
   assert.equal(post.title, 'hello');
   assert.equal(post.handle, HANDLE);
-  assert.equal(post.sub_name, 'general');
+  assert.equal(post.sub_name, 'test');
   assert.match(post.file_path, /^posts\/\d{4}-\d{2}-\d{2}-[0-9a-f]{16}\.md$/);
 
   const draft = db.prepare('SELECT finalized_post_id FROM drafts WHERE id = ?').get(draftId);
@@ -87,7 +90,7 @@ test('finalizeDraft: idempotent — re-call returns same postId', (t) => {
   const postsDir = freshPostsDir();
   t.after(() => rmSync(postsDir, { recursive: true, force: true }));
 
-  const { draftId } = submitDraft(db, { title: 't', body: 'b' });
+  const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'test' });
   const a = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
   const b = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
@@ -128,7 +131,7 @@ test('finalizeDraft: auto-creates handle row + pseudonym', (t) => {
   const before = db.prepare(`SELECT COUNT(*) as n FROM handles ${userHandles}`).get().n;
   assert.equal(before, 0);
 
-  const { draftId } = submitDraft(db, { title: 't', body: 'b' });
+  const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'test' });
   finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
   const after = db.prepare(`SELECT COUNT(*) as n FROM handles ${userHandles}`).get().n;
@@ -147,6 +150,7 @@ test('getPost: returns post + parsed body + rendered html', (t) => {
   const { draftId } = submitDraft(db, {
     title: 'hello',
     body: '# heading\n\n**bold** text',
+    subName: 'test',
   });
   const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
@@ -174,6 +178,7 @@ test('SECURITY: getPost renders body with same XSS protections as renderMarkdown
   const { draftId } = submitDraft(db, {
     title: 'evil',
     body: '<script>alert(1)</script> [click](javascript:alert(1))',
+    subName: 'test',
   });
   const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
 
@@ -194,7 +199,7 @@ test('listRecentPosts: returns posts in created_at DESC order', (t) => {
   // Three posts at different timestamps
   for (let i = 0; i < 3; i++) {
     db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
-                VALUES (?, 'general', ?, ?, ?, ?)`)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run(`p${i}`, HANDLE, `post-${i}`, `posts/p${i}.md`, 1000 + i);
   }
 
@@ -212,7 +217,7 @@ test('listRecentPosts: respects limit + offset', (t) => {
 
   for (let i = 0; i < 5; i++) {
     db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
-                VALUES (?, 'general', ?, ?, ?, ?)`)
+                VALUES (?, 'test', ?, ?, ?, ?)`)
       .run(`p${i}`, HANDLE, `post-${i}`, `posts/p${i}.md`, 1000 + i);
   }
 
@@ -233,7 +238,7 @@ test('listRecentPosts: empty DB returns empty array', () => {
 test('submitDraft: rejects title over cap', () => {
   const db = freshDb();
   assert.throws(
-    () => submitDraft(db, { title: 'x'.repeat(TITLE_MAX + 1), body: 'b' }),
+    () => submitDraft(db, { title: 'x'.repeat(TITLE_MAX + 1), body: 'b', subName: 'test' }),
     /title exceeds/,
   );
 });
@@ -241,7 +246,7 @@ test('submitDraft: rejects title over cap', () => {
 test('submitDraft: rejects body over cap', () => {
   const db = freshDb();
   assert.throws(
-    () => submitDraft(db, { title: 't', body: 'x'.repeat(BODY_MAX + 1) }),
+    () => submitDraft(db, { title: 't', body: 'x'.repeat(BODY_MAX + 1), subName: 'test' }),
     /body exceeds/,
   );
 });

@@ -55,12 +55,15 @@ export const TITLE_MAX = 300;
 export const BODY_MAX = 40000;
 export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export function submitDraft(db, { title, body, subName = 'general', flairSlug = null, sensitive = false }) {
+export function submitDraft(db, { title, body, subName, flairSlug = null, sensitive = false }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
     throw new Error('submitDraft: title is required');
   }
   if (typeof body !== 'string' || body.trim().length === 0) {
     throw new Error('submitDraft: body is required');
+  }
+  if (typeof subName !== 'string' || subName.trim().length === 0) {
+    throw new Error('submitDraft: subName is required');
   }
   if (title.length > TITLE_MAX) {
     throw new Error(`submitDraft: title exceeds ${TITLE_MAX} characters`);

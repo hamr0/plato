@@ -49,6 +49,10 @@ async function spinUpWithPort() {
 
         const db = openDb(':memory:');
         applyAllMigrations(db);
+        // Migration 024 drops 'general' on fresh installs; tests that
+        // reach for "the default catch-all sub" use 'test' instead.
+        db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)')
+          .run('test', Date.now());
 
         const mailer = createCaptureMailer();
         const auth = knowless({
@@ -275,8 +279,8 @@ test('finalize without session redirects with a 401-style message', async (t) =>
 
   // Insert a draft directly to skip the auth flow
   const draftId = 'a'.repeat(16);
-  db.prepare('INSERT INTO drafts (id, title, body, created_at) VALUES (?, ?, ?, ?)')
-    .run(draftId, 't', 'b', Date.now());
+  db.prepare('INSERT INTO drafts (id, sub_name, title, body, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(draftId, 'test', 't', 'b', Date.now());
 
   const res = await fetch(`${baseUrl}/draft/${draftId}/finalize`);
   assert.equal(res.status, 401);
@@ -458,12 +462,12 @@ test('M5/B9 polish: home page is one unified feed (no per-sub cap)', async (t) =
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, 'capper-test', Date.now());
 
-  // 5 posts in 'general'. Default home now shows all of them — no
-  // algorithmic per-sub diversity cap. Sort/date chips are the only
+  // 5 posts in the seeded 'test' sub. Default home now shows all of them
+  // — no algorithmic per-sub diversity cap. Sort/date chips are the only
   // curation lever.
   const insert = db.prepare(
     `INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
-     VALUES (?, 'general', ?, ?, ?, ?)`
+     VALUES (?, 'test', ?, ?, ?, ?)`
   );
   const now = Date.now();
   for (let i = 0; i < 5; i++) {
@@ -936,7 +940,7 @@ test('SECURITY: title with HTML is escaped on home page', async (t) => {
   db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
     .run(handle, 'test-handle', Date.now());
   db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
-              VALUES (?, 'general', ?, ?, ?, ?)`)
+              VALUES (?, 'test', ?, ?, ?, ?)`)
     .run('1'.repeat(16), handle, '<script>alert(1)</script>', 'posts/test.md', Date.now());
 
   const res = await fetch(baseUrl + '/');

@@ -172,7 +172,7 @@ These are deliberate product decisions. The PRD treats them as load-bearing; cha
 - **No NSFW labeling, no age verification.** Plato uses a generic `sensitive` per-sub flag (M5/B11) — banner + advisory mark in the home strip, no age-gating. NSFW as a label is excluded specifically because the default rules ban porn, so labeling something NSFW would invite the very content the rules forbid. Age verification is an operator-layer concern (reverse proxy / content gateway), not a forum feature.
 - **No tags / hashtags.** Per-sub flairs (M5/B10) are the structured-categorization escape valve: closed list, owner-curated, max 6 per sub, slug derived from label, color is 6-digit hex (8 preset swatches + free-form `<input type="color">` in the editor; both emit `#rrggbb` and the validator hard-rejects everything else), optional unless `flairs_required`.
 - **No private subs.** PRD §Permanently out — different product.
-- **`general` is archive-only.** Legacy backfill bucket from migration 002. New posts must land in a real sub.
+- **No default sub.** Fresh installs have no `general` sub (migration 024 drops the empty backfill row from 002). Old instances with real M1 archives keep `general` as archive-only — new posts must land in a real sub regardless.
 - **No image embeds, no video, no rich media.** Text-first by design.
 
 If you want any of the locked items different on your instance, you're forking. That's fine — the licensing supports it.
@@ -469,7 +469,7 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 ## Gotchas
 
 - **Magic-link emails go to a real SMTP server.** Production stack is postfix + opendkim on the box (deploy-guide §5); knowless connects to localhost:25, postfix delivers direct, opendkim signs with the operator's domain DKIM key. In dev, no MTA runs; `KNOWLESS_DEV_LOG_LINKS=true` (set in `.env.dev` for `npm run dev`) prints the magic link to stderr via `[knowless dev:from] magic link: ...` instead of mailing it. Without that flag, login forms 200 silently and the link goes nowhere.
-- **`general` sub is hidden from new-post forms by design.** Don't be surprised if the sub picker doesn't show it.
+- **`general` sub doesn't exist on fresh installs.** Migration 024 drops it. Old archive-bearing installs keep it but it's hidden from new-post forms by design.
 - **Post permalinks are `/post/<id>` and `/sub/<name>/post/<id>` — both work.** The sub-scoped form is canonical (used everywhere internally); the bare `/post/<id>` is kept for share-links from before sub-scoping.
 - **Score is a `REAL` cache, not a source of truth.** It's updated transactionally on every vote. If it ever drifts, the source of truth is `SUM(value) FROM votes WHERE target_*`. There's no rebuild script yet.
 - **Comments don't have hard delete by author.** Mods remove via the mod controls. PRD §M3 explicitly punts author-side delete to never (use mod tools).
