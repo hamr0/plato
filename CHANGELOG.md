@@ -6,6 +6,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — deploy/ scaffold + cert-expiry watcher + preflight (post-M8, deploy/2)
+
+- **`deploy/` directory (NEW)** — extracts the inlined heredocs from
+  the deploy guide into checked-in template files so operators have
+  one source of truth for everything that lands in `/etc/`:
+  - `plato.service.template` — systemd unit (substitutes
+    `${INSTALL_DIR}` / `${PLATO_USER}`).
+  - `plato.nginx.template` — nginx site (substitutes only `${DOMAIN}`
+    so nginx's own `$host`/`$remote_addr` survive envsubst).
+  - `plato.cron` — `/etc/cron.d/plato`, all 9 jobs ready to render
+    with `${INSTALL_DIR}` / `${ADMIN_EMAIL}` / `${DOMAIN}` /
+    `${BACKUP_DIR}` substitution. Cert-expiry line is uncommented.
+  - `plato.logrotate` — daily, 14-day retention, gzip, copytruncate.
+    Covers `/var/log/plato*.log` + `/var/log/msmtp.log`.
+  - `msmtprc.example` — four commented account blocks (Gmail App
+    Password / Fastmail / Proton Bridge / generic STARTTLS), 600-perm
+    reminder.
+  - `bootstrap.sh` — idempotent mechanical installer. Creates the
+    `plato` system user + `BACKUP_DIR`, renders all four templates
+    with envsubst, sets SELinux `httpd_can_network_connect` when
+    enforcing, runs `systemctl daemon-reload`. Does NOT install
+    packages, write secrets, or run certbot — those are the
+    operator-decision steps in the guide. Re-runnable.
+- **`bin/check-cert.sh` (NEW)** — daily TLS cert-expiry watcher.
+  `openssl s_client` against `${DOMAIN}:${PORT}`, parses `notAfter`,
+  silent ≥ 14 days; daily one-line stamp + email when below;
+  `URGENT` subject prefix below 3 days. Recipient resolution
+  mirrors `bin/health-watch.sh`: `HEALTH_ALERT_EMAIL` env →
+  `config.json:operator.email` → log-only. Probe-failure path
+  (DNS / port / firewall) emits a distinct alert with diagnostic
+  hints. The `certbot.timer` renewal layer remains the actual
+  renewer; this is the operator-side alarm for "renewal silently
+  stopped working."
+- **`bin/preflight.sh` (NEW)** — pre-start sanity check. One line per
+  check: Node ≥ 22.5, sqlite3 CLI, `/usr/sbin/sendmail` present,
+  `/etc/msmtprc` mode 600, `.env` mode 600, `KNOWLESS_SECRET` length,
+  `KNOWLESS_BASE_URL` set, `PLATO_SENDMAIL_PATH` executable when
+  set, `config.json` parses, `operator.email` + `branding.baseUrl`
+  set, DB/posts/exports paths writable, port free. OK / WARN / FAIL,
+  exit 1 on any FAIL.
+- **`docs/02-features/deploy-guide.md`** — refactored to reference
+  `deploy/` files instead of inlining heredocs. New "Step 10:
+  bootstrap.sh" replaces three steps (systemd / nginx / cron /
+  logrotate) with one command, plus a manual-rendering block for
+  operators who want to audit the substitution. Step 9 gains a
+  `bin/preflight.sh` invocation. Cert-renewal troubleshooting
+  section now points at `bin/check-cert.sh`. Routine-operations
+  table grows preflight + check-cert + bootstrap-rerun rows.
+- **`docs/02-features/cron-jobs.md`** — removed postfix-as-MTA
+  recommendation; now points at msmtp via the deploy guide. Cron
+  scripts still call `/usr/sbin/sendmail -t` (msmtp's symlink),
+  so no script changes were needed.
+
 ### Added — SMTP unification via msmtp + comprehensive deploy guide (post-M8, deploy/1)
 
 - **`src/mail/transport.js`** — single source of truth for plato's

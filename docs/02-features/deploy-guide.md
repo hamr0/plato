@@ -125,58 +125,21 @@ ls -ld /opt/plato     # drwx------ plato plato
 
 This is the only place SMTP credentials live on the box.
 
+`deploy/msmtprc.example` ships with three commented account blocks (Gmail App Password / Fastmail / Proton Bridge) plus a generic STARTTLS block. Pick one, fill in your relay creds, install:
+
 ```bash
-# Pick ONE of the three blocks below for your relay. Replace ${...} placeholders
-# with your actual credentials.
-cat > /etc/msmtprc <<'EOF'
-# ─── Defaults ──────────────────────────────────────────────────────────────
-defaults
-auth           on
-tls            on
-tls_starttls   on
-tls_trust_file /etc/pki/tls/certs/ca-bundle.crt
-logfile        /var/log/msmtp.log
-
-# ─── Gmail (App Password) ──────────────────────────────────────────────────
-account        default
-host           smtp.gmail.com
-port           587
-from           you@gmail.com
-user           you@gmail.com
-password       xxxx-xxxx-xxxx-xxxx
-EOF
-
-# Lock it. msmtp REFUSES to read this file if it's group/world-readable.
+cp /opt/plato/deploy/msmtprc.example /etc/msmtprc
+$EDITOR /etc/msmtprc                 # uncomment + fill in your block
 chown root:root /etc/msmtprc
-chmod 600 /etc/msmtprc
+chmod 600 /etc/msmtprc                # msmtp REFUSES non-600 creds
 
-# msmtp wants to write its log; pre-create with sane perms.
+# Pre-create msmtp's log file with sane perms.
 touch /var/log/msmtp.log
 chown root:root /var/log/msmtp.log
 chmod 640 /var/log/msmtp.log
 ```
 
-Alternative `account default` blocks for Fastmail / Proton Bridge:
-
-```ini
-# ─── Fastmail ──────────────────────────────────────────────────────────────
-account        default
-host           smtp.fastmail.com
-port           587
-from           you@fastmail.com
-user           you@fastmail.com
-password       xxxxxxxxxxxxxxxx
-
-# ─── Proton Bridge (running on the same box or reachable via private net) ──
-account        default
-host           127.0.0.1
-port           1025
-from           you@proton.me
-user           you@proton.me
-password       <bridge password>
-tls            off
-auth           plain
-```
+(If you haven't cloned plato yet — see step 6 — you can pull `msmtprc.example` straight from `https://raw.githubusercontent.com/hamr0/plato/main/deploy/msmtprc.example` instead.)
 
 **Smoke test now, before plato exists**:
 
@@ -250,58 +213,70 @@ EOF
 
 Edit `forumName` / `tagline` / `hostedBy` to taste. `baseUrl` is required for archive exports to embed working backlinks. `operator.email` is the recipient for every cron alert (failures, weekly stats digest, cert expiry).
 
-## Step 9 — Run migrations
+## Step 9 — Run migrations + preflight
 
 ```bash
 sudo -u plato -H bash -c "cd /opt/plato && node --env-file=.env bin/migrate.js"
+
+# Sanity check: every prerequisite plato needs to start cleanly. Reports
+# OK / WARN / FAIL per check; exits 1 on any FAIL. Runs in <1 second.
+sudo -u plato -H bash -c "cd /opt/plato && bin/preflight.sh"
 ```
 
-Idempotent. Re-run on every plato update.
+Both are idempotent. Re-run on every plato update.
 
-## Step 10 — systemd unit
+## Step 10 — bootstrap.sh: install systemd + nginx + cron + logrotate
+
+`deploy/bootstrap.sh` is the mechanical-only installer — it writes the system files that have only one right answer. It does **not** install packages, write secrets, or run certbot; you've already done those.
 
 ```bash
-cat > /etc/systemd/system/plato.service <<EOF
-[Unit]
-Description=plato forum
-After=network-online.target
-Wants=network-online.target
+sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL /opt/plato/deploy/bootstrap.sh
+```
 
-[Service]
-Type=simple
-User=plato
-Group=plato
-WorkingDirectory=/opt/plato
-ExecStart=/usr/bin/node --env-file=/opt/plato/.env /opt/plato/bin/server.js
-Restart=on-failure
-RestartSec=5
-StandardOutput=append:/var/log/plato.log
-StandardError=append:/var/log/plato.log
+Output (abridged):
+```
+[bootstrap] writing /etc/systemd/system/plato.service
+[bootstrap] writing /etc/nginx/conf.d/plato.conf
+[bootstrap] writing /etc/cron.d/plato
+[bootstrap] writing /etc/logrotate.d/plato
+[bootstrap] SELinux enforcing — setting httpd_can_network_connect
+[bootstrap] done.
+```
 
-# Sandbox
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/opt/plato /var/log/plato.log
-PrivateTmp=yes
-ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-RestrictRealtime=yes
-SystemCallArchitectures=native
+Re-runnable. If you edit a template under `deploy/` (e.g. add a custom systemd directive) and re-run bootstrap, the installed file is re-rendered. **It will not touch `/opt/plato`'s contents.**
 
-[Install]
-WantedBy=multi-user.target
-EOF
+If you want to do this by hand instead (or audit what bootstrap is about to do), each template renders standalone:
 
-touch /var/log/plato.log
-chown plato:plato /var/log/plato.log
+```bash
+# systemd unit
+INSTALL_DIR=/opt/plato PLATO_USER=plato \
+  envsubst '${INSTALL_DIR} ${PLATO_USER}' \
+  < /opt/plato/deploy/plato.service.template \
+  | sudo tee /etc/systemd/system/plato.service > /dev/null
 
-systemctl daemon-reload
-systemctl enable --now plato
-systemctl status plato --no-pager
+# nginx site (only ${DOMAIN} substitutes — nginx's own $host etc. preserved)
+DOMAIN=$DOMAIN \
+  envsubst '${DOMAIN}' \
+  < /opt/plato/deploy/plato.nginx.template \
+  | sudo tee /etc/nginx/conf.d/plato.conf > /dev/null
+
+# cron block
+INSTALL_DIR=/opt/plato ADMIN_EMAIL=$ADMIN_EMAIL DOMAIN=$DOMAIN BACKUP_DIR=/var/lib/plato-backups \
+  envsubst '${INSTALL_DIR} ${ADMIN_EMAIL} ${DOMAIN} ${BACKUP_DIR}' \
+  < /opt/plato/deploy/plato.cron \
+  | sudo tee /etc/cron.d/plato > /dev/null
+
+# logrotate (no substitution needed)
+sudo cp /opt/plato/deploy/plato.logrotate /etc/logrotate.d/plato
+
+sudo systemctl daemon-reload
+```
+
+After bootstrap (either path):
+
+```bash
+sudo systemctl enable --now plato
+sudo systemctl status plato --no-pager
 # Expect: Active: active (running)
 ```
 
@@ -309,53 +284,17 @@ If status is `failed`, `journalctl -u plato -n 50` shows why.
 
 ## Step 11 — DNS preflight, then nginx + certbot
 
-**Make sure** `$DOMAIN` resolves to the VPS IP first; otherwise certbot's HTTP-01 challenge will fail.
+`bootstrap.sh` already dropped `/etc/nginx/conf.d/plato.conf` for you in step 10. Before issuing a cert, **make sure `$DOMAIN` resolves to the VPS IP** — otherwise certbot's HTTP-01 challenge will fail:
 
 ```bash
 dig +short $DOMAIN          # must return your VPS IP
 ```
 
-Drop the nginx site:
+Start nginx and smoke-test plain HTTP:
 
 ```bash
-cat > /etc/nginx/conf.d/plato.conf <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-
-    # certbot --nginx will rewrite this block to redirect to https and
-    # drop the cert paths in. Don't hand-edit after that.
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 60s;
-
-        # Generous client cap; plato's own validators reject oversized posts.
-        client_max_body_size 8m;
-    }
-
-    # /healthz must never be cached by intermediaries.
-    location = /healthz {
-        proxy_pass http://127.0.0.1:8080/healthz;
-        proxy_set_header Host \$host;
-        add_header Cache-Control "no-store" always;
-    }
-}
-EOF
-
-nginx -t                   # syntax check
+nginx -t                    # syntax check
 systemctl enable --now nginx
-systemctl reload nginx
-```
-
-Smoke-test plain HTTP first:
-
-```bash
 curl -sS http://${DOMAIN}/healthz | jq .
 # Expect: { "ok": true, "version": "...", ... }
 ```
@@ -380,76 +319,19 @@ curl -sS https://${DOMAIN}/healthz | jq .
 
 Renewal is auto: `systemctl status certbot.timer` runs twice daily, silent on success.
 
-## Step 12 — `/etc/cron.d/plato`
+## Step 12 — Cron + logrotate
 
-One file, replaces user crontab. Removable with `rm`.
-
-```bash
-cat > /etc/cron.d/plato <<EOF
-# plato cron — see docs/02-features/cron-jobs.md
-# All jobs run as root; the bin/*.sh scripts re-drop privilege via sudo -u plato
-# where they touch plato data, and run as root for system-level work (sendmail,
-# certbot file access).
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-MAILTO=${ADMIN_EMAIL}
-
-# Hourly: URLhaus malicious-URL feed
-0 * * * *           root cd /opt/plato && sudo -u plato node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
-
-# Daily 03:30 UTC: backup tarball, 7-day retention
-30 3 * * *          root cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups sudo -u plato bin/backup.sh >> /var/log/plato-backup.log 2>&1
-
-# Daily 04:35 UTC: counter snapshot
-35 4 * * *          root cd /opt/plato && sudo -u plato node bin/stats.js >> /var/log/plato-stats.log 2>&1
-
-# Weekly Mon 06:00 UTC: stats digest email
-0 6 * * 1           root cd /opt/plato && sudo -u plato node bin/stats-weekly.js >> /var/log/plato-stats.log 2>&1
-
-# Quarterly: disposable-domains refresh
-0 6 1 1,4,7,10 *    root /opt/plato/scripts/cron-refresh-disposable.sh
-
-# Daily 05:15 UTC: sub inactivity sweep
-15 5 * * *          root cd /opt/plato && sudo -u plato node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
-
-# Every 15 min: archive export queue (off-peak window enforced inside script)
-*/15 * * * *        root cd /opt/plato && sudo -u plato node bin/run-export-queue.js >> /var/log/plato-export.log 2>&1
-
-# Every 15 min: archive import queue
-*/15 * * * *        root cd /opt/plato && sudo -u plato node bin/run-import-queue.js >> /var/log/plato-import.log 2>&1
-
-# Every 5 min: /healthz watcher — silent on 200, alerts on non-2xx
-*/5 * * * *         root cd /opt/plato && BACKUP_DIR=/var/lib/plato-backups PLATO_LOG=/var/log/plato.log bin/health-watch.sh
-
-# Daily 04:15 UTC: TLS cert expiry check (ships in commit 2 of the deploy work)
-# 15 4 * * *        root cd /opt/plato && DOMAIN=${DOMAIN} bin/check-cert.sh >> /var/log/plato-cert.log 2>&1
-EOF
-
-mkdir -p /var/lib/plato-backups
-chown plato:plato /var/lib/plato-backups
-```
-
-The trailing `check-cert.sh` line is commented; uncomment it once commit 2 lands the script. Until then, certbot's own ACME-side expiry warnings are the safety net.
-
-## Step 13 — logrotate
+`bootstrap.sh` already installed both in step 10. Verify:
 
 ```bash
-cat > /etc/logrotate.d/plato <<'EOF'
-/var/log/plato*.log /var/log/msmtp.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    copytruncate
-}
-EOF
-
-logrotate -d /etc/logrotate.d/plato     # dry-run; no errors expected
+cat /etc/cron.d/plato | head -20         # MAILTO + first few jobs
+ls -l /etc/logrotate.d/plato
+logrotate -d /etc/logrotate.d/plato      # dry-run, no errors expected
 ```
 
-## Step 14 — Final smoke
+The cron block runs ~9 jobs covering URLhaus refresh, daily backups (7-day retention), TLS cert-expiry check, daily counter snapshot, weekly stats digest, quarterly disposable-domains refresh, sub-inactivity sweep, archive export/import queues, and the every-5-min `/healthz` watcher. Per-job detail lives in [`cron-jobs.md`](cron-jobs.md). Tweak cadences by editing `deploy/plato.cron` and re-running bootstrap.
+
+## Step 13 — Final smoke
 
 ```bash
 # 1. plato is running and writable
@@ -478,7 +360,10 @@ If all three pass, you're deployed. Visit `https://${DOMAIN}`, click the magic l
 | Tail plato logs | `journalctl -u plato -f` or `tail -f /var/log/plato.log` |
 | Tail mail logs | `tail -f /var/log/msmtp.log` |
 | Check health | `curl -sS https://$DOMAIN/healthz \| jq .` |
+| Pre-start sanity check | `sudo -u plato bash -c 'cd /opt/plato && bin/preflight.sh'` |
+| Cert expiry probe | `cd /opt/plato && DOMAIN=$DOMAIN bin/check-cert.sh` |
 | Run a backup now | `sudo -u plato BACKUP_DIR=/var/lib/plato-backups /opt/plato/bin/backup.sh` |
+| Re-render system files | `sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL /opt/plato/deploy/bootstrap.sh` |
 | Update plato | see [Updating plato](#updating-plato) |
 | Read modlog | `https://$DOMAIN/modlog` (publicly visible) |
 
@@ -586,12 +471,26 @@ If you exhaust the Let's Encrypt rate limit (5 issuances per domain per week), w
 
 ### Cert renewal fails silently
 
-Until commit 2 ships `bin/check-cert.sh`, your fallbacks are:
+You have two layers of safety net:
 
-- **Let's Encrypt itself emails** the ACME-registered address (the one you passed `-m`) when a cert is < 20 days from expiry.
-- **certbot.timer logs**: `journalctl -u certbot -n 100`.
+- **`bin/check-cert.sh`** runs daily from cron (line in `/etc/cron.d/plato`). Silent ≥ 14 days; daily email when remaining drops below 14; `URGENT` subject prefix below 3. Recipient is `HEALTH_ALERT_EMAIL` env then `config.json:operator.email`.
+- **Let's Encrypt itself emails** the ACME-registered address (the one you passed `-m`) when a cert is < 20 days from expiry. This is independent of plato's cron.
 
-After commit 2 lands, uncomment the cron line and you'll get a daily nag once `cert_days_remaining < 14`, and an `URGENT` daily email under 3 days.
+If both stay silent and the cert still expires, the renewal layer itself is broken. Investigate:
+
+```bash
+systemctl status certbot.timer
+journalctl -u certbot -n 200
+certbot renew --dry-run            # would today's renewal succeed?
+```
+
+You can also run `bin/check-cert.sh` interactively to confirm it's parsing the cert correctly:
+
+```bash
+DOMAIN=$DOMAIN BACKUP_DIR=/var/lib/plato-backups /opt/plato/bin/check-cert.sh
+echo "exit=$?"
+tail -1 /var/lib/plato-backups/health.log
+```
 
 ### Cron alerts not arriving
 

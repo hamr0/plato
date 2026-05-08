@@ -1,0 +1,42 @@
+# systemd unit for plato. Place at /etc/systemd/system/plato.service.
+# deploy/bootstrap.sh substitutes ${INSTALL_DIR} and ${PLATO_USER} and
+# drops it for you; if you prefer to install by hand:
+#
+#   envsubst < deploy/plato.service.template | sudo tee /etc/systemd/system/plato.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now plato
+
+[Unit]
+Description=plato forum
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${PLATO_USER}
+Group=${PLATO_USER}
+WorkingDirectory=${INSTALL_DIR}
+ExecStart=/usr/bin/node --env-file=${INSTALL_DIR}/.env ${INSTALL_DIR}/bin/server.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/plato.log
+StandardError=append:/var/log/plato.log
+
+# Sandbox — every line below shrinks the blast radius if the node
+# process is compromised. Don't relax these without thinking about
+# what each one prevents.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=${INSTALL_DIR} /var/log/plato.log
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

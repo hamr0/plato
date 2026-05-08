@@ -16,7 +16,7 @@ All cron jobs **autoconfig** from `config.json` and the script's own location. T
 - `email` — where success/failure / digest reports are sent. If unset, scripts print to stderr (cron's default mailer or `journalctl` surfaces it).
 - `service` — the systemd unit name to `systemctl restart` when a snapshot changes. Defaults to `plato`.
 
-Mail uses `/usr/sbin/sendmail -t` so no extra package (`mail`, `mailx`, etc.) is required on minimal hosts.
+Mail uses `/usr/sbin/sendmail -t` so no extra package (`mail`, `mailx`, etc.) is required on minimal hosts. The recommended provider of that binary is **msmtp + msmtp-mta** (a 2 MB OSS client, no daemon, no spool); see [`deploy-guide.md`](deploy-guide.md) for the full setup including `/etc/msmtprc` templates for Gmail/Fastmail/Proton.
 
 ## The jobs
 
@@ -138,7 +138,7 @@ plato preflight from $(hostname)
 EOF
 ```
 
-If you don't get the email, fix sendmail/MTA before relying on cron alarms. On Debian/Ubuntu: `apt install postfix` and pick "Internet site" or "Satellite" mode. On Fedora/RHEL: `dnf install postfix && systemctl enable --now postfix`.
+If you don't get the email, fix `/usr/sbin/sendmail` before relying on cron alarms. The recommended path is `dnf install msmtp msmtp-mta` (or `apt install msmtp msmtp-mta` on Debian/Ubuntu) plus `/etc/msmtprc` pointing at any SMTP relay you control — full walkthrough in [`deploy-guide.md`](deploy-guide.md).
 
 ## Why these aren't in-process
 

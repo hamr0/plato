@@ -1,0 +1,70 @@
+# /etc/msmtprc — outbound mail config for plato.
+#
+# Pick ONE account block below, replace the placeholders, then:
+#
+#   sudo cp deploy/msmtprc.example /etc/msmtprc
+#   sudo $EDITOR /etc/msmtprc        # uncomment + fill in your block
+#   sudo chown root:root /etc/msmtprc
+#   sudo chmod 600 /etc/msmtprc      # msmtp REFUSES group/world-readable creds
+#
+# Smoke test BEFORE plato exists:
+#   echo -e "Subject: msmtprc preflight\n\nhello" | sendmail you@example.com
+#
+# msmtp logs every attempt to /var/log/msmtp.log; that's where SMTP-level
+# errors (auth failure, DNS, cert verification) surface.
+
+# ─── Defaults applied to every account block below ────────────────────
+defaults
+auth           on
+tls            on
+tls_starttls   on
+tls_trust_file /etc/pki/tls/certs/ca-bundle.crt
+logfile        /var/log/msmtp.log
+
+# ─── Gmail (free account, with 2FA + App Password) ────────────────────
+# Generate the App Password at https://myaccount.google.com/apppasswords
+# (2FA must be on for App Passwords to be available).
+#
+# account        default
+# host           smtp.gmail.com
+# port           587
+# from           you@gmail.com
+# user           you@gmail.com
+# password       xxxx-xxxx-xxxx-xxxx
+
+# ─── Fastmail (any plan, App Password) ────────────────────────────────
+# Generate the App Password at:
+#   https://app.fastmail.com/settings/security/devicekeys
+#
+# account        default
+# host           smtp.fastmail.com
+# port           587
+# from           you@fastmail.com
+# user           you@fastmail.com
+# password       xxxxxxxxxxxxxxxx
+
+# ─── Proton Mail (via Proton Bridge running on the same box) ──────────
+# Proton requires you to run their Bridge daemon — Proton Mail does
+# not expose plain SMTP on the public internet. Bridge listens on
+# localhost; auth/TLS to Proton happens inside the Bridge process.
+# Install Bridge from https://proton.me/mail/bridge then:
+#
+# account        default
+# host           127.0.0.1
+# port           1025
+# from           you@proton.me
+# user           you@proton.me
+# password       <bridge-generated password>
+# tls            off
+# auth           plain
+
+# ─── Generic SMTP relay ───────────────────────────────────────────────
+# Any STARTTLS-on-587 relay works. Examples: your work email,
+# self-hosted mailcow, postfix-as-relay-on-another-box, ISP webmail.
+#
+# account        default
+# host           smtp.example.com
+# port           587
+# from           plato@example.com
+# user           plato@example.com
+# password       <relay password>
