@@ -161,7 +161,8 @@ plato runs as a non-root, non-login system user. systemd starts it; nothing logs
 
 ```bash
 useradd --system --create-home --home-dir /opt/plato --shell /sbin/nologin plato
-ls -ld /opt/plato     # drwx------ plato plato
+ls -ld /opt/plato
+# Expect: drwx------ N plato plato ... /opt/plato
 ```
 
 ## Step 5 — Configure postfix + opendkim + DNS
@@ -195,6 +196,8 @@ postconf -e "smtp_tls_loglevel = 1"
 postconf -e "smtpd_banner = \$myhostname ESMTP"
 
 systemctl enable --now postfix
+systemctl status postfix --no-pager | head -3
+# Expect: Active: active (running)
 ```
 
 `inet_interfaces = loopback-only` is the security-critical line: knowless and cron both connect via `localhost:25`, so external network access to postfix's listener is unnecessary and forbidden.
@@ -250,6 +253,8 @@ chown -R opendkim:opendkim /etc/opendkim
 chmod 644 /etc/opendkim/{KeyTable,SigningTable,TrustedHosts}
 
 systemctl enable --now opendkim
+systemctl status opendkim --no-pager | head -3
+# Expect: Active: active (running)
 ```
 
 ### 5.4 Wire opendkim into postfix as a milter
@@ -261,6 +266,8 @@ postconf -e "smtpd_milters = inet:127.0.0.1:8891"
 postconf -e "non_smtpd_milters = inet:127.0.0.1:8891"
 
 systemctl restart postfix
+ss -lnt | grep ':8891'
+# Expect: a LISTEN line for 127.0.0.1:8891 (opendkim's milter port).
 ```
 
 `non_smtpd_milters` is the line that catches mail submitted via `/usr/sbin/sendmail` (knowless's path AND cron's path) — without it, only mail received over network SMTP gets signed, and your magic links go out unsigned.
@@ -400,6 +407,17 @@ sudo chmod 600 /opt/plato/.env
 
 ## Step 8 — Write `config.json`
 
+`config.json` is the **forum-shape config** — what this instance *is*, as distinct from `.env` which holds secrets and process-level knobs. The split:
+
+| File | Mode | Contents | Why separate |
+|---|---|---|---|
+| `.env` | 600 plato:plato | `KNOWLESS_SECRET`, ports, paths, SMTP host/port | secret-bearing → must be 600; one wrong shell-history command leaks the master HMAC key |
+| `config.json` | 644 plato:plato | branding, operator alert email, rate-limit overrides, baseUrl for archives | no secrets → editable by branding/admin tooling, JSON-friendly for forks, version-controllable in your private ops repo |
+
+Operators tweak branding *all the time*. They should never have to open the file with `KNOWLESS_SECRET` in it to do that.
+
+Drop the file with sane defaults — every field below is required for either runtime correctness or operator-alert delivery. You can edit it anytime after launch and `systemctl restart plato`:
+
 ```bash
 sudo -u plato -H tee /opt/plato/config.json > /dev/null <<EOF
 {
@@ -418,31 +436,47 @@ sudo -u plato -H tee /opt/plato/config.json > /dev/null <<EOF
 EOF
 ```
 
-Edit `forumName` / `tagline` / `hostedBy` to taste. `baseUrl` is required for archive exports to embed working backlinks. `operator.email` is the recipient for every cron alert (failures, weekly stats digest, cert expiry).
+**Field walkthrough** (edit later, but ship with these defaults to get up and running):
 
-## Step 9 — Run migrations + preflight
+- `branding.forumName` — header text + page title. Your forum's name.
+- `branding.tagline` — sub-header text on the home page.
+- `branding.hostedBy` — footer attribution. Convention: `@yourhandle`.
+- `branding.feedbackEmail` — surfaced on `/about`. Where users send concerns; usually `$ADMIN_EMAIL`.
+- `branding.baseUrl` — **required** for archive exports to embed working backlinks. Set to your `https://$DOMAIN`.
+- `operator.email` — recipient for every cron alert (backup failures, weekly stats digest, cert expiry, /healthz failures). Usually `$ADMIN_EMAIL`.
+- `operator.service` — systemd unit name to `systemctl restart` when a snapshot changes (disposable-domains refresh, etc.). Defaults to `plato`.
+
+**Optional sections you can add later** (all have working defaults if absent):
+
+- `rateLimits` — per-IP limits for login, post, comment, sub-create. See `operator-guide.md §Rate limits`.
+- `linkCaps` — max links per post / comment, with floor enforcement. `operator-guide.md §Link cap`.
+- `urlDisplayMax` — character count after which inline URLs collapse to the host. Default 56.
+- `feedPageSize` — posts per home/sub feed page. Default 20.
+
+Skip those for now — get plato up first, customize after.
+
+**Verify it parses**:
 
 ```bash
-sudo -u plato -H bash -c "cd /opt/plato && node --env-file=.env bin/migrate.js"
-
-# Sanity check: every prerequisite plato needs to start cleanly. Reports
-# OK / WARN / FAIL per check; exits 1 on any FAIL. Runs in <1 second.
-sudo -u plato -H bash -c "cd /opt/plato && bin/preflight.sh"
+node -e 'JSON.parse(require("fs").readFileSync("/opt/plato/config.json"))' && echo "config.json: OK"
+# Expect: config.json: OK
 ```
 
-Both are idempotent. Re-run on every plato update.
+## Step 9 — bootstrap.sh: install systemd + nginx + cron + logrotate
 
-## Step 10 — bootstrap.sh: install systemd + nginx + cron + logrotate
+`deploy/bootstrap.sh` is the mechanical-only installer — it writes the system files that have only one right answer (systemd unit, nginx site, cron block, logrotate). It also creates the runtime directories plato writes to (`posts/`, `exports/`, `data/`) with the right ownership. It does **not** install packages, write secrets, or run certbot; you've already done those.
 
-`deploy/bootstrap.sh` is the mechanical-only installer — it writes the system files that have only one right answer. It does **not** install packages, write secrets, or run certbot; you've already done those.
+Run it before migrations + preflight, because preflight checks the runtime directories that bootstrap creates:
 
 ```bash
 sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT \
   /opt/plato/deploy/bootstrap.sh
 ```
 
-Output (abridged):
+Expected output:
 ```
+[bootstrap] domain=$DOMAIN admin=$ADMIN_EMAIL install=/opt/plato user=plato port=$PLATO_PORT
+[bootstrap] user plato already exists       (or: creating system user plato)
 [bootstrap] writing /etc/systemd/system/plato.service
 [bootstrap] writing /etc/nginx/conf.d/plato.conf
 [bootstrap] writing /etc/cron.d/plato
@@ -480,15 +514,44 @@ sudo cp /opt/plato/deploy/plato.logrotate /etc/logrotate.d/plato
 sudo systemctl daemon-reload
 ```
 
-After bootstrap (either path):
+## Step 10 — Run migrations + preflight, then start plato
+
+`bootstrap.sh` created `posts/`, `exports/`, `data/` with `plato:plato` ownership in step 9 — that's why preflight runs *after* bootstrap, not before. Now create the SQLite schema and verify every prerequisite plato needs is in place:
+
+```bash
+sudo -u plato -H bash -c "cd /opt/plato && node --env-file=.env bin/migrate.js"
+# Expect: 'applied N migration(s)' (currently 23). Idempotent — re-runs on
+# every plato update; only runs the new migrations.
+
+sudo -u plato -H bash -c "cd /opt/plato && bin/preflight.sh"
+# Expect: ~10 OK lines, no FAIL. WARNs are tolerable — they flag dev-mode
+# values (KNOWLESS_SMTP_PORT=1025) or missing optional pieces (postfix
+# when you haven't done step 5 yet).
+```
+
+Any FAIL is a real problem; fix before continuing. Common ones:
+
+- `FAIL .env not present at /opt/plato/.env` → step 7 didn't run as the right user.
+- `FAIL KNOWLESS_SECRET is empty` → `bin/gen-secret.sh` was piped wrong; re-run step 7.
+- `FAIL POSTS_DIR / EXPORTS_DIR does not exist` → bootstrap (step 9) didn't run, or didn't run as root.
+
+Once preflight clears, start plato:
 
 ```bash
 sudo systemctl enable --now plato
-sudo systemctl status plato --no-pager
-# Expect: Active: active (running)
+sudo systemctl status plato --no-pager | head -10
+# Expect: Active: active (running) since ...
+#         Main PID: NNNNN (node)
 ```
 
-If status is `failed`, `journalctl -u plato -n 50` shows why.
+If status is `failed`, app-level errors went to `/var/log/plato.log`, *not* the journal — the systemd unit redirects plato's stdout/stderr there:
+
+```bash
+sudo tail -50 /var/log/plato.log     # plato's own console.log/error output
+sudo journalctl -u plato -n 20       # systemd-level lifecycle messages only
+```
+
+The split is intentional: plato's mail-outcome hooks (`[plato mail.submit]` / `[plato mail.fail]` / `[plato mail.suppressed]`) and knowless's own log lines all end up in `/var/log/plato.log` for grep-friendly observability. journalctl only shows "started/stopped" systemd events.
 
 ## Step 11 — DNS preflight, then nginx + certbot
 
@@ -565,7 +628,8 @@ If all three pass, you're deployed. Visit `https://${DOMAIN}`, click the magic l
 | Task | Command |
 |---|---|
 | Restart plato | `systemctl restart plato` |
-| Tail plato logs | `journalctl -u plato -f` or `tail -f /var/log/plato.log` |
+| Tail plato app output | `tail -f /var/log/plato.log` (mail hooks, knowless lines, request errors) |
+| Tail plato systemd events | `journalctl -u plato -f` (start/stop/crash; not app output) |
 | Tail mail logs | `tail -f /var/log/maillog` (or `journalctl -u postfix -f`) |
 | Inspect mail queue | `mailq` (deferred mail) / `postqueue -f` (force flush) |
 | Check health | `curl -sS https://$DOMAIN/healthz \| jq .` |
@@ -627,10 +691,15 @@ To restore: stop the server, untar, copy `forum.db` + `posts/` over the live one
 
 ```bash
 # 1. Did plato try to send it?
-journalctl -u plato -n 50 | grep -iE "mail|knowless|plato mail"
+sudo tail -100 /var/log/plato.log | grep -iE "mail|knowless"
 # Look for [plato mail.fail] (knowless onTransportFailure hook) — message
 # carries the SMTP-level reason. Sibling [plato mail.submit] lines confirm
-# successful submissions.
+# successful submissions. [plato mail.suppressed] lines are the heartbeat
+# for sham/rate-limited windows.
+#
+# (NOTE: this is in /var/log/plato.log, not journalctl — plato's
+# console output is redirected there by the systemd unit. journalctl -u
+# plato only shows lifecycle events.)
 
 # 2. Did postfix accept and deliver?
 tail -100 /var/log/maillog
@@ -728,14 +797,18 @@ If that fails, postfix is broken — go back to step 5. If only cron's mail fail
 ### plato won't start
 
 ```bash
-journalctl -u plato -n 100 --no-pager
+# Lifecycle events (start failed, segfault, OOM, restart loop):
+sudo journalctl -u plato -n 100 --no-pager
+
+# App-level errors (most "won't start" reasons land here, not in journal):
+sudo tail -100 /var/log/plato.log
 ```
 
-Three things to look for:
+Three things to look for in `/var/log/plato.log`:
 
 1. **`auth: KNOWLESS_SECRET is required`** — `.env` is missing or unreadable by the `plato` user. Check `ls -l /opt/plato/.env` (must be 600 plato:plato).
-2. **`Error: ENOENT: no such file or directory, open '.../forum.db'`** — you skipped step 9. Run migrations.
-3. **`Error: listen EADDRINUSE`** — another process holds :8080. `ss -tlnp | grep 8080` to find it. Usually a previous test instance.
+2. **`Error: ENOENT: no such file or directory, open '.../forum.db'`** — you skipped migrations. `sudo -u plato -H bash -c "cd /opt/plato && node --env-file=.env bin/migrate.js"`.
+3. **`Error: listen EADDRINUSE`** — another process holds your `PLATO_PORT`. `ss -tlnp | grep $PLATO_PORT` to find it.
 
 ### "Why is everyone signed out / new identities everywhere"
 
@@ -780,53 +853,169 @@ Before you announce the URL:
 - **Use a vendor SMTP relay** (Mailgun / Postmark / SES). knowless deliberately doesn't bless this — see [knowless PRD §16.2 "one mail purpose"](https://github.com/hamr0/knowless/blob/main/PRD.md). On a VPS that allows outbound :25, postfix delivering direct is cleaner: no third-party trust, no cred rotation, no vendor lock-in. If your provider blocks :25 and won't unblock, you've stepped off the supported path — `transportOverride` exists in knowless as an escape hatch but isn't documented as a path the project supports.
 - **Configure fail2ban for postfix.** Postfix on `loopback-only` interfaces isn't an attack surface from outside the box, so the standard postfix fail2ban jails don't apply. If you change `inet_interfaces` to listen on the public IP (don't), then yes.
 
-## Self-signed mode (homeserver / LAN testing)
+## Appendix: Homeserver / LAN smoke (auth-flow only)
 
-For deploys where certbot can't help — private hostnames (`homelab`, `federver`), RFC1918 IPs, split-horizon DNS, a developer laptop, internal staging — plato ships a self-signed alternative. Two artifacts:
+For deploys where certbot can't help — private hostnames (`homelab`, `federver`), RFC1918 IPs, split-horizon DNS, a developer laptop, internal staging — this is a self-contained walkthrough that skips the postfix path. **No real mail delivery**: most residential ISPs block port 25 outbound, so the production mail stack can't work here. Magic links land in `/var/log/plato.log` instead, and you click them out of the log.
 
-- `deploy/gen-selfsigned-cert.sh` — wraps `openssl req -x509` to drop a key + cert at the canonical Fedora/RHEL paths (`/etc/pki/tls/{certs,private}/plato.{crt,key}`).
-- `deploy/plato.nginx-selfsigned.template` — replaces the certbot-managed config; listens on 80 (redirect → 443) and 443 ssl, proxy_pass to `${PLATO_PORT}`.
+This validates the **auth flow + UI + observability hooks**. Real mail delivery, SPF/DKIM/DMARC, and cron alerting all need a VPS to validate.
 
-Use this **instead of** Step 11. Steps 1–10 + 12–13 work unchanged.
+### What you keep when you migrate to a real VPS
+
+- `KNOWLESS_SECRET`, `config.json`, posts/, exports/, forum.db
+- systemd unit, /etc/cron.d/plato, /etc/logrotate.d/plato
+
+### What you redo on the VPS
+
+- nginx config (certbot replaces self-signed)
+- Step 5 (postfix + opendkim + DNS) — entirely new against your real domain
+- `KNOWLESS_DEV_LOG_LINKS` flips back to default (off)
+
+### Step A1 — Set context
 
 ```bash
-# Generate the cert + key. CN must match what you'll connect to in the
-# browser (your hostname). Subject Alt Names cover localhost + 127.0.0.1
-# so curl from the box itself works without -k.
-sudo CN=$DOMAIN /opt/plato/deploy/gen-selfsigned-cert.sh
+export DOMAIN=federver               # your hostname (or whatever resolves on LAN)
+export ADMIN_EMAIL=you@example.com   # for cron alerts; magic links never land here
+export PLATO_PORT=8090               # 8080 is often taken on shared boxes
+```
 
-# Render the SSL nginx config and replace bootstrap's HTTP-only one.
+If `:80` is already taken (AdGuard / Pi-hole / Home Assistant / another tenant), check first:
+
+```bash
+sudo ss -tlnp 'sport = :80'
+# Expect either: empty (nginx can have :80) or listing of the conflicting service.
+```
+
+### Step A2 — Disable nginx's stock `:80` server block (only if `:80` is taken)
+
+Skip this on a real VPS — nginx owning :80 with HTTP→HTTPS redirect is the production default.
+
+If `:80` is taken on this box (e.g. AdGuard owns it):
+
+```bash
+sudo /opt/plato/deploy/disable-nginx-default-server.sh
+# Expect:
+#   [disable-nginx-default-server] backed up /etc/nginx/nginx.conf → ...preplato
+#   [disable-nginx-default-server] commented :80 server block(s) ...
+#   [disable-nginx-default-server] nginx -t: passes
+```
+
+To reverse later: `sudo cp /etc/nginx/nginx.conf.preplato /etc/nginx/nginx.conf`.
+
+### Step A3 — Steps 1–4 from the main guide
+
+Run main-guide Steps 1 (packages — postfix/opendkim are optional in dev mode but installing them is fine), 2 (firewall), 3 (SELinux), 4 (plato user) verbatim. Skip Step 5 (postfix + DNS) entirely.
+
+### Step A4 — Steps 6–8 from the main guide, with dev-mode `.env`
+
+Step 6 (clone) and Step 8 (config.json) run verbatim. Step 7's `.env` template gets two extra lines for dev-mode behavior:
+
+```bash
+SECRET=$(sudo -u plato /opt/plato/bin/gen-secret.sh)
+echo "secret length: ${#SECRET}"
+# Expect: 64
+
+sudo tee /opt/plato/.env > /dev/null <<ENV
+KNOWLESS_SECRET=$SECRET
+KNOWLESS_BASE_URL=https://$DOMAIN
+KNOWLESS_FROM=auth@$DOMAIN
+KNOWLESS_SMTP_HOST=localhost
+KNOWLESS_SMTP_PORT=1025
+KNOWLESS_DEV_LOG_LINKS=true
+KNOWLESS_COOKIE_SECURE=false
+PORT=$PLATO_PORT
+DB_PATH=/opt/plato/forum.db
+ENV
+sudo chown plato:plato /opt/plato/.env
+sudo chmod 600 /opt/plato/.env
+```
+
+The two dev-mode lines:
+- `KNOWLESS_DEV_LOG_LINKS=true` — when SMTP submit fails (it will, since :1025 is unbound), knowless prints the magic link to stderr → `/var/log/plato.log`.
+- `KNOWLESS_COOKIE_SECURE=false` — cookies work over self-signed HTTPS without strict-secure flag (browsers reject Secure cookies on cert-not-trusted origins).
+
+### Step A5 — Bootstrap, then migrations + preflight
+
+```bash
+sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT \
+  /opt/plato/deploy/bootstrap.sh
+# Expect: WARNs about postfix + opendkim missing (we're not using them);
+# the rest renders normally.
+
+sudo -u plato -H bash -c "cd /opt/plato && node --env-file=.env bin/migrate.js"
+# Expect: applied 23 migration(s)
+
+sudo -u plato -H bash -c "cd /opt/plato && bin/preflight.sh"
+# Expect: 2 WARNs (postfix not installed, KNOWLESS_SMTP_PORT=1025 dev fallback);
+# no FAILs.
+```
+
+### Step A6 — Self-signed cert + nginx (443-only template)
+
+```bash
+sudo CN=$DOMAIN /opt/plato/deploy/gen-selfsigned-cert.sh
+# Expect: cert at /etc/pki/tls/certs/plato.crt, key at /etc/pki/tls/private/plato.key
+
 DOMAIN=$DOMAIN PLATO_PORT=$PLATO_PORT \
   envsubst '${DOMAIN} ${PLATO_PORT}' \
   < /opt/plato/deploy/plato.nginx-selfsigned.template \
   | sudo tee /etc/nginx/conf.d/plato.conf > /dev/null
 
-sudo nginx -t                         # syntax check
-sudo systemctl enable --now nginx
-sudo systemctl reload nginx           # if already running
+sudo nginx -t
+# Expect: configuration file /etc/nginx/nginx.conf test is successful
 
-# Smoke. -k accepts the self-signed cert.
-curl -sSk https://$DOMAIN/healthz | jq .
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx
 ```
 
-Browsers will warn about the self-signed cert. Accept the warning — you generated it. Importing the cert into your trust store is doable but out of scope for this guide.
-
-### Mail on a homeserver
-
-Most residential ISPs block port 25 outbound, so postfix on a homeserver can't deliver direct. **Don't try to make production mail work in this environment.** Instead, run plato in dev mode for the auth-flow smoke:
+### Step A7 — Start plato + smoke
 
 ```bash
-# In /opt/plato/.env, set:
-KNOWLESS_DEV_LOG_LINKS=true        # print magic links to stderr
-KNOWLESS_COOKIE_SECURE=false       # cookies work over self-signed HTTPS
+sudo systemctl enable --now plato
+sleep 2
+sudo systemctl status plato --no-pager | head -10
+# Expect: Active: active (running)
 
-# Restart plato, then POST /login. The magic link appears in journalctl:
-journalctl -u plato -f | grep '\[knowless dev:'
+curl -sSk https://$DOMAIN/healthz
+# Expect: {"ok":true,"version":"...","db_writable":true,"exports_dir_writable":true,...}
+
+# Trigger a magic-link send. POST returns 200 even when SMTP fails
+# (silent-miss design protects against email enumeration).
+curl -sSk -X POST https://$DOMAIN/login \
+  --data-urlencode "email=$ADMIN_EMAIL" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -o /dev/null -w "HTTP: %{http_code}\n"
+# Expect: HTTP: 200
+
+# The magic link landed in plato.log (NOT journalctl — see Routine ops):
+sudo tail -10 /var/log/plato.log
+# Expect to see:
+#   [knowless] mail submit failed: connect ECONNREFUSED ::1:1025
+#   [plato mail.fail] ts=... connect ECONNREFUSED ::1:1025
+#   [knowless dev:auth@$DOMAIN] magic link: https://$DOMAIN/auth/callback?t=...
+#
+# The first two lines are the observability hooks firing as intended.
+# The third line is the magic link — copy the full URL.
 ```
 
-Click the link from the log. Validate the auth flow, sub creation, post writing, modlog. **Real mail delivery (DKIM-signed outbound, SPF/DMARC checks) gets validated on the VPS, not here.** Carrying postfix from homeserver to VPS doesn't help — you'll redo `myhostname`, the DKIM key, and the DNS records anyway.
+### Step A8 — Browser validation
 
-When you migrate homeserver → VPS, you swap nginx config + cert source + redo Step 5 against your real domain; everything else (`/etc/cron.d/plato`, systemd unit, `KNOWLESS_SECRET`, `config.json`) carries over. To remove the self-signed bits during teardown, `deploy/teardown.sh` already covers `/etc/pki/tls/{certs,private}/plato.{crt,key}` (interactive prompt; pass `--yes-data` to skip).
+From a machine on the same LAN that can resolve `$DOMAIN` (or with a hosts-file entry):
+
+1. Visit `https://$DOMAIN`. Browser warns about the self-signed cert. Accept it.
+2. Paste the magic-link URL from `/var/log/plato.log` into the address bar.
+3. You should land logged in. Header shows your handle.
+4. Smoke the rest: create a sub at `/sub/create`, write a post, hit `/modlog`, hit `/healthz`.
+
+If any of those break, the logs are in `/var/log/plato.log` and `/var/log/plato-*.log` for cron jobs.
+
+### Teardown
+
+```bash
+sudo /opt/plato/deploy/teardown.sh --yes-data
+# If you ran disable-nginx-default-server.sh:
+sudo cp /etc/nginx/nginx.conf.preplato /etc/nginx/nginx.conf
+sudo systemctl reload nginx
+```
 
 ## Where to read next
 
