@@ -63,12 +63,25 @@ Set these once in your shell so the rest of the guide is copy-paste:
 ```bash
 export DOMAIN=forum.example.com
 export ADMIN_EMAIL=you@example.com   # used by certbot + as cron alert recipient
+export PLATO_PORT=8080               # plato's listener; pick another (e.g. 8090) if 8080 is taken
+```
+
+If something on the box already binds 8080 (AdGuard, another web app, a docker container), check first and adjust:
+
+```bash
+sudo ss -tlnp 'sport = :8080'        # what's there?
+# If non-empty, set PLATO_PORT=8090 (or any free port). bootstrap.sh
+# threads this through both /etc/nginx/conf.d/plato.conf (proxy_pass)
+# and you'll mirror it as PORT=8090 in plato's .env.
 ```
 
 ## Step 1 — Base system + Node + nginx + msmtp
 
+The package list differs between AlmaLinux/RHEL (needs EPEL + the separate `msmtp-mta` package) and Fedora (single `msmtp` package, no EPEL). Pick the block for your distro.
+
+**AlmaLinux 9 / RHEL 9:**
+
 ```bash
-# As root on the VPS.
 dnf -y update
 dnf -y install epel-release
 dnf -y install \
@@ -77,14 +90,37 @@ dnf -y install \
   msmtp msmtp-mta mailx \
   vim curl
 
-# Node 22 from NodeSource
+# Node 22 from NodeSource (RHEL ships an older module by default)
 curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
 dnf -y install nodejs
+```
 
-# Sanity
-node --version       # v22.x
-sqlite3 --version    # 3.x
-which sendmail       # /usr/sbin/sendmail (provided by msmtp-mta)
+**Fedora 38+ (Server / Cloud / Workstation):**
+
+```bash
+dnf -y update
+dnf -y install \
+  nginx certbot python3-certbot-nginx \
+  sqlite git jq tar firewalld policycoreutils-python-utils \
+  msmtp mailx \
+  vim curl
+
+# Fedora's nodejs in the distro repo is usually current enough; check:
+node --version    # need ≥ 22.5
+# If it's older, use NodeSource:
+#   curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+#   dnf -y install nodejs
+```
+
+**Why the difference**: on AlmaLinux/RHEL (EPEL packaging), `msmtp` is the binary and `msmtp-mta` is a separate package that drops the `/usr/sbin/sendmail` symlink. On Fedora, the single `msmtp` package wires up `update-alternatives --install ... mta /usr/bin/msmtp` automatically, so `/usr/sbin/sendmail → /usr/bin/msmtp` lands on install. No second package.
+
+**Sanity (both distros):**
+
+```bash
+node --version       # v22.5+ required (--env-file flag)
+sqlite3 --version    # any 3.x
+which sendmail       # → /usr/sbin/sendmail
+ls -l /usr/sbin/sendmail   # should resolve to msmtp on both distros
 ```
 
 ## Step 2 — Firewall
@@ -183,7 +219,7 @@ KNOWLESS_FROM=auth@${DOMAIN}
 # Relay creds live in /etc/msmtprc, never here.
 PLATO_SENDMAIL_PATH=/usr/sbin/sendmail
 
-PORT=8080
+PORT=$PLATO_PORT
 DB_PATH=/opt/plato/forum.db
 ENV
 
@@ -230,7 +266,8 @@ Both are idempotent. Re-run on every plato update.
 `deploy/bootstrap.sh` is the mechanical-only installer — it writes the system files that have only one right answer. It does **not** install packages, write secrets, or run certbot; you've already done those.
 
 ```bash
-sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL /opt/plato/deploy/bootstrap.sh
+sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT \
+  /opt/plato/deploy/bootstrap.sh
 ```
 
 Output (abridged):
@@ -254,9 +291,9 @@ INSTALL_DIR=/opt/plato PLATO_USER=plato \
   < /opt/plato/deploy/plato.service.template \
   | sudo tee /etc/systemd/system/plato.service > /dev/null
 
-# nginx site (only ${DOMAIN} substitutes — nginx's own $host etc. preserved)
-DOMAIN=$DOMAIN \
-  envsubst '${DOMAIN}' \
+# nginx site (only ${DOMAIN} + ${PLATO_PORT} substitute — nginx's own $host etc. preserved)
+DOMAIN=$DOMAIN PLATO_PORT=$PLATO_PORT \
+  envsubst '${DOMAIN} ${PLATO_PORT}' \
   < /opt/plato/deploy/plato.nginx.template \
   | sudo tee /etc/nginx/conf.d/plato.conf > /dev/null
 
@@ -363,7 +400,7 @@ If all three pass, you're deployed. Visit `https://${DOMAIN}`, click the magic l
 | Pre-start sanity check | `sudo -u plato bash -c 'cd /opt/plato && bin/preflight.sh'` |
 | Cert expiry probe | `cd /opt/plato && DOMAIN=$DOMAIN bin/check-cert.sh` |
 | Run a backup now | `sudo -u plato BACKUP_DIR=/var/lib/plato-backups /opt/plato/bin/backup.sh` |
-| Re-render system files | `sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL /opt/plato/deploy/bootstrap.sh` |
+| Re-render system files | `sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT /opt/plato/deploy/bootstrap.sh` |
 | Update plato | see [Updating plato](#updating-plato) |
 | Read modlog | `https://$DOMAIN/modlog` (publicly visible) |
 

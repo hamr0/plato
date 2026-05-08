@@ -1,14 +1,11 @@
 # nginx site for plato. Place at /etc/nginx/conf.d/plato.conf.
-# deploy/bootstrap.sh substitutes ${DOMAIN} and drops it for you; if
-# you prefer to install by hand:
+# Rendered by deploy/bootstrap.sh; see docs/02-features/deploy-guide.md
+# for the manual-render path. Do not edit /etc/nginx/conf.d/plato.conf
+# directly — edit this template and re-run bootstrap.
 #
-#   envsubst '${DOMAIN}' < deploy/plato.nginx.template \
-#     | sudo tee /etc/nginx/conf.d/plato.conf
-#   sudo nginx -t && sudo systemctl reload nginx
-#
-# Then: sudo certbot --nginx -d ${DOMAIN} -m you@example.com --agree-tos -n --redirect
-# certbot rewrites this file in place to add SSL paths + redirect 80→443.
-# Do NOT hand-edit after that — run `certbot renew` if you need to refresh.
+# certbot --nginx rewrites the rendered file in place to add SSL paths
+# and redirect 80→443. Once that's happened, treat the rendered file as
+# certbot-owned: run `certbot renew` to refresh, don't hand-edit.
 
 server {
     listen 80;
@@ -16,7 +13,7 @@ server {
     server_name ${DOMAIN};
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:${PLATO_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -32,7 +29,7 @@ server {
     # /healthz must never be cached by intermediaries — it's a
     # readiness probe, not content.
     location = /healthz {
-        proxy_pass http://127.0.0.1:8080/healthz;
+        proxy_pass http://127.0.0.1:${PLATO_PORT}/healthz;
         proxy_set_header Host $host;
         add_header Cache-Control "no-store" always;
     }

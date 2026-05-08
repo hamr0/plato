@@ -30,6 +30,7 @@
 #   INSTALL_DIR=/opt/plato
 #   PLATO_USER=plato
 #   BACKUP_DIR=/var/lib/plato-backups
+#   PLATO_PORT=8080      (must match PORT= in $INSTALL_DIR/.env)
 
 set -euo pipefail
 
@@ -39,6 +40,7 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-/opt/plato}"
 PLATO_USER="${PLATO_USER:-plato}"
 BACKUP_DIR="${BACKUP_DIR:-/var/lib/plato-backups}"
+PLATO_PORT="${PLATO_PORT:-8080}"
 
 # Resolve where we live so the template paths work no matter where the
 # script is invoked from.
@@ -64,7 +66,7 @@ for tpl in plato.service.template plato.nginx.template plato.cron plato.logrotat
   fi
 done
 
-echo "[bootstrap] domain=$DOMAIN admin=$ADMIN_EMAIL install=$INSTALL_DIR user=$PLATO_USER"
+echo "[bootstrap] domain=$DOMAIN admin=$ADMIN_EMAIL install=$INSTALL_DIR user=$PLATO_USER port=$PLATO_PORT"
 
 # ─── User + directory ─────────────────────────────────────────────────
 if id -u "$PLATO_USER" >/dev/null 2>&1; then
@@ -97,8 +99,8 @@ INSTALL_DIR="$INSTALL_DIR" PLATO_USER="$PLATO_USER" \
 chmod 644 /etc/systemd/system/plato.service
 
 echo "[bootstrap] writing /etc/nginx/conf.d/plato.conf"
-DOMAIN="$DOMAIN" \
-  envsubst '${DOMAIN}' \
+DOMAIN="$DOMAIN" PLATO_PORT="$PLATO_PORT" \
+  envsubst '${DOMAIN} ${PLATO_PORT}' \
   < "$SCRIPT_DIR/plato.nginx.template" \
   > /etc/nginx/conf.d/plato.conf
 chmod 644 /etc/nginx/conf.d/plato.conf

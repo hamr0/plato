@@ -1,10 +1,7 @@
 # systemd unit for plato. Place at /etc/systemd/system/plato.service.
-# deploy/bootstrap.sh substitutes ${INSTALL_DIR} and ${PLATO_USER} and
-# drops it for you; if you prefer to install by hand:
-#
-#   envsubst < deploy/plato.service.template | sudo tee /etc/systemd/system/plato.service
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now plato
+# Rendered by deploy/bootstrap.sh; see docs/02-features/deploy-guide.md
+# for the manual-render path. Do not edit /etc/systemd/system/plato.service
+# directly — edit this template and re-run bootstrap.
 
 [Unit]
 Description=plato forum
