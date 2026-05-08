@@ -96,6 +96,32 @@ chown -R "$PLATO_USER:$PLATO_USER" \
 touch /var/log/plato.log
 chown "$PLATO_USER:$PLATO_USER" /var/log/plato.log
 
+# ─── Per-user msmtprc for the plato process ───────────────────────────
+#
+# msmtp's /etc/msmtprc must stay mode 600 root:root (msmtp REFUSES to
+# read group/world-readable creds). That blocks the plato user from
+# reading it. msmtp prefers ~/.msmtprc when invoked by a user, so we
+# create $INSTALL_DIR/.msmtprc as a copy with the logfile rewritten
+# to a path under $INSTALL_DIR/data (ProtectSystem=strict in plato.service
+# makes /var/log/msmtp.log read-only for the plato process; logging
+# would fail and msmtp would exit non-zero even on successful sends).
+#
+# Cron jobs continue to use /etc/msmtprc (running as root). When the
+# operator rotates relay creds, they edit /etc/msmtprc and re-run
+# bootstrap.sh to refresh $INSTALL_DIR/.msmtprc. The duplication is
+# the price of msmtp's "no group-readable creds" rule.
+if [[ -f /etc/msmtprc ]]; then
+  echo "[bootstrap] syncing $INSTALL_DIR/.msmtprc from /etc/msmtprc"
+  sed 's|^logfile.*|logfile '"$INSTALL_DIR"'/data/msmtp.log|' /etc/msmtprc \
+    > "$INSTALL_DIR/.msmtprc"
+  chown "$PLATO_USER:$PLATO_USER" "$INSTALL_DIR/.msmtprc"
+  chmod 600 "$INSTALL_DIR/.msmtprc"
+  sudo -u "$PLATO_USER" touch "$INSTALL_DIR/data/msmtp.log"
+else
+  echo "[bootstrap] /etc/msmtprc not present — skipping plato user msmtprc sync"
+  echo "             (configure /etc/msmtprc per deploy-guide §5, then re-run bootstrap)"
+fi
+
 # ─── Render templates ─────────────────────────────────────────────────
 # envsubst with an explicit whitelist so nginx's own $host / $remote_addr
 # variables aren't expanded as shell vars.

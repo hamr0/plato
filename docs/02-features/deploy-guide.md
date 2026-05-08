@@ -159,23 +159,32 @@ ls -ld /opt/plato     # drwx------ plato plato
 
 ## Step 5 — Configure msmtp
 
-This is the only place SMTP credentials live on the box.
+This is the only place SMTP credentials live on the box. plato ships with an opinionated **dual-file** model:
 
-`deploy/msmtprc.example` ships with three commented account blocks (Gmail App Password / Fastmail / Proton Bridge) plus a generic STARTTLS block. Pick one, fill in your relay creds, install:
+| Path | Owner | Used by | Notes |
+|---|---|---|---|
+| `/etc/msmtprc` | root:root, mode 600 | cron jobs (run as root) | source of truth; operator edits this |
+| `/opt/plato/.msmtprc` | plato:plato, mode 600 | plato's systemd service | rendered by `bootstrap.sh` from /etc/msmtprc, with `logfile` rewritten to `/opt/plato/data/msmtp.log` |
+
+**Why two files**: msmtp REFUSES to read group/world-readable creds, so `/etc/msmtprc` must stay mode 600 root:root. The plato user (running unprivileged under systemd) can't read it. msmtp prefers `~/.msmtprc` when invoked by a user, so plato's home gets a per-user copy with the same Gmail block. `bootstrap.sh` keeps the two in sync — when you rotate creds, edit `/etc/msmtprc` and re-run `bootstrap.sh`.
+
+The logfile path differs too: cron's msmtp writes `/var/log/msmtp.log`, but plato's systemd unit has `ProtectSystem=strict`, so plato's msmtp writes to `/opt/plato/data/msmtp.log` (inside `ReadWritePaths`). Both rotate via `/etc/logrotate.d/plato`.
+
+`deploy/msmtprc.example` ships with the Gmail block uncommented as the active default. Edit it in place, install, lock it down:
 
 ```bash
 cp /opt/plato/deploy/msmtprc.example /etc/msmtprc
-$EDITOR /etc/msmtprc                 # uncomment + fill in your block
+$EDITOR /etc/msmtprc                 # replace YOUR_EMAIL@gmail.com + APP_PASSWORD
 chown root:root /etc/msmtprc
 chmod 600 /etc/msmtprc                # msmtp REFUSES non-600 creds
 
-# Pre-create msmtp's log file with sane perms.
+# Pre-create the cron-side log with sane perms.
 touch /var/log/msmtp.log
 chown root:root /var/log/msmtp.log
 chmod 640 /var/log/msmtp.log
 ```
 
-(If you haven't cloned plato yet — see step 6 — you can pull `msmtprc.example` straight from `https://raw.githubusercontent.com/hamr0/plato/main/deploy/msmtprc.example` instead.)
+(If you haven't cloned plato yet — see step 6 — pull `msmtprc.example` straight from `https://raw.githubusercontent.com/hamr0/plato/main/deploy/msmtprc.example` instead.)
 
 **Smoke test now, before plato exists**:
 
@@ -187,6 +196,8 @@ echo -e "Subject: msmtp preflight from $(hostname)\n\nIf you see this, /etc/msmt
 Check the inbox. If it doesn't arrive, fix this *before* moving on — every plato mail flows through here.
 
 If `sendmail` exits non-zero, look at `/var/log/msmtp.log` for the SMTP-level reason (auth failure, DNS, certificate). Common fixes are in the [Troubleshooting](#troubleshooting) section.
+
+The plato-side `/opt/plato/.msmtprc` doesn't exist yet — `bootstrap.sh` creates it in step 10. Don't worry about it now.
 
 ## Step 6 — Clone plato
 

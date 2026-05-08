@@ -79,6 +79,21 @@ if [ -x /usr/sbin/sendmail ]; then
         fail "/etc/msmtprc has no uncommented \`account default\` block — msmtp will error \"account default not found\""
       fi
     fi
+
+    # Per-user .msmtprc for the plato process. /etc/msmtprc is unreadable
+    # by the unprivileged plato user; bootstrap.sh writes a per-user copy
+    # with the logfile rewritten to a path inside ReadWritePaths. Without
+    # this file, knowless logs "Sendmail exited with code 78" on every
+    # magic-link send (msmtp exits non-zero when its logfile is unwritable
+    # under systemd ProtectSystem=strict, even when the message was sent).
+    INSTALL_ROOT=$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")
+    PLATO_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+    PLATO_MSMTPRC="$PLATO_HOME/.msmtprc"
+    if [ -e "$PLATO_MSMTPRC" ]; then
+      ok "$PLATO_MSMTPRC exists (per-user msmtp config for plato process)"
+    else
+      fail "$PLATO_MSMTPRC missing — re-run deploy/bootstrap.sh to sync from /etc/msmtprc"
+    fi
   else
     warn "/etc/msmtprc not present (production needs it; see deploy/msmtprc.example)"
   fi
