@@ -6,6 +6,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — knowless owns plato's mail end-to-end; postfix + opendkim replace msmtp wrapper (post-M8, deploy/3)
+
+- **Removed `src/mail/transport.js`** + its 9 unit tests. plato no
+  longer overrides knowless's transport. knowless connects to
+  `localhost:25` directly, postfix (with opendkim milter) handles
+  delivery + DKIM signing.
+- **Removed `PLATO_SENDMAIL_PATH`** from `.env.example`. Replaced
+  with `KNOWLESS_SMTP_HOST` / `KNOWLESS_SMTP_PORT` documentation
+  pointing at the postfix loopback.
+- **Wired knowless v0.2.1 observability hooks** in `bin/server.js`:
+  `onMailerSubmit` / `onTransportFailure` / `onSuppressionWindow`
+  log structured `[plato mail.*]` lines to stderr, captured by
+  systemd into `/var/log/plato.log`. Health-watch can grep for
+  success/failure rates without parsing knowless's stderr noise.
+- **deploy/bootstrap.sh** drops the per-user `.msmtprc` sync; warns
+  when postfix or opendkim are missing.
+- **deploy/preflight.sh** drops the `PLATO_SENDMAIL_PATH` /
+  `/etc/msmtprc` / per-user `.msmtprc` checks; replaces with
+  postfix (`postconf` + listener on :25) and opendkim (binary +
+  daemon presence) checks.
+- **deploy/teardown.sh** keeps the `/etc/msmtprc` cleanup branch
+  for legacy deploys but no longer expects it.
+- **deploy/msmtprc.example deleted.** Operator config for the new
+  path lives entirely in deploy-guide.md §5 (postfix `main.cf`,
+  opendkim setup, registrar DNS records).
+- **deploy/plato.logrotate** drops `/var/log/msmtp.log`. Postfix
+  has its own logrotate config; we don't duplicate.
+- **docs/02-features/deploy-guide.md §5 rewritten** — postfix +
+  opendkim + DNS walkthrough (SPF / DKIM / DMARC TXT records, PTR
+  at provider, header-based smoke test). The msmtp dual-file model
+  is gone.
+- **docs/02-features/cron-jobs.md** mail-section updated: cron's
+  `/usr/sbin/sendmail` is now postfix's, inheriting the same
+  opendkim signing path as user-facing mail. One MTA, one queue,
+  one set of logs.
+- **README.md + operator-guide.md** stack-summary lines updated:
+  msmtp → postfix + opendkim.
+- **Suite size:** 816 → 807 (dropped mail.test.js's 9 tests; no
+  other test changes).
+
+**Why:** msmtp was a residential-homeserver workaround that leaked
+into the production design. The blessed knowless path is
+"nodemailer → localhost postfix + opendkim → direct delivery,
+DKIM-signed at your domain." No vendor SMTP relay, no `.env` SMTP
+password, no dual-file `.msmtprc` model. Fewer moving parts, better
+deliverability (proper DKIM signing on every message), and the same
+OPS.md §5 reference both knowless and plato can point at.
+
 ### Added — deploy/ scaffold + cert-expiry watcher + preflight (post-M8, deploy/2)
 
 - **`deploy/` directory (NEW)** — extracts the inlined heredocs from

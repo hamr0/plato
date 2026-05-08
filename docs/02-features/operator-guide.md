@@ -405,7 +405,7 @@ A separate "evaluation Docker image" is on the roadmap (`docker run -p 8080:8080
 
 ### First-time install
 
-For a **production deploy** to a fresh VPS (AlmaLinux + nginx + Let's Encrypt + msmtp + systemd + cron), follow [`deploy-guide.md`](deploy-guide.md) — it's a single opinionated path with every choice made and a troubleshooting section. The notes below are for **local development** only.
+For a **production deploy** to a fresh VPS (AlmaLinux + nginx + Let's Encrypt + postfix + opendkim + systemd + cron), follow [`deploy-guide.md`](deploy-guide.md) — it's a single opinionated path with every choice made and a troubleshooting section. The notes below are for **local development** only.
 
 ```bash
 git clone https://github.com/hamr0/plato.git

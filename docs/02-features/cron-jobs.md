@@ -16,7 +16,7 @@ All cron jobs **autoconfig** from `config.json` and the script's own location. T
 - `email` — where success/failure / digest reports are sent. If unset, scripts print to stderr (cron's default mailer or `journalctl` surfaces it).
 - `service` — the systemd unit name to `systemctl restart` when a snapshot changes. Defaults to `plato`.
 
-Mail uses `/usr/sbin/sendmail -t` so no extra package (`mail`, `mailx`, etc.) is required on minimal hosts. The recommended provider of that binary is **msmtp + msmtp-mta** (a 2 MB OSS client, no daemon, no spool); see [`deploy-guide.md`](deploy-guide.md) for the full setup including `/etc/msmtprc` templates for Gmail/Fastmail/Proton.
+Mail uses `/usr/sbin/sendmail -t` — same binary that magic-link mail flows through (postfix, on a postfix box). One MTA, one DKIM signing path, one queue. Cron alerts inherit the same SPF/DKIM/DMARC posture as user-facing mail. See [`deploy-guide.md`](deploy-guide.md) §5 for postfix + opendkim + DNS setup.
 
 ## The jobs
 
@@ -138,7 +138,7 @@ plato preflight from $(hostname)
 EOF
 ```
 
-If you don't get the email, fix `/usr/sbin/sendmail` before relying on cron alarms. The recommended path is `dnf install msmtp msmtp-mta` (or `apt install msmtp msmtp-mta` on Debian/Ubuntu) plus `/etc/msmtprc` pointing at any SMTP relay you control — full walkthrough in [`deploy-guide.md`](deploy-guide.md).
+If you don't get the email, fix `/usr/sbin/sendmail` before relying on cron alarms. On a postfix box (the recommended setup for plato), `/usr/sbin/sendmail` is provided by postfix itself, and the message inherits the same opendkim signing path as user-facing mail. Full walkthrough in [`deploy-guide.md`](deploy-guide.md) §5.
 
 ## Why these aren't in-process
 

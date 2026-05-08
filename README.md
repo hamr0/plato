@@ -123,7 +123,7 @@ npm start
 
 Open `http://localhost:8080` and post.
 
-For deploying to a real VPS (AlmaLinux + nginx + Let's Encrypt + msmtp + systemd + cron, end-to-end with troubleshooting), follow the **[Deploy Guide](docs/02-features/deploy-guide.md)** — single opinionated path, every choice made.
+For deploying to a real VPS (AlmaLinux + nginx + Let's Encrypt + postfix + opendkim + systemd + cron, end-to-end with SPF/DKIM/DMARC walkthrough and troubleshooting), follow the **[Deploy Guide](docs/02-features/deploy-guide.md)** — single opinionated path, every choice made.
 
 ---
 
