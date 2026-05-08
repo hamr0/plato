@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db/index.js';
 import { createAuth } from '../src/auth/index.js';
 import { loadDisposableDomains } from '../src/content/disposable-domain.js';
-import { createMailerTransport } from '../src/mail/transport.js';
 import { createApp, resolveBrandingRules } from '../src/web/app.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -37,17 +36,28 @@ const db = openDb(DB_PATH);
 // truth — operators edit one config field, both surfaces stay in sync.
 const brandingRules = resolveBrandingRules(operatorConfig.branding?.rules);
 
-// PLATO_SENDMAIL_PATH=/usr/sbin/sendmail in production .env routes magic-link
-// mail through the local sendmail binary (msmtp-mta in our deploy story); the
-// relay creds live in /etc/msmtprc, never in plato's process. When the env var
-// is unset (dev), this returns null and knowless keeps its SMTP-localhost:1025
-// default → fails fast → KNOWLESS_DEV_LOG_LINKS stderr fallback prints the link.
-const transportOverride = createMailerTransport(process.env);
+// knowless v0.2.1 mail-outcome hooks. plato logs each to stderr (captured
+// by systemd → /var/log/plato.log) so health-watch can grep success/failure
+// rates. The legacy `[knowless] mail submit failed:` console.error fires
+// alongside onTransportFailure — both end up in the same logfile, with the
+// hook line being the structured one.
+const mailEvents = {
+  onMailerSubmit: ({ messageId, handle, timestamp }) => {
+    console.log(`[plato mail.submit] handle=${handle} messageId=${messageId ?? 'null'} ts=${timestamp}`);
+  },
+  onTransportFailure: ({ error, timestamp }) => {
+    console.error(`[plato mail.fail] ts=${timestamp} ${error?.message ?? error}`);
+  },
+  onSuppressionWindow: ({ sham, rateLimited, windowMs }) => {
+    if (sham === 0 && rateLimited === 0) return;
+    console.log(`[plato mail.suppressed] sham=${sham} rateLimited=${rateLimited} windowMs=${windowMs}`);
+  },
+};
 
 const auth = createAuth(process.env, {
   dbPath: process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db'),
   bodyFooter: brandingRules.length > 0 ? brandingRules.join('\n') : undefined,
-  ...(transportOverride ? { transportOverride } : {}),
+  ...mailEvents,
 });
 const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
 

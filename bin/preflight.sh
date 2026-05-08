@@ -60,45 +60,29 @@ fi
 
 echo
 echo "mail:"
-if [ -x /usr/sbin/sendmail ]; then
-  ok "/usr/sbin/sendmail present"
-  if [ -e /etc/msmtprc ]; then
-    PERMS=$(stat -c '%a' /etc/msmtprc 2>/dev/null || stat -f '%Lp' /etc/msmtprc 2>/dev/null)
-    if [ "$PERMS" = "600" ]; then
-      ok "/etc/msmtprc exists, mode 600"
+# Production: postfix listening on localhost:25 (with opendkim milter signing
+# outbound mail). knowless connects directly; plato does not override the
+# transport. Dev: postfix absent → knowless fails fast on :1025 →
+# KNOWLESS_DEV_LOG_LINKS prints magic links to stderr.
+if command -v postconf >/dev/null 2>&1; then
+  ok "postfix installed ($(postconf -d mail_version 2>/dev/null | awk -F= '{gsub(/ /,""); print $2}'))"
+  if ss -lnt 2>/dev/null | awk '{print $4}' | grep -qE '(127\.0\.0\.1|0\.0\.0\.0|\[::\]?|\[::1\]?):25$'; then
+    ok "postfix listening on localhost:25"
+  else
+    warn "postfix installed but not listening on :25 — systemctl status postfix"
+  fi
+  if command -v opendkim-genkey >/dev/null 2>&1; then
+    ok "opendkim installed (DKIM signing available)"
+    if pgrep -x opendkim >/dev/null 2>&1; then
+      ok "opendkim running"
     else
-      warn "/etc/msmtprc exists but mode is $PERMS (msmtp REFUSES non-600; chmod 600 /etc/msmtprc)"
-    fi
-    # Only root can read 600-locked /etc/msmtprc; check for unreplaced
-    # placeholders (the most common new-deploy mistake).
-    if [ -r /etc/msmtprc ]; then
-      if grep -qE 'YOUR_EMAIL@gmail\.com|APP_PASSWORD_GOES_HERE|xxxx-xxxx-xxxx-xxxx' /etc/msmtprc; then
-        fail "/etc/msmtprc still contains placeholder values — edit it before starting plato"
-      fi
-      if ! grep -qE '^account[[:space:]]+default' /etc/msmtprc; then
-        fail "/etc/msmtprc has no uncommented \`account default\` block — msmtp will error \"account default not found\""
-      fi
-    fi
-
-    # Per-user .msmtprc for the plato process. /etc/msmtprc is unreadable
-    # by the unprivileged plato user; bootstrap.sh writes a per-user copy
-    # with the logfile rewritten to a path inside ReadWritePaths. Without
-    # this file, knowless logs "Sendmail exited with code 78" on every
-    # magic-link send (msmtp exits non-zero when its logfile is unwritable
-    # under systemd ProtectSystem=strict, even when the message was sent).
-    INSTALL_ROOT=$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)")
-    PLATO_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-    PLATO_MSMTPRC="$PLATO_HOME/.msmtprc"
-    if [ -e "$PLATO_MSMTPRC" ]; then
-      ok "$PLATO_MSMTPRC exists (per-user msmtp config for plato process)"
-    else
-      fail "$PLATO_MSMTPRC missing — re-run deploy/bootstrap.sh to sync from /etc/msmtprc"
+      warn "opendkim installed but not running — systemctl status opendkim"
     fi
   else
-    warn "/etc/msmtprc not present (production needs it; see deploy/msmtprc.example)"
+    warn "opendkim not installed — outbound mail will deliver UNSIGNED, will land in spam"
   fi
 else
-  warn "/usr/sbin/sendmail not present (production needs msmtp; OK in dev — knowless falls back to stderr)"
+  warn "postfix not installed (production needs it; OK in dev — knowless falls back to stderr)"
 fi
 
 # ─── .env ─────────────────────────────────────────────────────────────
@@ -128,15 +112,15 @@ if [ -r "$ENV_FILE" ]; then
     ok "KNOWLESS_BASE_URL=$BASE_URL"
   fi
 
-  SENDMAIL_PATH=$(read_env PLATO_SENDMAIL_PATH)
-  if [ -n "$SENDMAIL_PATH" ]; then
-    if [ -x "$SENDMAIL_PATH" ]; then
-      ok "PLATO_SENDMAIL_PATH=$SENDMAIL_PATH (executable)"
-    else
-      fail "PLATO_SENDMAIL_PATH=$SENDMAIL_PATH (not present or not executable)"
-    fi
+  SMTP_PORT=$(read_env KNOWLESS_SMTP_PORT)
+  if [ "$SMTP_PORT" = "25" ]; then
+    ok "KNOWLESS_SMTP_PORT=25 (production: postfix on localhost)"
+  elif [ "$SMTP_PORT" = "1025" ]; then
+    warn "KNOWLESS_SMTP_PORT=1025 (dev fallback; set 25 + run postfix in production)"
+  elif [ -n "$SMTP_PORT" ]; then
+    warn "KNOWLESS_SMTP_PORT=$SMTP_PORT (non-standard; expected 25 in production)"
   else
-    warn "PLATO_SENDMAIL_PATH unset (dev: OK; production: set to /usr/sbin/sendmail)"
+    warn "KNOWLESS_SMTP_PORT unset (defaults to 1025 — dev only)"
   fi
 else
   fail ".env not present at $ENV_FILE"

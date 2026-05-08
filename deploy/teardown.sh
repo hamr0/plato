@@ -10,13 +10,13 @@
 #   - /etc/nginx/conf.d/plato.conf  (then `nginx -s reload` if nginx is running)
 #   - /etc/cron.d/plato
 #   - /etc/logrotate.d/plato
-#   - /var/log/plato*.log, /var/log/msmtp.log
+#   - /var/log/plato*.log
 #
 # What it CAN remove (asks first; pass --yes-data to skip the prompt):
 #   - $INSTALL_DIR (default /opt/plato) — your db, posts, exports
 #   - the `plato` system user
 #   - $BACKUP_DIR (default /var/lib/plato-backups) — every backup tarball
-#   - /etc/msmtprc — your relay credentials
+#   - /etc/msmtprc — legacy relay credentials from pre-postfix deploys
 #   - self-signed cert at /etc/pki/tls/{certs,private}/plato.{crt,key}
 #
 # What it leaves alone:
@@ -127,7 +127,7 @@ done
 
 # ─── Cron logs ────────────────────────────────────────────────────────
 shopt -s nullglob
-for f in /var/log/plato*.log /var/log/msmtp.log; do
+for f in /var/log/plato*.log; do
   if [[ -f "$f" ]]; then
     echo "[teardown] removing $f"
     run "rm -f \"$f\""
@@ -159,7 +159,7 @@ if id -u "$PLATO_USER" >/dev/null 2>&1; then
 fi
 
 if [[ -f /etc/msmtprc ]]; then
-  if confirm "remove /etc/msmtprc (your relay credentials)?"; then
+  if confirm "remove /etc/msmtprc (legacy relay credentials from pre-postfix deploys)?"; then
     run "rm -f /etc/msmtprc"
   fi
 fi
@@ -170,5 +170,6 @@ echo
 echo "Things this script DID NOT touch (intentionally):"
 echo "  - SELinux setbool httpd_can_network_connect (harmless; useful for other apps)"
 echo "  - any certbot-issued certs in /etc/letsencrypt"
-echo "  - dnf-installed packages (nginx, certbot, msmtp, msmtp-mta, nodejs, sqlite)"
+echo "  - dnf-installed packages (nginx, certbot, postfix, opendkim, nodejs, sqlite)"
+echo "  - postfix + opendkim configuration (operator owns these — they predate plato)"
 echo "  - the plato git checkout (you cloned it; you remove it)"

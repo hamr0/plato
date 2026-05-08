@@ -12,8 +12,8 @@
 #   - daemon-reloads systemd
 #
 # What it does NOT do (the operator must own these decisions):
-#   - install packages (node, nginx, certbot, msmtp, sqlite — see deploy-guide.md)
-#   - write /etc/msmtprc (your relay creds; see deploy/msmtprc.example)
+#   - install packages (node, nginx, certbot, postfix, opendkim, sqlite — see deploy-guide.md)
+#   - configure postfix + opendkim, generate DKIM key, paste DNS records
 #   - generate KNOWLESS_SECRET, write .env, write config.json
 #   - run npm ci or migrations
 #   - run certbot (issuance is a one-time interactive ACME exchange)
@@ -96,30 +96,20 @@ chown -R "$PLATO_USER:$PLATO_USER" \
 touch /var/log/plato.log
 chown "$PLATO_USER:$PLATO_USER" /var/log/plato.log
 
-# ─── Per-user msmtprc for the plato process ───────────────────────────
+# ─── Mail readiness check ─────────────────────────────────────────────
 #
-# msmtp's /etc/msmtprc must stay mode 600 root:root (msmtp REFUSES to
-# read group/world-readable creds). That blocks the plato user from
-# reading it. msmtp prefers ~/.msmtprc when invoked by a user, so we
-# create $INSTALL_DIR/.msmtprc as a copy with the logfile rewritten
-# to a path under $INSTALL_DIR/data (ProtectSystem=strict in plato.service
-# makes /var/log/msmtp.log read-only for the plato process; logging
-# would fail and msmtp would exit non-zero even on successful sends).
-#
-# Cron jobs continue to use /etc/msmtprc (running as root). When the
-# operator rotates relay creds, they edit /etc/msmtprc and re-run
-# bootstrap.sh to refresh $INSTALL_DIR/.msmtprc. The duplication is
-# the price of msmtp's "no group-readable creds" rule.
-if [[ -f /etc/msmtprc ]]; then
-  echo "[bootstrap] syncing $INSTALL_DIR/.msmtprc from /etc/msmtprc"
-  sed 's|^logfile.*|logfile '"$INSTALL_DIR"'/data/msmtp.log|' /etc/msmtprc \
-    > "$INSTALL_DIR/.msmtprc"
-  chown "$PLATO_USER:$PLATO_USER" "$INSTALL_DIR/.msmtprc"
-  chmod 600 "$INSTALL_DIR/.msmtprc"
-  sudo -u "$PLATO_USER" touch "$INSTALL_DIR/data/msmtp.log"
-else
-  echo "[bootstrap] /etc/msmtprc not present — skipping plato user msmtprc sync"
-  echo "             (configure /etc/msmtprc per deploy-guide §5, then re-run bootstrap)"
+# knowless connects to localhost:25 — that means postfix (or another MTA)
+# must be installed and listening. opendkim signs outbound mail so it
+# clears DKIM at recipient ISPs. Bootstrap doesn't install or configure
+# either (operator decisions: relay vs direct delivery, DKIM key rotation,
+# DNS records); it just warns when they're missing.
+if ! command -v postconf >/dev/null 2>&1; then
+  echo "[bootstrap] WARN: postfix not installed — magic-link mail will fail"
+  echo "             (install postfix + opendkim per deploy-guide §5)"
+fi
+if ! command -v opendkim-genkey >/dev/null 2>&1; then
+  echo "[bootstrap] WARN: opendkim not installed — outbound mail will deliver"
+  echo "             unsigned and land in spam (install per deploy-guide §5)"
 fi
 
 # ─── Render templates ─────────────────────────────────────────────────
@@ -178,8 +168,10 @@ Files installed:
   $BACKUP_DIR (owned by $PLATO_USER)
 
 Next, by hand (these need decisions / secrets):
-  1. /etc/msmtprc          — see deploy/msmtprc.example
-  2. $INSTALL_DIR/.env     — KNOWLESS_SECRET + PLATO_SENDMAIL_PATH
+  1. postfix + opendkim    — install, configure, generate DKIM key, paste DNS
+                             records (SPF / DKIM / DMARC) at registrar.
+                             See deploy-guide.md §5 (and knowless OPS.md §5).
+  2. $INSTALL_DIR/.env     — KNOWLESS_SECRET + KNOWLESS_SMTP_PORT=25
   3. $INSTALL_DIR/config.json — branding + operator block
   4. cd $INSTALL_DIR && sudo -u $PLATO_USER npm ci --omit=dev
   5. cd $INSTALL_DIR && sudo -u $PLATO_USER node --env-file=.env bin/migrate.js

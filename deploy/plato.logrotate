@@ -1,16 +1,19 @@
 # /etc/logrotate.d/plato
 #
-# Rotates everything plato or its crons redirect to /var/log/plato-*.log,
-# plus msmtp's own log. Daily, 14-day retention, gzip with 1-day delay
-# so today's log is uncompressed for fast tail/grep. copytruncate means
-# cron jobs don't have to be told to reopen their log files — the
-# truncate happens in place after the copy.
+# Rotates everything plato or its crons redirect to /var/log/plato-*.log.
+# Daily, 14-day retention, gzip with 1-day delay so today's log is
+# uncompressed for fast tail/grep. copytruncate means cron jobs don't
+# have to be told to reopen their log files — the truncate happens in
+# place after the copy.
+#
+# Postfix has its own logrotate config (/etc/logrotate.d/syslog or
+# /etc/logrotate.d/postfix on most distros) — we don't duplicate it.
 #
 # Files plato writes itself (./data/stats.log, $BACKUP_DIR/health.log) are
 # NOT rotated here — they grow ~one line per day or per failure event,
 # don't need rotation, and stats-weekly.js reads stats.log end-to-end.
 
-/var/log/plato*.log /var/log/msmtp.log {
+/var/log/plato*.log {
     daily
     rotate 14
     compress
