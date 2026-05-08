@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — `/about` defines the operator role (post-M8, docs/about)
+
+The word "operator" appeared twice on `/about` (the read-only carve-out
+and the "if you don't trust this operator" fork section) but was never
+defined positively. Readers had to infer the trust contract from the
+negative space. Added a one-line `**the operator.**` paragraph at the
+top of "how this place works" stating the operator runs the server but
+has no in-app privilege — no admin role, no override of sub mods, no
+quiet removals. Closes the trust loop the existing copy was gesturing
+at; one sentence, no new section.
+
 ### Changed — drop empty `general` sub on fresh installs (post-M8, schema/general)
 
 PRD §Permanently out has always said "no default catch-all sub" — and
