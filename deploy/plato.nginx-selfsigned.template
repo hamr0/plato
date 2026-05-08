@@ -12,15 +12,14 @@
 # See deploy-guide.md §"Self-signed mode (homeserver / LAN testing)"
 # for the full render command and matching cert generation.
 #
+# This template listens on 443 only — port 80 is *intentionally* not
+# touched. Self-signed mode lives on boxes where 80 is usually already
+# taken (AdGuard Home, Pi-hole, Home Assistant, Caddy on another tenant,
+# etc.). If port 80 IS free on yours and you want the HTTP→HTTPS
+# redirect, prepend the block at the bottom of this file (commented).
+#
 # Cert + key paths default to those used by deploy/gen-selfsigned-cert.sh
 # and matched by deploy/teardown.sh.
-
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${DOMAIN};
-    return 301 https://$host$request_uri;
-}
 
 server {
     listen 443 ssl;
@@ -49,3 +48,13 @@ server {
         add_header Cache-Control "no-store" always;
     }
 }
+
+# Optional: if port 80 is free on your box and you want a clean
+# HTTP→HTTPS redirect, uncomment the block below.
+#
+# server {
+#     listen 80;
+#     listen [::]:80;
+#     server_name ${DOMAIN};
+#     return 301 https://$host$request_uri;
+# }
