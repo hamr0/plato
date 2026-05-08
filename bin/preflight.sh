@@ -170,22 +170,34 @@ else
   fail "DB_PATH dir not writable ($DB_DIR) — chown plato:plato $DB_DIR"
 fi
 
+# Note: do NOT mkdir these dirs from preflight. When preflight runs as
+# root (the deploy guide's path) any mkdir lands as root:root, which
+# silently breaks plato (running as the plato user) — `/healthz` then
+# reports `exports_dir_writable: false` after a clean-looking start.
+# Bootstrap or the operator owns directory creation; preflight only
+# checks. This rule was added after the homeserver smoke test caught
+# a 502/ok:false flow that traced back to preflight's own mkdir.
+
 POSTS_DIR=$(read_env POSTS_DIR)
 POSTS_DIR="${POSTS_DIR:-$POSTS_DIR_DEFAULT}"
-mkdir -p "$POSTS_DIR" 2>/dev/null || true
-if [ -w "$POSTS_DIR" ]; then
-  ok "POSTS_DIR writable ($POSTS_DIR)"
+if [ ! -d "$POSTS_DIR" ]; then
+  fail "POSTS_DIR does not exist ($POSTS_DIR) — bootstrap.sh creates it; or: sudo -u plato mkdir -p $POSTS_DIR"
+elif [ -w "$POSTS_DIR" ]; then
+  POSTS_OWNER=$(stat -c '%U' "$POSTS_DIR" 2>/dev/null || stat -f '%Su' "$POSTS_DIR" 2>/dev/null)
+  ok "POSTS_DIR writable ($POSTS_DIR, owner=$POSTS_OWNER)"
 else
-  fail "POSTS_DIR not writable ($POSTS_DIR)"
+  fail "POSTS_DIR not writable ($POSTS_DIR) — chown plato:plato $POSTS_DIR"
 fi
 
 EXPORTS_DIR=$(read_env EXPORTS_DIR)
 EXPORTS_DIR="${EXPORTS_DIR:-$EXPORTS_DIR_DEFAULT}"
-mkdir -p "$EXPORTS_DIR" 2>/dev/null || true
-if [ -w "$EXPORTS_DIR" ]; then
-  ok "EXPORTS_DIR writable ($EXPORTS_DIR)"
+if [ ! -d "$EXPORTS_DIR" ]; then
+  fail "EXPORTS_DIR does not exist ($EXPORTS_DIR) — bootstrap.sh creates it; or: sudo -u plato mkdir -p $EXPORTS_DIR"
+elif [ -w "$EXPORTS_DIR" ]; then
+  EXPORTS_OWNER=$(stat -c '%U' "$EXPORTS_DIR" 2>/dev/null || stat -f '%Su' "$EXPORTS_DIR" 2>/dev/null)
+  ok "EXPORTS_DIR writable ($EXPORTS_DIR, owner=$EXPORTS_OWNER)"
 else
-  fail "EXPORTS_DIR not writable ($EXPORTS_DIR)"
+  fail "EXPORTS_DIR not writable ($EXPORTS_DIR) — chown plato:plato $EXPORTS_DIR"
 fi
 
 # ─── Port ─────────────────────────────────────────────────────────────

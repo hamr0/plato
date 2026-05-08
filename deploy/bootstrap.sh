@@ -84,6 +84,15 @@ chown "$PLATO_USER:$PLATO_USER" "$INSTALL_DIR"
 mkdir -p "$BACKUP_DIR"
 chown "$PLATO_USER:$PLATO_USER" "$BACKUP_DIR"
 
+# plato writes to posts/ and exports/ at runtime; bootstrap creates
+# them with plato ownership so they survive systemd's ProtectSystem
+# sandbox (which permits writes only to ReadWritePaths). preflight.sh
+# deliberately doesn't mkdir these — when run as root that would land
+# the dirs as root:root, blocking plato silently.
+mkdir -p "$INSTALL_DIR/posts" "$INSTALL_DIR/exports" "$INSTALL_DIR/data"
+chown -R "$PLATO_USER:$PLATO_USER" \
+  "$INSTALL_DIR/posts" "$INSTALL_DIR/exports" "$INSTALL_DIR/data"
+
 touch /var/log/plato.log
 chown "$PLATO_USER:$PLATO_USER" /var/log/plato.log
 
