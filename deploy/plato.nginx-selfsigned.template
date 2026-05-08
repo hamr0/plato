@@ -1,0 +1,51 @@
+# Self-signed nginx config for plato — homeserver / LAN testing only.
+# Replaces /etc/nginx/conf.d/plato.conf when not using certbot/Let's Encrypt.
+#
+# Rendered from deploy/plato.nginx-selfsigned.template; do not edit
+# /etc/nginx/conf.d/plato.conf directly — edit the template and re-render.
+#
+# Production deploys (real public domain + DNS) use plato.nginx.template
+# + `certbot --nginx` instead. This file is for the scenarios certbot
+# can't handle: private hostnames, RFC1918 IPs, split-horizon DNS,
+# developer laptops, internal staging.
+#
+# See deploy-guide.md §"Self-signed mode (homeserver / LAN testing)"
+# for the full render command and matching cert generation.
+#
+# Cert + key paths default to those used by deploy/gen-selfsigned-cert.sh
+# and matched by deploy/teardown.sh.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/pki/tls/certs/plato.crt;
+    ssl_certificate_key /etc/pki/tls/private/plato.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:plato:10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${PLATO_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        client_max_body_size 8m;
+    }
+
+    location = /healthz {
+        proxy_pass http://127.0.0.1:${PLATO_PORT}/healthz;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store" always;
+    }
+}

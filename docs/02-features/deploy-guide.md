@@ -595,6 +595,39 @@ Before you announce the URL:
 - **Set up monitoring beyond `/healthz`.** A monthly $0 ping from UptimeRobot or BetterStack on the public URL is plenty for a hobby forum. The `/healthz` endpoint is what they should hit.
 - **Run a self-hosted MTA.** Outbound port 25 is blocked by most VPS providers and IP reputation matters; the msmtp + relay setup is the realistic OSS path. See [`operator-guide.md`](operator-guide.md) for the long-form reasoning.
 
+## Self-signed mode (homeserver / LAN testing)
+
+For deploys where certbot can't help — private hostnames (`homelab`, `federver`), RFC1918 IPs, split-horizon DNS, a developer laptop, internal staging — plato ships a self-signed alternative. Two artifacts:
+
+- `deploy/gen-selfsigned-cert.sh` — wraps `openssl req -x509` to drop a key + cert at the canonical Fedora/RHEL paths (`/etc/pki/tls/{certs,private}/plato.{crt,key}`).
+- `deploy/plato.nginx-selfsigned.template` — replaces the certbot-managed config; listens on 80 (redirect → 443) and 443 ssl, proxy_pass to `${PLATO_PORT}`.
+
+Use this **instead of** Step 11. Steps 1–10 + 12–13 work unchanged.
+
+```bash
+# Generate the cert + key. CN must match what you'll connect to in the
+# browser (your hostname). Subject Alt Names cover localhost + 127.0.0.1
+# so curl from the box itself works without -k.
+sudo CN=$DOMAIN /opt/plato/deploy/gen-selfsigned-cert.sh
+
+# Render the SSL nginx config and replace bootstrap's HTTP-only one.
+DOMAIN=$DOMAIN PLATO_PORT=$PLATO_PORT \
+  envsubst '${DOMAIN} ${PLATO_PORT}' \
+  < /opt/plato/deploy/plato.nginx-selfsigned.template \
+  | sudo tee /etc/nginx/conf.d/plato.conf > /dev/null
+
+sudo nginx -t                         # syntax check
+sudo systemctl enable --now nginx
+sudo systemctl reload nginx           # if already running
+
+# Smoke. -k accepts the self-signed cert.
+curl -sSk https://$DOMAIN/healthz | jq .
+```
+
+Browsers will warn about the self-signed cert. Accept the warning — you generated it. Importing the cert into your trust store is doable but out of scope for this guide.
+
+When you migrate from homeserver test → real VPS, you swap *only* the nginx config + cert source; everything else (msmtp, /etc/cron.d/plato, systemd unit, /etc/msmtprc creds, KNOWLESS_SECRET, config.json) carries over. To remove the self-signed bits during teardown, `deploy/teardown.sh` already covers `/etc/pki/tls/{certs,private}/plato.{crt,key}` (interactive prompt; pass `--yes-data` to skip).
+
 ## Where to read next
 
 - [`operator-guide.md`](operator-guide.md) — full operator reference: every config knob, every cron job, every threshold, every locked decision.
