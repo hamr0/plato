@@ -6,6 +6,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — Ubuntu 24.04 primary path + Step 0 SSH hardening (post-M8, deploy/5)
+
+The deploy guide privileged AlmaLinux 9 as the primary distro, but Ubuntu
+is the actual default on every budget VPS provider (RackNerd, Hetzner,
+DigitalOcean, Linode, Vultr) — including the RackNerd box plato is now
+tested against. The guide's framing was backwards relative to where
+operators actually land. Also: the guide assumed key-based SSH was
+already in place when the typical RackNerd-shape delivery is `root` +
+password, leaving the box exposed to credential-stuffing during setup.
+
+- **Title + stack + prerequisites flipped to Ubuntu primary.** Ubuntu
+  24.04 LTS (apt + ufw + AppArmor) is the named primary path; AlmaLinux
+  9 / RHEL 9 (dnf + firewalld + SELinux) and Fedora live in parallel
+  blocks at Steps 1–3. Steps 4–13 are unchanged (already distro-
+  agnostic) — bootstrap.sh handles the SELinux check via
+  `command -v setsebool || skip` so it works on Ubuntu without edits.
+- **NEW Step 0 — SSH hardening.** Generate an ed25519 key on the
+  laptop, copy via `ssh-copy-id`, then disable `PasswordAuthentication`
+  and set `PermitRootLogin prohibit-password` in `/etc/ssh/sshd_config`.
+  Distro-agnostic. Verified in a second terminal before closing the
+  first session (the safety-net pattern). Unit name fallback handles
+  Ubuntu (`ssh`) vs RHEL (`sshd`).
+- **Step 1 — apt block as primary.** Pre-seeds postfix via
+  `debconf-set-selections` to skip the interactive Internet Site dialog,
+  installs nginx + sqlite3 + ufw + postfix + opendkim in one
+  non-interactive run. NodeSource for Node 22 (Ubuntu's apt repo lags).
+  AlmaLinux/RHEL and Fedora dnf blocks moved below as alternatives.
+- **Step 2 — ufw as primary.** `ufw allow OpenSSH` + `ufw allow 'Nginx
+  Full'`. firewalld block kept as RHEL alternative.
+- **Step 3 — AppArmor as primary.** Ubuntu's nginx ships unconfined, so
+  the step is a sanity-check (`aa-status | grep nginx`) rather than a
+  config change. SELinux `setsebool` block kept as RHEL alternative.
+- **Troubleshooting + security checklist updated** to reference
+  "firewall (ufw or firewalld)" and the AppArmor fallback when 502s
+  appear on Ubuntu (no SELinux boolean to flip — log-dive instead).
+- **operator-guide §Hosting** updated to name Ubuntu 24.04 as RackNerd's
+  default and the deploy guide's primary, with AlmaLinux 9 as the
+  supported alternative.
+
 ### Changed — `/about` defines the operator role (post-M8, docs/about)
 
 The word "operator" appeared twice on `/about` (the read-only carve-out

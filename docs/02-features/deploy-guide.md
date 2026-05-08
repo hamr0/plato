@@ -1,12 +1,14 @@
 # plato deploy guide
 
-A single, opinionated path from a fresh AlmaLinux 9 VPS to a running plato instance with TLS, mail, monitoring, and backups. No "pick one of three" forks; every choice has been made for you.
+A single, opinionated path from a fresh Ubuntu 24.04 VPS to a running plato instance with TLS, mail, monitoring, and backups. No "pick one of three" forks; every choice has been made for you.
 
 If you want to know *why* a choice was made, see the cross-references; they all point at [`operator-guide.md`](operator-guide.md) or [`plato.context.md`](plato.context.md).
 
+**Distro support.** Primary path: **Ubuntu 24.04 LTS** (also works on Debian 12). The guide also includes parallel **AlmaLinux 9 / RHEL 9** blocks at the three steps that differ (1, 2, 3). Everything from Step 4 onward is distro-agnostic.
+
 ## Stack, in one breath
 
-- **OS**: AlmaLinux 9 (RHEL-equivalent). Packages via `dnf`, services via `systemctl`, firewall via `firewalld`, SELinux enforcing.
+- **OS**: Ubuntu 24.04 LTS (apt + ufw + AppArmor) on the primary path; AlmaLinux 9 / RHEL 9 (dnf + firewalld + SELinux) supported via parallel blocks in Steps 1–3.
 - **Runtime**: Node ≥ 22.5 from NodeSource. SQLite 3 from the distro repo.
 - **Reverse proxy + TLS**: nginx + certbot (`certbot.timer` auto-renews twice daily).
 - **Outbound mail**: postfix + opendkim. knowless connects to `localhost:25`; postfix delivers direct to recipient mail servers, opendkim signs every outbound message with your domain's DKIM key. SPF, DKIM, and DMARC live as TXT records at your registrar. **No vendor SMTP relay.** Your domain, your IP, your reputation.
@@ -53,7 +55,7 @@ Two consequences worth internalizing:
 
 Before you start:
 
-- [ ] AlmaLinux 9 VPS with public IPv4. 1 GB RAM, 25 GB disk, 1 vCPU is plenty for a hobby forum. Budget: **RackNerd ~$20/year** (KVM, full control, port 25 + PTR available via support ticket — what plato is tested on). Mid-tier: Hetzner CX11 (€4.50/mo, EU). Higher-touch: DigitalOcean / Linode / OVH / Vultr — all work, but check the port-25 row below before committing.
+- [ ] Ubuntu 24.04 LTS VPS with public IPv4 (or AlmaLinux 9; the guide branches at Steps 1–3). 1 GB RAM, 25 GB disk, 1 vCPU is plenty for a hobby forum. Budget: **RackNerd ~$20/year** (KVM, full control, port 25 + PTR available via support ticket — what plato is tested on). Mid-tier: Hetzner CX11 (€4.50/mo, EU). Higher-touch: DigitalOcean / Linode / OVH / Vultr — all work, but check the port-25 row below before committing.
 - [ ] Domain you control with DNS access (for the `A` record AND for SPF/DKIM/DMARC TXT records). **Point an `A` record at the VPS IP before step 11**; certbot needs to resolve `$DOMAIN` to the VPS to issue the cert.
 - [ ] **VPS provider doesn't block port 25 outbound.** Most providers' anti-spam policy blocks it on new accounts; some unblock on request, some never do. Check before you commit:
   - **RackNerd** — blocked by default, unblocked on request via a 1-paragraph support ticket. Approves in hours, free. The port-25 + PTR tickets can go in together; there's a paste-ready template in [operator-guide.md § Hosting](operator-guide.md#hosting--budget-vps-recommendation).
@@ -83,9 +85,86 @@ sudo ss -tlnp 'sport = :8080'        # what's there?
 # and you'll mirror it as PORT=8090 in plato's .env.
 ```
 
+## Step 0 — SSH hardening
+
+Before any plato setup. Most budget VPS providers (RackNerd, OVH, Hetzner cloud) deliver `root` + password authentication by default — credential-stuffing bots scan public IPv4 ranges constantly, so leaving password auth on while you set up TLS and mail is a bad way to start.
+
+**On your laptop**, generate a key (skip if you already have `~/.ssh/id_ed25519`) and copy it to the VPS:
+
+```bash
+ssh-keygen -t ed25519 -C "$(whoami)@$(hostname)"
+
+# Copy the pubkey to the VPS — you'll be prompted for the root password
+# one last time:
+ssh-copy-id root@<VPS_IP>
+
+# Verify key auth works WITHOUT a password prompt:
+ssh root@<VPS_IP> 'whoami'    # should print: root
+```
+
+If `ssh-copy-id` isn't available (older macOS without Homebrew), do it manually:
+
+```bash
+# On laptop:
+cat ~/.ssh/id_ed25519.pub
+# Copy the output, then on the VPS:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "<paste-pubkey-here>" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+**On the VPS**, disable password auth and harden `sshd`:
+
+```bash
+# Distro-agnostic. PasswordAuthentication=no is the line that matters;
+# the rest is defense-in-depth.
+sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/'   /etc/ssh/sshd_config
+sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/'  /etc/ssh/sshd_config
+sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/'      /etc/ssh/sshd_config
+
+# Ubuntu/Debian split sshd config across drop-ins; check none of them
+# re-enable password auth:
+grep -rE "^[^#]*PasswordAuthentication" /etc/ssh/sshd_config.d/ 2>/dev/null
+
+# Reload sshd. The unit name differs by distro; this handles both:
+systemctl reload ssh 2>/dev/null || systemctl reload sshd
+```
+
+**Verify in a SECOND terminal** (keep the first ssh session open as a safety net in case you locked yourself out):
+
+```bash
+ssh root@<VPS_IP>                              # should land in, no password prompt
+ssh -o PubkeyAuthentication=no root@<VPS_IP>   # should be: 'Permission denied (publickey).'
+```
+
+If both pass, password auth is off and only your private key works. Close the first session.
+
+> **Re-exporting env vars after re-login.** The `DOMAIN` / `ADMIN_EMAIL` / `PLATO_PORT` you set in Prerequisites only live in the original shell. After ssh'ing back in for verification, re-run the three `export` lines. The rest of the guide assumes they're set in the current session.
+
 ## Step 1 — Base system + Node + nginx + postfix + opendkim
 
-**AlmaLinux 9 / RHEL 9 (needs EPEL for opendkim):**
+**Ubuntu 24.04 / Debian 12 (apt — primary path):**
+
+Pre-seed `postfix` to skip its interactive setup dialog, then install everything in one shot:
+
+```bash
+apt -y update && apt -y upgrade
+
+echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
+echo "postfix postfix/mailname string $DOMAIN"               | debconf-set-selections
+
+DEBIAN_FRONTEND=noninteractive apt -y install \
+  nginx certbot python3-certbot-nginx \
+  sqlite3 git jq tar ufw \
+  postfix opendkim opendkim-tools \
+  vim curl ca-certificates gnupg
+
+# Node 22 from NodeSource (Ubuntu's apt repo lags by 1–2 majors)
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt -y install nodejs
+```
+
+**AlmaLinux 9 / RHEL 9 (dnf — needs EPEL for opendkim):**
 
 ```bash
 dnf -y update
@@ -101,7 +180,7 @@ curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
 dnf -y install nodejs
 ```
 
-**Fedora 38+ (Server / Cloud / Workstation):**
+**Fedora 38+ (dnf — homeserver path):**
 
 ```bash
 dnf -y update
@@ -118,9 +197,9 @@ node --version    # need ≥ 22.5
 #   dnf -y install nodejs
 ```
 
-`postfix` provides `/usr/sbin/sendmail` automatically (via `alternatives --set mta`). No second package needed for the sendmail interface that cron mail uses.
+`postfix` provides `/usr/sbin/sendmail` automatically on every distro — via `update-alternatives` on Debian/Ubuntu, `alternatives --set mta` on RHEL family. No second package needed for the sendmail interface that cron mail uses.
 
-**Sanity (both distros):**
+**Sanity (any distro):**
 
 ```bash
 node --version            # v22.5+ required (--env-file flag)
@@ -133,26 +212,46 @@ opendkim-genkey -V        # opendkim is installed
 
 ## Step 2 — Firewall
 
+**Ubuntu / Debian (ufw — primary path):**
+
+```bash
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow OpenSSH
+ufw allow 'Nginx Full'         # opens 80 + 443
+ufw --force enable
+ufw status verbose             # expect: 22, 80/tcp, 443/tcp ALLOW IN; defaults deny
+```
+
+**AlmaLinux / RHEL / Fedora (firewalld):**
+
 ```bash
 systemctl enable --now firewalld
 firewall-cmd --permanent --add-service=ssh
 firewall-cmd --permanent --add-service=http
 firewall-cmd --permanent --add-service=https
 firewall-cmd --reload
-firewall-cmd --list-services       # expect: ssh http https
+firewall-cmd --list-services    # expect: ssh http https
 ```
 
-## Step 3 — SELinux (the easy-to-miss step)
+## Step 3 — Mandatory access control (the easy-to-miss step)
 
-AlmaLinux runs SELinux in enforcing mode. nginx by default cannot proxy to backends on `localhost` — you'll get 502s and waste an hour.
+**Ubuntu / Debian (AppArmor — primary path):**
+
+Ubuntu ships AppArmor enabled, but the `nginx` package doesn't install an enforced profile by default — proxying to a localhost backend works out of the box. Sanity-check anyway so you know what you're looking at:
+
+```bash
+aa-status | grep nginx || echo "nginx unconfined under AppArmor — OK"
+```
+
+If you ever add a custom AppArmor profile for nginx, make sure it allows outbound TCP to `127.0.0.1`. Off the default install, nothing to do here.
+
+**AlmaLinux / RHEL / Fedora (SELinux):**
+
+SELinux runs in enforcing mode by default. nginx is forbidden from proxying to backends on `localhost` until you flip a boolean — you'll get 502s and waste an hour:
 
 ```bash
 setsebool -P httpd_can_network_connect 1
-```
-
-That's it. Verify:
-
-```bash
 getsebool httpd_can_network_connect    # → on
 ```
 
@@ -732,10 +831,15 @@ nginx can't reach the backend. In order:
 ```bash
 systemctl status plato                    # is plato up?
 ss -tlnp | grep 8080                      # is plato actually listening?
-getsebool httpd_can_network_connect       # did you do step 3?
+
+# RHEL-family only:
+getsebool httpd_can_network_connect       # did you do step 3? expect: on
+
+# Ubuntu/Debian only:
+aa-status | grep nginx                    # expect: nothing (nginx unconfined)
 ```
 
-The third one is the most-common 502 cause on AlmaLinux. Re-run `setsebool -P httpd_can_network_connect 1`.
+On AlmaLinux/RHEL/Fedora, the SELinux boolean is the most-common 502 cause — re-run `setsebool -P httpd_can_network_connect 1`. On Ubuntu, AppArmor doesn't block this by default, so a 502 there points at plato itself or nginx config — read `journalctl -u nginx | tail -20` and `journalctl -u plato | tail -20`.
 
 ### `/healthz` returns 503
 
@@ -841,8 +945,8 @@ Before you announce the URL:
 - [ ] `/etc/opendkim/keys/$DOMAIN/default.private` is mode 600, owned opendkim. **Back this up** — losing it means re-rotating DKIM at the registrar before mail can sign again.
 - [ ] postfix `inet_interfaces = loopback-only` (verify: `postconf inet_interfaces`).
 - [ ] `/opt/plato/.env` is mode 600, owned plato:plato.
-- [ ] firewalld allows only 22/80/443 (`firewall-cmd --list-services`).
-- [ ] SSH login as root is disabled (`PermitRootLogin no` in `/etc/ssh/sshd_config`); you log in as a sudoer with a key.
+- [ ] Firewall allows only 22/80/443 (`ufw status` on Ubuntu, `firewall-cmd --list-services` on RHEL).
+- [ ] SSH password auth is off (`PasswordAuthentication no`) and you authenticate with a key — set in Step 0.
 - [ ] `KNOWLESS_SECRET` is backed up somewhere you trust (password manager, encrypted USB). Losing it ≈ losing every user.
 - [ ] `git remote -v` in `/opt/plato` matches the upstream you intended.
 - [ ] The first signed-in user on the live site is *you* — that establishes you as the de-facto admin in the modlog.

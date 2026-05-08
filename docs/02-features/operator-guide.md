@@ -407,7 +407,7 @@ A separate "evaluation Docker image" is on the roadmap (`docker run -p 8080:8080
 
 plato is one node process + one SQLite file + one HTTP port; it runs comfortably on any 1 GB / 1 vCPU / 25 GB VPS. Hosting cost should be under $30/year for a hobby instance.
 
-**What plato has been tested on:** **RackNerd** ($10–$25/year for a KVM VPS, varies by promo). Not the prettiest control panel, but the spec/price ratio is unmatched at this tier and they unblock port 25 + set PTR via support ticket within hours of asking. AlmaLinux 9 is a one-click OS template.
+**What plato has been tested on:** **RackNerd** ($10–$25/year for a KVM VPS, varies by promo). Not the prettiest control panel, but the spec/price ratio is unmatched at this tier and they unblock port 25 + set PTR via support ticket within hours of asking. Ubuntu 24.04 LTS is the default OS template (and the deploy guide's primary path); AlmaLinux 9 is also a one-click option if you prefer the RHEL family.
 
 **Two configuration changes you'll need to ask RackNerd for** (paste-ready ticket — file both in one ticket):
 
@@ -444,7 +444,7 @@ Replace `<yourdomain.com>`, `<YOUR_HOSTNAME_OR_VPS_ID>`, and `<YOUR_IPV4>` with 
 
 ### First-time install
 
-For a **production deploy** to a fresh VPS (AlmaLinux + nginx + Let's Encrypt + postfix + opendkim + systemd + cron), follow [`deploy-guide.md`](deploy-guide.md) — it's a single opinionated path with every choice made and a troubleshooting section. The notes below are for **local development** only.
+For a **production deploy** to a fresh VPS (Ubuntu 24.04 primary, AlmaLinux 9 supported, with nginx + Let's Encrypt + postfix + opendkim + systemd + cron), follow [`deploy-guide.md`](deploy-guide.md) — it's a single opinionated path with every choice made and a troubleshooting section. The notes below are for **local development** only.
 
 ```bash
 git clone https://github.com/hamr0/plato.git
