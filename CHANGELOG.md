@@ -6,6 +6,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Changed — deploy-guide polish; ship disable-nginx-default-server.sh (post-M8, deploy/4)
+
+Postmortem from a homeserver smoke against the new deploy/3 stack
+surfaced four friction points; this entry collects all four.
+
+- **§9 ↔ §10 reorder.** Old guide ran preflight before bootstrap;
+  bootstrap creates `posts/`, `exports/`, `data/` so preflight always
+  FAILed those checks. New order: bootstrap (creates dirs + system
+  files) → migrate + preflight + start plato as one capstone.
+  Renumbered remaining steps so the sequence flows cleanly.
+- **§8 (config.json) expanded.** Was a heredoc + one paragraph; now
+  opens with the .env-vs-config.json split table (mode 600 secret-
+  bearing config vs editable forum-shape config), per-field
+  walkthrough, optional sections to add later, and a JSON-parse
+  verify command. Operators can now read §8 and understand WHY the
+  file exists, not just paste it.
+- **Log-path split documented everywhere.** plato app output
+  (mail-outcome hooks, knowless lines, request errors) goes to
+  `/var/log/plato.log`; `journalctl -u plato` shows only systemd
+  lifecycle events. Routine-ops table, troubleshooting "won't
+  start", magic-link debugging, and the homeserver appendix all
+  call this out explicitly. Bit us mid-smoke when the diagnostic
+  pointed at journalctl, which had nothing.
+- **Homeserver appendix promoted to Steps A1–A8.** Was three short
+  paragraphs; now a full copy-paste walkthrough with expected-
+  output markers per step, mirroring the production guide's shape.
+  Calls out what carries over to the VPS migration vs what gets
+  redone. Validates auth-flow + UI + observability hooks in dev
+  mode (`KNOWLESS_DEV_LOG_LINKS=true`); real mail validation
+  remains the VPS's job.
+- **deploy/disable-nginx-default-server.sh** (NEW, ~80 LOC bash) —
+  idempotent script that comments out Fedora's stock
+  `server { listen 80; }` block in `/etc/nginx/nginx.conf` for
+  boxes where :80 is already taken (AdGuard, Pi-hole, another
+  tenant). Backs up to `nginx.conf.preplato`, runs `nginx -t` to
+  verify the result. **Production VPS deploys do NOT need this** —
+  nginx owning :80 with HTTP→HTTPS redirect is the default and
+  correct setup. Referenced only from the homeserver appendix.
+- **Expected-output sweep.** Step blocks that previously left it to
+  inference now show the shape of expected output (`useradd` perms
+  line, postfix/opendkim service-active lines, milter port
+  listener). docs/02-features/plato.context.md updated to clarify
+  log destinations + dev-mode magic-link fallback.
+
 ### Changed — knowless owns plato's mail end-to-end; postfix + opendkim replace msmtp wrapper (post-M8, deploy/3)
 
 - **Removed `src/mail/transport.js`** + its 9 unit tests. plato no

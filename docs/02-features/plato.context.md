@@ -462,13 +462,13 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 - One Node process. No clustering needed at hobby scale; SQLite WAL handles concurrent readers fine.
 - Reverse proxy (Caddy/nginx) for TLS. M8 adds opinionated Caddy config.
 - Backups: `cp forum.db forum.db.bak` and rsync `posts/`. SQLite WAL means you can copy the live file (`.backup` is safer for hot copies).
-- Logging: stdout. Pipe to `journalctl` via systemd or your favorite log shipper.
+- Logging: plato writes to stdout/stderr. The deploy-shipped systemd unit redirects both to `/var/log/plato.log` (so journalctl shows lifecycle only; app output is in plato.log). knowless's mail-outcome hooks land here as `[plato mail.submit]` / `[plato mail.fail]` / `[plato mail.suppressed]` — grep-friendly observability without a metrics endpoint.
 - Monitoring: hit `/` and check 200; failures are loud. No metrics endpoint yet.
 - Secrets: `KNOWLESS_SECRET` is the entire identity of the forum. Losing it doesn't break anything (handles still work — they were derived once and stored). Leaking it lets someone forge handles, so treat like a session-signing key. The Ed25519 archive-signing privkey lives in the DB's `instance_keypair` table (M7/B4); leaking it lets someone forge archives that match this instance's pubkey, so back up `forum.db` securely and don't ship it to anyone you don't trust.
 
 ## Gotchas
 
-- **Magic-link emails go to a real SMTP server.** In dev, run `python3 -m smtpd -c DebuggingServer -n localhost:1025` or use mailhog. Without it, the form will accept submissions but the magic link is logged to stdout (knowless dev mode).
+- **Magic-link emails go to a real SMTP server.** Production stack is postfix + opendkim on the box (deploy-guide §5); knowless connects to localhost:25, postfix delivers direct, opendkim signs with the operator's domain DKIM key. In dev, no MTA runs; `KNOWLESS_DEV_LOG_LINKS=true` (set in `.env.dev` for `npm run dev`) prints the magic link to stderr via `[knowless dev:from] magic link: ...` instead of mailing it. Without that flag, login forms 200 silently and the link goes nowhere.
 - **`general` sub is hidden from new-post forms by design.** Don't be surprised if the sub picker doesn't show it.
 - **Post permalinks are `/post/<id>` and `/sub/<name>/post/<id>` — both work.** The sub-scoped form is canonical (used everywhere internally); the bare `/post/<id>` is kept for share-links from before sub-scoping.
 - **Score is a `REAL` cache, not a source of truth.** It's updated transactionally on every vote. If it ever drifts, the source of truth is `SUM(value) FROM votes WHERE target_*`. There's no rebuild script yet.
