@@ -1499,6 +1499,22 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .imported-banner a { color: var(--accent); }
 .imported-banner strong { color: var(--text); }
 
+/* Eval-image banner — full-width strip at the very top of every page.
+   Only present on the docker eval image (PLATO_EVAL_BANNER=1). Reuses
+   the sticky-note --note-bg fill so the "evaluation" signal doesn't
+   add a second yellow shade to the palette. Centered, small, links
+   inherit --accent. */
+.eval-banner {
+  background: var(--note-bg);
+  color: var(--text);
+  border-bottom: 1px solid var(--accent-warm);
+  padding: 0.4rem 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+.eval-banner a { color: var(--accent); }
+
 /* Sub sticky note (M8/B1) — the per-sub mod-voice slot above the feed.
    Full-frame yellow notice: filled background (--note-bg, theme-aware),
    warm-accent border on all four sides, normal text color for high

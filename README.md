@@ -74,6 +74,16 @@ Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.disc
 
 ## Try it
 
+**Fastest path — Docker eval image (one command):**
+
+```bash
+docker run --rm -p 8080:8080 ghcr.io/hamr0/plato:latest
+```
+
+Open `http://localhost:8080`. Click **log in**, enter any email, then watch `docker logs` for the magic-link URL — paste it into your browser. The yellow strip at the top of every page reminds you this is an evaluation image, not a production deploy. Pass `-v plato-data:/app/data` if you want forum data to survive container restarts.
+
+**Production-shape path** (recommended for any real deployment — see [operator-guide §Why no docker for production](docs/02-features/operator-guide.md#why-no-docker-for-production)):
+
 ```bash
 git clone https://github.com/hamr0/plato
 cd plato

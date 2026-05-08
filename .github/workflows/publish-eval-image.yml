@@ -1,0 +1,56 @@
+# Build + push the plato evaluation image to GHCR on git tag push.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Result: ghcr.io/hamr0/plato:v0.1.0 + ghcr.io/hamr0/plato:latest
+#
+# Manual run also wired (workflow_dispatch) so the image can be
+# rebuilt without cutting a tag — useful for fixing a Dockerfile bug.
+
+name: publish eval image
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/plato"
+          TAGS="$IMAGE:latest"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAGS="$TAGS,$IMAGE:${{ github.ref_name }}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=plato evaluation image — for tinkering, not production
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

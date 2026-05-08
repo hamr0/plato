@@ -52,6 +52,7 @@ const handler = createApp({
   branding: operatorConfig.branding ?? {},
   urlDisplayMax: operatorConfig.urlDisplayMax,
   feedPageSize: operatorConfig.feedPageSize,
+  evalBanner: process.env.PLATO_EVAL_BANNER === '1',
 });
 
 const server = http.createServer(handler);

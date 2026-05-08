@@ -1,0 +1,29 @@
+# Keep the eval image lean. The production-shape `posts/`, `exports/`,
+# `forum.db`, and operator config don't ship in the image — they're
+# operator-supplied at runtime via env or volume mount.
+
+.git
+.github
+node_modules
+test
+docs
+exports
+posts
+backups
+data
+forum-poc
+.claude
+.env
+.env.dev
+.env.example
+.env.local
+*.db
+*.db-shm
+*.db-wal
+*.log
+CHANGELOG.md
+README.md
+LICENSE
+.gitignore
+.dockerignore
+Dockerfile

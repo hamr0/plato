@@ -6,6 +6,42 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — evaluation Docker image (post-M8)
+
+`docker run --rm -p 8080:8080 ghcr.io/hamr0/plato:latest` boots a
+fresh forum at `http://localhost:8080`. A yellow strip at the top of
+every page flags it as evaluation-only and links to
+[operator-guide §Why no docker for production](docs/02-features/operator-guide.md#why-no-docker-for-production).
+
+Workflow for an evaluator:
+1. `docker run …` (one command, no cloning, no env setup)
+2. Click *log in*, enter any email
+3. Watch `docker logs` for the magic-link URL, paste into browser
+4. You're in.
+
+Pass `-v plato-data:/app/data` to persist `forum.db` + `posts/` +
+the auto-generated `KNOWLESS_SECRET` across restarts; without it
+the container is fully ephemeral.
+
+Implementation: `Dockerfile` (multi-stage, `node:22-alpine`, runs as
+non-root `node` user, ~241 MB), `bin/docker-entrypoint.sh` for
+first-boot setup (generates secret, runs migrations, execs server),
+`.dockerignore` to keep the build context lean, and
+`.github/workflows/publish-eval-image.yml` that pushes to GHCR on
+`v*.*.*` tag (with `latest` always tracking). Docker's
+`HEALTHCHECK` directive wires through `/healthz` (M8/B2) so
+`docker ps` reports plato's own readiness signal.
+
+The production deploy path stays no-docker. plato is single-process
+/ single-SQLite / single-port; container orchestration adds friction
+without solving anything plato needs. New operator-guide section
+**Why no docker for production** captures the full reasoning.
+
+App-side: new `evalBanner` option on `createApp` (off by default).
+`bin/server.js` flips it on when `PLATO_EVAL_BANNER=1` is set in the
+env. +3 tests covering off-by-default, on-everywhere when on, and
+the strip's position above the page header. 804 → 807 green.
+
 ### Closed — M8 stats + alert-recipient cleanup (M8/B5 + B4 follow-up)
 
 - `bin/stats.js` daily snapshot now includes `votes` (count of cast

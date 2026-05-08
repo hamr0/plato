@@ -146,7 +146,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=36">
+<link rel="stylesheet" href="/static/style.css?v=37">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -160,7 +160,7 @@ ${themePaletteOverrides()}
 <script src="/static/uxbits.js?v=1" defer></script>
 <script src="/static/theme.js?v=1" defer></script>
 </head>
-<body>${body}${siteFooter()}</body>
+<body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);
 }
 
@@ -185,7 +185,22 @@ const branding = {
 
 // Set at boot from createApp. layout() reads `siteMeta.baseUrl` to compose
 // canonical / og:url. Module-scoped (one process per instance).
-const siteMeta = { baseUrl: '' };
+// `evalBanner` controls the top-of-page "evaluation image" strip — set by
+// the docker eval image via PLATO_EVAL_BANNER=1; off otherwise.
+const siteMeta = { baseUrl: '', evalBanner: false };
+
+// Top-of-page strip that flags this instance as the evaluation image.
+// Off by default; only the docker eval image flips it on
+// (PLATO_EVAL_BANNER=1 → bin/server.js → createApp({ evalBanner: true })).
+// Sits inside <body> above whatever the page renders so it's the first
+// thing a visitor sees on every page.
+function evalBannerView() {
+  if (!siteMeta.evalBanner) return html``;
+  return html`<div class="eval-banner" role="status">
+    evaluation image — for tinkering, not production. for production setup, see the
+    <a href="https://github.com/hamr0/plato/blob/main/docs/02-features/operator-guide.md">operator guide</a>.
+  </div>`;
+}
 
 const APP_VERSION = (() => {
   try {
@@ -5374,7 +5389,7 @@ function resolveFeedPageSize(override) {
   return override;
 }
 
-export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined }) {
+export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined, evalBanner = false }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -5394,6 +5409,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
   // Strip trailing slash so canonical concatenation produces a single
   // slash between origin and path (`https://x.test` + `/about`).
   siteMeta.baseUrl = String(baseUrl || '').replace(/\/+$/, '');
+  siteMeta.evalBanner = Boolean(evalBanner);
   setUrlDisplayMax(resolveUrlDisplayMax(urlDisplayMax));
   FEED_PAGE_SIZE = resolveFeedPageSize(feedPageSize);
   // Resolve operator overrides against the floor at boot. Bad config
