@@ -6,6 +6,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Added — SMTP unification via msmtp + comprehensive deploy guide (post-M8, deploy/1)
+
+- **`src/mail/transport.js`** — single source of truth for plato's
+  outbound mail transport. Reads `PLATO_SENDMAIL_PATH` from env and
+  returns a nodemailer sendmail transport pointed at the binary. When
+  the env var is unset (dev), returns `null` — knowless keeps its
+  SMTP-localhost:1025 default which fails fast and falls back to the
+  `KNOWLESS_DEV_LOG_LINKS` stderr path. Production sets
+  `PLATO_SENDMAIL_PATH=/usr/sbin/sendmail` (the symlink installed by
+  the `msmtp-mta` package) so plato pipes magic-link mail through
+  msmtp; relay credentials live in `/etc/msmtprc` (root, mode 600)
+  and never enter the plato process. +9 unit tests (807 → 816).
+- **`bin/server.js`** — passes the constructed transport to knowless
+  via the existing `transportOverride` knob. knowless package
+  unchanged.
+- **`.env.example`** — documents `PLATO_SENDMAIL_PATH` with a pointer
+  to the deploy guide for the matching `/etc/msmtprc` setup.
+- **`docs/02-features/deploy-guide.md`** (NEW) — single, opinionated,
+  end-to-end path from a fresh AlmaLinux 9 VPS to a running plato
+  instance with TLS, mail, monitoring, and backups. AlmaLinux + nginx
+  + certbot + msmtp + systemd + `/etc/cron.d/plato` + logrotate.
+  Includes per-step commands, an "inner wiring" diagram, a
+  troubleshooting section, and a security checklist. Designed to be
+  followable by an operator with AI assistance and zero plato
+  background.
+- **Why msmtp instead of postfix/SaaS:** msmtp is a single OSS binary
+  (~2 MB, no daemon, no spool), provides the `/usr/sbin/sendmail`
+  symlink so cron's `MAILTO=` and plato's transport both work without
+  code, and fails synchronously on relay rejection (no silent queue).
+  knowless's "refuses SMTP auth" security default is preserved as a
+  side effect — knowless still talks to a local binary via nodemailer's
+  sendmail transport, never speaks SMTP, never holds creds.
+
 ### Added — eval-image curated seed + README "What plato gives you" rewrite (post-M8)
 
 - **`bin/eval-seed.js`** runs from the docker entrypoint when

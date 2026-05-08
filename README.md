@@ -123,10 +123,13 @@ npm start
 
 Open `http://localhost:8080` and post.
 
+For deploying to a real VPS (AlmaLinux + nginx + Let's Encrypt + msmtp + systemd + cron, end-to-end with troubleshooting), follow the **[Deploy Guide](docs/02-features/deploy-guide.md)** — single opinionated path, every choice made.
+
 ---
 
 ## Documentation
 
+- [Deploy Guide](docs/02-features/deploy-guide.md) — fresh VPS to running plato, one path, all choices made.
 - [Operator Guide](docs/02-features/operator-guide.md) — running and customizing your instance.
 - [Cron jobs](docs/02-features/cron-jobs.md) — URLhaus + disposable-domains refresh, autoconfig from `config.json`.
 - [Integration Guide](docs/02-features/plato.context.md) — wiring plato into a project.
