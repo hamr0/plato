@@ -2291,15 +2291,17 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     const linkBlock = checkLinkCap(db, currentHandle, `${title}\n${postBody}`, Date.now(), linkCapConfig);
     if (linkBlock) return retry(400, linkBlock.message);
 
-    // Owner of the destination sub bypasses (a) the global per-hour
-    // burst-pacing cap and (b) the per-sub topic-flood cap. The global
-    // per-DAY cap still applies, so the spam-floor defense holds — a
-    // fresh owner can burst their daily 3 posts into their own sub
-    // without waiting an hour between each, but can't drain quota
-    // across the instance. Topic-flooding a sub you own is a
-    // contradiction; the cap was symbolic friction.
+    // Owner of the destination sub gets three carve-outs in their own
+    // sub: (a) the per-hour burst-pacing cap is bypassed, (b) the
+    // per-sub topic-flood cap is bypassed (topic-flooding your own
+    // sub is a contradiction), and (c) the per-account daily cap is
+    // doubled — but only on the recent + established tiers. New-tier
+    // owners do NOT get the daily doubling: the brigading vector is
+    // "fresh account → fresh sub → flood seed posts," so doubling 3
+    // to 6 here opens it. Recent + established already have community
+    // history, so the carve-out reads as engagement, not seeding.
     const isOwnerOfSub = canModerate(db, subName, currentHandle) === 'owner';
-    const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub });
+    const rateBlock = checkPostRate(db, currentHandle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub, doubledForOwner: isOwnerOfSub });
     if (rateBlock) return retry(429, rateBlock.message);
 
     if (!isOwnerOfSub) {
@@ -2375,12 +2377,13 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
   // Rate-limit the publish step, not draft creation. New accounts
   // confirming their email shouldn't be silently swallowed by the
   // limiter. The 429 surfaces a clear message + the home link.
-  // Owner of the destination sub bypasses the per-hour and per-sub
-  // caps; the per-day cap still bites (see handleDraft for the
-  // rationale).
+  // Owner of the destination sub bypasses the per-hour cap, gets the
+  // per-sub flood cap waived, and gets a doubled per-day cap on the
+  // recent + established tiers (new-tier owners do not double — see
+  // the rationale in handlePostNew above).
   const draftRow = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
   const isOwnerOfSub = draftRow ? canModerate(db, draftRow.sub_name, handle) === 'owner' : false;
-  const rateBlock = checkPostRate(db, handle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub });
+  const rateBlock = checkPostRate(db, handle, Date.now(), rateLimitConfig, { skipHourly: isOwnerOfSub, doubledForOwner: isOwnerOfSub });
   if (rateBlock) {
     return send(res, 429, errorPage(req, { db, auth }, {
       title: 'rate limited', message: rateBlock.message,

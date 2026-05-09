@@ -1,7 +1,11 @@
 # plato — Operator Integration Guide
 
 > For AI assistants and developers installing, running, forking, or extending a plato instance.
-> v0.3.4 (M4 + M5 mod surface + M5 defenses + M5/B6 system audit rows + M5/B7 audit hardening + M5/B8 UX pass + M5/B9–B13: branding/UI polish, per-sub flairs, per-sub + per-post sensitive flag, flag-threshold, inline revoke, simplified flair editor, post-form prefill on rejection, bare-URL truncation w/ operator `urlDisplayMax`, server-side pagination w/ operator `feedPageSize`, unified home feed — per-sub cap removed; M5/B14: guest comment composer + localStorage stash `plato:pendingComment` + login `return_to` autopost; M5/B15: sub description ≤200 chars; M6/B0: memlog — per-user notification log w/ migration 013, 90-day retention, no vote events; M6/B1: memlog activity unification — `mode=notifications/activity/all` axis, `type` column (`ntfy`/`actv`), `listActivityForHandle()` returns own posts + comments shaped to notification row contract; chrome enforcement: every page goes through `pageView` / `quickPage`, hash-jump auto-opens collapsed details; owner carve-outs from rate caps when posting/commenting in own sub — global per-day floors preserved; self-ban guard; sham-token clicks redirect to `/` not `/login` via `failureRedirect: '/'` — silent-miss extends to link-click stage; flag-auto-collapse snaps `score_at_collapse` so the third spam-defense path completes the auto-uncollapse round-trip; `auto_uncollapse_community` rows render as italic-muted "community" in modlog; mobile responsive layout pass at ≤640px breakpoint; dev/prod env split: `npm run dev` stacks `.env` + `.env.dev`; M6/B2–B5: sub subscriptions + `/subs?filter=mine` + per-sub Atom feed `/sub/<name>/rss` + inline subscribe on `/subs` + home-feed subscribed/all toggle; M6/B6: token-gated personal RSS — migration 015 added `handles.rss_token`, two routes share one token: `/u/<token>/subs.rss` (subs activity) + `/u/<token>/rss` (subs + memlog notifications), regenerate from `/memlog`, `Cache-Control: private, no-store`, robots `Disallow: /u/`; visible UI rebranded "rssvp" (per-sub action-row link + /memlog "personal rssvp feed" heading both accent-colored; URL paths unchanged); click-to-copy URLs on /memlog with transient "copied!" flash; regen redirects to `/memlog?rssvp=open` so `<details>` stays open; M6 scope finalized: email digest + ntfy push both PRD-locked under §Permanently out — pull-shape RSS in three tiers replaces them; M6 closeout: `DEFAULT_BRANDING_RULES` baked-in (4 lowercase ASCII lines surface on /about + magic-link email footer when `branding.rules` is unset; explicit `[]`/`null` suppresses); subscribe in-place via `static/subscribe.js` (fetch-based, no full reload); sub-page action row `<p>` → `<div class="sub-action-row">` (the `<form>` was breaking the row because <p> can't contain flow content); `/subs` directory: subscribers→mem column rename + nowrap on active/owner; about-page opening reads "this is a plato instance, hosted by …" — the project name, not the operator's forumName; per-sub `rssvp` link is click-to-copy via `static/rssvp.js` (same as `/memlog` personal feeds — one delegated listener handles `.rssvp-copy` buttons + `.rssvp-link` anchors; modifier-clicks bypass for `open in new tab`); subscribe button drops static underline → dotted on hover only) | Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file
+> v0.10.0 — M5 (mod surface + spam defenses + branding) → M6 (subscriptions + token-gated RSS) → M7 (Ed25519-signed archives + URL-fetch sub-import + OpenTimestamps anchor) → M8 (light/dark theme + `/healthz` + `bin/backup.sh` + `bin/health-watch.sh` + sticky note + stats/digest) → post-M8 (canonical deploy guide validated end-to-end against terribic.com; eval Docker image; mail unification via knowless+postfix+opendkim; Ubuntu 24.04 primary path; Step 14 inbound aliases + Step 15 reputation tools). Apache 2.0 (LICENSE in repo). Version surfaces: footer (`· v<version>`), startup log line, README shields.io badge — all read package.json once at boot. Established-tier post caps tightened from uncapped to 6/hr, 20/day, 60 comments/day (closes the cross-sub fan-out hole); owner doubling on per-day post cap added for `recent` and `established` (new tier holds at 3/day as brigade-guard).
+>
+> Full version trail in [CHANGELOG.md](../../CHANGELOG.md). Earlier milestone-close points retroactively tagged 0.5.0 (M5) → 0.6.0 (M6) → 0.7.0 (M7) → 0.8.0 (M8). 0.9.0 = first canonical deploy.
+>
+> Stack: Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file | no build step.
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -150,7 +154,7 @@ These have hardcoded constants because the right value is the same for almost ev
 - **`NOTE_MAX = 280`** (`src/content/flag.js`) — server-side cap on flag notes.
 - **`COMMENT_PREVIEW_CHARS = 280`** (`src/web/app.js`) — long-comment fold threshold; matches the post-preview cap on the home page.
 - **`FLAG_THRESHOLD_FLOOR = 3`** (`src/content/flag.js`) — floor for the per-sub `flagThreshold` setting. Each sub's threshold is set at creation (default 3) and can be raised by the owner but never lowered below this floor.
-- **`RATE_LIMIT_FLOOR`** (`src/content/rateLimit.js`) — PRD-locked floor for per-account + per-sub rate limits. Operator can tighten via `config.json`; loosening throws at boot. **Owner carve-out (posts)**: when the poster owns the destination sub, two caps are lifted — (a) the per-sub topic-flood cap and (b) the global per-hour burst-pacing cap (`checkPostRate` accepts `{ skipHourly: true }`). The global per-day cap (3/10/established by tier) still applies. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'`. **Owner carve-out (comments)**: when commenting in a sub you own, the daily cap is **doubled** (10→20 new, 30→60 recent) — `checkCommentRate(..., { doubledForOwner: true })`. Cap is doubled, not lifted, so a compromised owner can't drop unlimited comments. Wired in `handleAddComment`.
+- **`RATE_LIMIT_FLOOR`** (`src/content/rateLimit.js`) — PRD-locked floor for per-account + per-sub rate limits. Three tiers by handle age: `new` (<24h, 1/3/10), `recent` (1–7d, 3/10/30), `established` (>7d, 6/20/60). The established cap is held (not removed) so a single voice can't dominate the home feed via cross-sub fan-out. Operator can tighten via `config.json`; loosening throws at boot. **Owner carve-out (posts)**: when the poster owns the destination sub, three caps are adjusted — (a) the per-sub topic-flood cap is skipped, (b) the per-hour burst-pacing cap is skipped (`{ skipHourly: true }`), and (c) the per-day cap is **doubled** for `recent` and `established` (10→20, 20→40) but **not** for `new` (3 stays 3 — brigade guard against "fresh account → fresh sub → flood seed posts"). `checkPostRate(..., { skipHourly: true, doubledForOwner: true })`. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'`. **Owner carve-out (comments)**: when commenting in a sub you own, the daily cap is **doubled** for every tier (10→20 new, 30→60 recent, 60→120 established) — `checkCommentRate(..., { doubledForOwner: true })`. Cap is doubled, not lifted, so a compromised owner can't drop unlimited comments. New-tier comments *do* double because comment-flooding-own-sub is engagement, not brigading. Wired in `handleAddComment`. Doubled budget is "spent in own-sub only": once `dayCount` exceeds the base cap, posting elsewhere fails because the same dayCount is checked against the lower base cap.
 - **`LINK_CAP_FLOOR`** (`src/content/linkCap.js`) — PRD-locked floor for per-post outbound link cap (1/3/5 by tier).
 - **`NEW_ACCOUNT_WINDOW_MS = 7 days`** (`src/content/vote.js`) — how long a fresh handle is treated as "new" (half vote weight, no comment voting, posts < 24h only).
 - **`YOUNG_POST_WINDOW_MS = 24h`** — companion to the new-account rules.
@@ -237,8 +241,9 @@ Forum-wide spam-defense overrides. Lives at `<project root>/config.json` or wher
 {
   "rateLimits": {
     "perAccount": {
-      "new":    { "postsPerHour": 1, "postsPerDay": 3,  "commentsPerDay": 10 },
-      "recent": { "postsPerHour": 3, "postsPerDay": 10, "commentsPerDay": 30 }
+      "new":         { "postsPerHour": 1, "postsPerDay": 3,  "commentsPerDay": 10 },
+      "recent":      { "postsPerHour": 3, "postsPerDay": 10, "commentsPerDay": 30 },
+      "established": { "postsPerHour": 6, "postsPerDay": 20, "commentsPerDay": 60 }
     },
     "perSubDay": { "newish": 5, "trusted": 20 }
   },
@@ -372,16 +377,20 @@ Every number in plato that gates behavior. Floors are PRD-locked safe minimums; 
 
 | Tier (`accountAgeTier`) | posts/hour | posts/day | comments/day | per-sub posts/day |
 |---|---|---|---|---|
-| **new** (<24h)        | 1 | 3  | 10 | 5 |
-| **recent** (1d–7d)    | 3 | 10 | 30 | 5  (still <30d) |
-| **trusted** (≥30d)    | — | —  | —  | 20 |
-| **established** (>7d) | — | —  | —  | (per-sub still applies until 30d) |
+| **new** (<24h)         | 1 | 3  | 10 | 5 |
+| **recent** (1d–7d)     | 3 | 10 | 30 | 5  (still <30d) |
+| **established** (>7d)  | 6 | 20 | 60 | 5  (still <30d) |
+| **trusted** (≥30d)     | (uses established per-account caps) | — | — | 20 |
 
 **Owner-in-own-sub carve-outs** (`canModerate(...) === 'owner'`):
-- per-hour cap → **skipped** for posts (`checkPostRate(..., { skipHourly: true })`)
-- per-sub topic-flood cap → **skipped** for posts
-- per-day comment cap → **doubled** (10→20 new, 30→60 recent) (`checkCommentRate(..., { doubledForOwner: true })`)
-- per-day **post** cap is **not** lifted — the spam-floor never disappears
+
+| Tier | post/day base | post/day owner | comment/day base | comment/day owner |
+|---|---|---|---|---|
+| new         | 3  | 3 (unchanged — brigade guard) | 10 | 20 (2×) |
+| recent      | 10 | 20 (2×) | 30 | 60 (2×) |
+| established | 20 | 40 (2×) | 60 | 120 (2×) |
+
+Code path: `checkPostRate(db, handle, now, config, { skipHourly: true, doubledForOwner: true })` and `checkCommentRate(db, handle, now, config, { doubledForOwner: true })`. The post-side `doubledForOwner` is gated by `tier !== 'new'` inside `checkPostRate` so new-tier owners always cap at 3/day. Per-hour cap and per-sub topic-flood cap are skipped for owners independently of doubling. Doubled budget is "spent in own-sub only" — `dayCount` is global, so once it exceeds the base cap, posting in any non-owned sub fails.
 
 ### Outbound link cap per post (`src/content/linkCap.js` — `LINK_CAP_FLOOR`)
 

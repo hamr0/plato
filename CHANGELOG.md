@@ -6,7 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.9.0 fixes land here before the next bump)
+(no entries yet — next: any post-0.10.0 fixes land here before the next bump)
+
+## [0.10.0] - 2026-05-09 — rate-limit floor extension + post-launch polish
+
+Post-canonical-deploy polish wave. The largest single change is **closing the cross-sub fan-out hole**: the `established` per-account tier was previously uncapped, leaving a 7-day-old account free to fan out across many subs and dominate the home feed. The new floor caps it at 6 posts/hour, 20 posts/day, 60 comments/day. Owner-in-own-sub carve-out also extended from comments-only to posts: `recent` and `established` owners get the daily post cap doubled in their own sub (10→20, 20→40); `new`-tier owners stay at 3/day to preserve the brigade-guard against "fresh account → fresh sub → flood seed posts."
+
+Also: Apache 2.0 LICENSE is now in the repo (was implied by README; GitHub's license detector now picks it up); mobile post-page overflow fix; brand-area title truncation on the post-detail page; dead CSS cleanup from the v0.9.0 header iteration.
+
+### Added — `established` per-account rate-limit floor (closes cross-sub fan-out hole)
+
+`RATE_LIMIT_FLOOR.perAccount.established = { postsPerHour: 6, postsPerDay: 20, commentsPerDay: 60 }`. Previously the established tier (>7d) had no per-account ceiling on the theory that handle reputation + modlog history + community votes were defense enough. In practice that left a single voice free to fan out: 5 posts in each of 4 subs at the trusted-newish per-sub flood cap = 20 posts/day from one account in the cross-sub home feed, with no cap to bind. The new ceiling holds the floor so a single voice contributes at most ~1 post/hour to the home feed in any 24h window.
+
+The curve across tiers now reads as a clean build-up: 1/3/10 → 3/10/30 → 6/20/60 (posts/hour, posts/day, comments/day). Per-sub flood cap unchanged (5/day under 30d, 20/day for trusted ≥30d). `resolveRateLimitConfig` now iterates `['new', 'recent', 'established']` for the override-validation loop. PRD §Spam Defenses 2 + operator-guide caps table + plato.context numeric reference all refreshed with the new tier.
+
+### Added — owner per-day post cap doubling on `recent` + `established` tiers
+
+`checkPostRate` gains a `doubledForOwner` flag mirroring `checkCommentRate`. When the poster owns the destination sub AND the tier is not `new`, the daily post cap is doubled (10→20 for recent, 20→40 for established). Wired in `handleDraft` and `handleFinalize` alongside the existing `skipHourly` flag. Comments are doubled across every tier (10→20, 30→60, 60→120) per existing pattern; posts are gated by `tier !== 'new'` because the brigading vector for new accounts is "fresh account → fresh sub → flood seed posts" and doubling 3 to 6 here opens it. Recent and established already have community history, so the post-side carve-out reads as engagement, not seeding.
+
+Doubled budget is "spent in own-sub only": the same global `dayCount` is checked against either the doubled cap (when posting into own sub) or the base cap (when posting elsewhere), so once an owner exceeds the base cap they can only continue posting in their own sub. Same pattern as the existing comment doubling.
+
+3 new tests in `test/integration/rateLimit.test.js`: established-tier 20/day cap, new-tier owner does NOT get post-cap doubling (brigade guard), recent-tier owner gets 20/day (2× of 10), established-tier owner gets 40/day (2× of 20). 806 → 809 green.
+
+### Fixed — post-detail page horizontal scroll on mobile
+
+`.post` was a CSS grid with `grid-template-columns: auto 1fr`, and `1fr` tracks have `min-width: auto` by default. On a post-detail page with a long title, the `<h1>` inside the body track forced the grid wider than the viewport — and every `<p>` inside the rendered article then wrapped at the inflated column width rather than at viewport width, producing page-level horizontal scroll. Switched to `auto minmax(0, 1fr)` + `min-width: 0` on `.post > .body` so the body track shrinks to fit. Added `flex-wrap: wrap`, `min-width: 0`, `font-size: 1.6rem`, and `overflow-wrap: anywhere` to `.post-title-line h1` so titles can wrap (or break a single unbreakable token) rather than overflow. Mobile media query tightens h1 to 1.25rem so a 25-char title still fits on a 320px iPhone SE viewport. Found during first canonical post creation at terribic.com.
+
+### Added — brand-area post-title truncation on the post-detail page
+
+The page brand wordmark on the post-detail route used to render the full post title — a 300-char title would otherwise blow out the header. New `brandTitleTruncated(title, words = 3)` helper renders the first 3 whitespace-separated tokens followed by a trailing ellipsis. The full title still appears in `<title>`, `og:title`, and the article body's own h1 — the brand wordmark is page chrome, not the canonical title display. Wired in the post-detail route via `titleHtml: html\`${brandTitleTruncated(post.title)}\`` while `title:` keeps the full string for HTML head + meta tags.
+
+### Added — Apache 2.0 LICENSE file + SPDX field in `package.json`
+
+Project's license declaration was previously README-only ("Apache 2.0. Fork without asking.") with no `LICENSE` file at repo root. GitHub's license detector and any third-party license scanner saw the project as un-licensed. Dropped the canonical Apache 2.0 text from `apache.org/licenses/LICENSE-2.0.txt` into `LICENSE` byte-for-byte (including the leading blank line — that's apache.org's canonical form). Added `"license": "Apache-2.0"` SPDX field to `package.json` so `npm` tooling and the GitHub license badge both pick it up. README license badge switched from `shields.io/github/license` (which read "unspecified" before the LICENSE file) to a static `shields.io/badge/license-Apache%202.0` URL — works regardless of GitHub's auto-detection state.
+
+### Fixed — dead CSS from the v0.9.0 header iteration
+
+`header .nav` and `header .nav a` rules at `style.css:605-614` styled the `<div class="nav muted">` brand-subtitle that was removed when the subtitle was inlined into the brand h1 in 6460f05. The remaining `.nav`-class elements (`home-nav`, `page-nav`, `sort-nav`) all live outside `<header>`, so the selector matched nothing. Deleted.
 
 ## [0.9.0] - 2026-05-09 — first canonical deploy + version visibility
 

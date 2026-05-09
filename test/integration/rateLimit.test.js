@@ -94,13 +94,63 @@ test('checkPostRate allows recent-tier 3 posts/hour', () => {
   assert.match(block.message, /3\/hour/);
 });
 
-test('checkPostRate does not limit established accounts', () => {
+test('checkPostRate blocks established accounts at 20 posts/day', () => {
   const now = Date.now();
   const db = freshDb(now);
-  for (let i = 0; i < 25; i++) {
-    seedPost(db, EST, now - i * 60 * 1000, `i${i}`);
+  // Seed 19 posts spread across the last ~23h (one every 72min) so the
+  // 6/hour cap doesn't trigger first. dayCount = 19 → still under 20.
+  for (let i = 0; i < 19; i++) {
+    seedPost(db, EST, now - (i + 1) * 72 * 60 * 1000, `e${i}`);
   }
   assert.equal(checkPostRate(db, EST, now), null);
+  // 20th post brings dayCount to 20, next call blocks.
+  seedPost(db, EST, now - 20 * 72 * 60 * 1000, 'e19');
+  const block = checkPostRate(db, EST, now);
+  assert.ok(block);
+  assert.match(block.message, /20\/day/);
+});
+
+test('checkPostRate doubledForOwner: new-tier owner does NOT get post-cap doubling', () => {
+  const now = Date.now();
+  const db = freshDb(now);
+  // Brigade-guard: a fresh account creating a fresh sub still caps at
+  // 3/day even with the owner flag. (Hourly cap is bypassed via
+  // skipHourly in the route, not here.)
+  for (let i = 0; i < 3; i++) seedPost(db, NEW, now - (i + 1) * 90 * 60 * 1000, `n${i}`);
+  const block = checkPostRate(db, NEW, now, undefined, { skipHourly: true, doubledForOwner: true });
+  assert.ok(block);
+  assert.match(block.message, /3\/day/);
+});
+
+test('checkPostRate doubledForOwner: recent-tier owner gets 20/day (2× of 10)', () => {
+  const now = Date.now();
+  const db = freshDb(now);
+  // 10 posts: base cap reached, but doubled cap (20) leaves room.
+  for (let i = 0; i < 10; i++) seedPost(db, REC, now - (i + 1) * 90 * 60 * 1000, `r${i}`);
+  // Without owner flag: blocked at 10/day.
+  const baseBlock = checkPostRate(db, REC, now, undefined, { skipHourly: true });
+  assert.ok(baseBlock);
+  assert.match(baseBlock.message, /10\/day/);
+  // With owner flag: still under doubled cap.
+  assert.equal(checkPostRate(db, REC, now, undefined, { skipHourly: true, doubledForOwner: true }), null);
+  // Push to 20 → doubled cap also bites.
+  for (let i = 10; i < 20; i++) seedPost(db, REC, now - (i + 1) * 60 * 60 * 1000, `r${i}`);
+  const ownerBlock = checkPostRate(db, REC, now, undefined, { skipHourly: true, doubledForOwner: true });
+  assert.ok(ownerBlock);
+  assert.match(ownerBlock.message, /20\/day/);
+});
+
+test('checkPostRate doubledForOwner: established-tier owner gets 40/day (2× of 20)', () => {
+  const now = Date.now();
+  const db = freshDb(now);
+  // 20 posts: base cap reached, doubled cap (40) leaves room.
+  for (let i = 0; i < 20; i++) seedPost(db, EST, now - (i + 1) * 60 * 60 * 1000, `e${i}`);
+  // Base cap blocks at 20.
+  const baseBlock = checkPostRate(db, EST, now, undefined, { skipHourly: true });
+  assert.ok(baseBlock);
+  assert.match(baseBlock.message, /20\/day/);
+  // Owner flag lifts to 40 — still under.
+  assert.equal(checkPostRate(db, EST, now, undefined, { skipHourly: true, doubledForOwner: true }), null);
 });
 
 test('checkCommentRate blocks new accounts at 10 comments/day', () => {

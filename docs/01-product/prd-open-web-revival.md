@@ -445,18 +445,18 @@ The deferred items aren't blockers for an unannounced public trial; the shipped 
 ### 2. Per-account rate limits with new-account scarlet letter
 
 **Criteria**:
-- Account age < 24 hours: 1 post/hour, 3 posts/day, 10 comments/day. All posts surface in mod queue with a "new account" tag.
-- Account age 1-7 days: 3 posts/hour, 10 posts/day, 30 comments/day.
-- Account age > 7 days with no flags upheld: limits removed, normal use.
-- Account age > 30 days with positive history: trusted, can pre-empt mod queue.
+- Account age < 24 hours (`new`): 1 post/hour, 3 posts/day, 10 comments/day. All posts surface in mod queue with a "new account" tag.
+- Account age 1-7 days (`recent`): 3 posts/hour, 10 posts/day, 30 comments/day.
+- Account age > 7 days (`established`): 6 posts/hour, 20 posts/day, 60 comments/day. Caps held instead of removed: catches the cross-sub fan-out vector (per-sub flood is 20/day per sub, but without a global cap one account can post into many subs simultaneously and dominate the home feed).
+- Account age > 30 days (`trusted`): per-sub flood cap raises from 5/day to 20/day per sub; per-account caps unchanged.
 
-**Why it works**: most spam comes from accounts created within hours of posting. Treating new accounts with extra scrutiny without blocking them outright catches the volume problem without alienating real new users.
+**Why it works**: most spam comes from accounts created within hours of posting. Treating new accounts with extra scrutiny without blocking them outright catches the volume problem without alienating real new users. Holding a ceiling on the established tier preserves the cross-sub fan-out floor: a single voice can't put 30+ posts into the home feed in 24h, no matter how many subs they spread across.
 
 **Owner carve-outs (in own sub only)**:
-- **Posts**: per-hour burst-pacing cap is skipped (`checkPostRate(..., { skipHourly: true })`); per-day cap still applies — a fresh owner can burst their daily 3 posts into their own freshly-created sub instead of waiting an hour between each.
-- **Comments**: daily cap is **doubled** (10→20 new, 30→60 recent); established stays uncapped — engagement-leading carve-out, not a lift. `checkCommentRate(..., { doubledForOwner: true })`.
+- **Posts**: per-hour burst-pacing cap is skipped (`checkPostRate(..., { skipHourly: true })`); per-day cap is **doubled** for `recent` (10→20) and `established` (20→40), but **not** for `new` (3 stays 3 — the brigading vector is "fresh account → fresh sub → flood seed posts," and doubling here opens it). `checkPostRate(..., { doubledForOwner: true })`.
+- **Comments**: daily cap is **doubled** for every tier (10→20 new, 30→60 recent, 60→120 established) — engagement-leading carve-out, not a lift. `checkCommentRate(..., { doubledForOwner: true })`.
 
-Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the destination sub. The global per-day floors (post + comment) are intentionally preserved so a compromised owner account can't drain the day's quota across the instance. See §3 for the matching per-sub topic-flood carve-out.
+Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the destination sub. The new-tier post asymmetry (comments doubled, posts not) is deliberate: a fresh account creating a sub and immediately posting six seed-posts is the brigading shape; replying actively in their own sub's discussion is engagement. The doubled budget is also "spent in own-sub only": once an owner exceeds the base cap, posting elsewhere fails because the same dayCount counter is checked against the lower base cap. See §3 for the matching per-sub topic-flood carve-out.
 
 **Source**: no external dependency. Account-age timestamps are stored at signup.
 
@@ -466,9 +466,9 @@ Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the 
 
 **Why it works**: catches "topic floods" — a single user spamming one community while looking innocuous globally.
 
-**Owner carve-out**: when the poster owns the destination sub, two caps are lifted — (a) the per-sub topic-flood cap (5/20 by tier) and (b) the global per-hour burst-pacing cap (1/3/established by tier). The global per-day cap (3/10/established by tier) still applies, so the spam-floor defense holds. Topic-flooding a sub you own is a contradiction, and the per-hour burst defense is symbolic friction for an owner seeding their own freshly-created sub. Solves the founder-bootstrap UX: a new owner can burst their daily 3 posts into their own sub immediately instead of waiting an hour between each. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'` plus `checkPostRate(..., { skipHourly: true })`.
+**Owner carve-out**: when the poster owns the destination sub, three caps are adjusted — (a) the per-sub topic-flood cap (5/20 by tier) is **skipped** entirely (topic-flooding a sub you own is a contradiction), (b) the global per-hour burst-pacing cap (1/3/6 by tier) is **skipped**, and (c) the global per-day cap is **doubled** for `recent` and `established` (10→20, 20→40) but held at 3 for `new`. The new-tier exception preserves the brigading defense: "fresh account → fresh sub → flood seed posts" stays bounded at 3/day even with the owner flag. Wired in `handleDraft` and `handleFinalize` via `canModerate(...) === 'owner'` plus `checkPostRate(..., { skipHourly: true, doubledForOwner: true })`.
 
-**Comment-side carve-out**: when commenting in a sub you own, the daily comment cap is **doubled** (20/60/established by tier) — engagement carve-out for an owner leading discussion in their own sub. The cap is doubled, not lifted: a compromised owner account can't drop unlimited comments. Wired in `handleAddComment` via `checkCommentRate(..., { doubledForOwner: true })`.
+**Comment-side carve-out**: when commenting in a sub you own, the daily comment cap is **doubled** for every tier (10→20 new, 30→60 recent, 60→120 established) — engagement carve-out for an owner leading discussion in their own sub. The cap is doubled, not lifted: a compromised owner account can't drop unlimited comments. New-tier owners *do* get the comment doubling because comment-flooding-own-sub is the engagement shape, not the brigading shape. Wired in `handleAddComment` via `checkCommentRate(..., { doubledForOwner: true })`.
 
 **Source**: no external dependency.
 

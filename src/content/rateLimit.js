@@ -1,13 +1,27 @@
 // Per-account rate limits — PRD §Spam Defenses 2.
 //
 // Tiers by account age (handles.first_seen_at):
-//   new         (<24h)       1 post/hour,  3 posts/day, 10 comments/day
+//   new         (<24h)       1 post/hour,  3 posts/day,  10 comments/day
 //   recent      (1d-7d)      3 posts/hour, 10 posts/day, 30 comments/day
-//   established (>7d)        no per-account limits (PRD §2 says "limits
-//                            removed at >7d with no flags upheld" — the
-//                            no-flags check lands when negative-history
-//                            queries arrive; for v1 the >7d account
-//                            unlocks regardless)
+//   established (>7d)        6 posts/hour, 20 posts/day, 60 comments/day
+//
+// The established tier was originally uncapped on the theory that a 7d-
+// old account had earned the floor off. In practice that left a single
+// account free to fan out across many subs (each per-sub flood cap is
+// 20/day, but no global cap caught the cross-sub spread). 20 posts/day
+// = ~1/hour over 24h, which is the upper bound of "active heavy
+// contributor" usage; anything past that reads as flooding.
+//
+// Owner carve-outs (in their own sub):
+//   new         posts: skipHourly only (3/day cap unchanged — brigading
+//                      via fresh-sub seeding is the actual abuse vector)
+//               comments: 2× daily (20)
+//   recent      posts: skipHourly + 2× daily (20 in own sub)
+//               comments: 2× daily (60)
+//   established posts: skipHourly + 2× daily (40 in own sub)
+//               comments: 2× daily (120)
+// All owners also bypass the per-sub topic-flood cap in their own sub
+// (handlePostNew skips checkPostRatePerSub when isOwnerOfSub).
 //
 // We deliberately count from `posts` / `comments` directly rather than
 // keeping a separate counter table — the source of truth is the actual
@@ -35,9 +49,9 @@ const DAY_MS  = 24 * HOUR_MS;
 export const RATE_LIMIT_FLOOR = Object.freeze({
   // Per-account, tier'd by handles.first_seen_at age.
   perAccount: Object.freeze({
-    new:    { postsPerHour: 1, postsPerDay: 3,  commentsPerDay: 10 },
-    recent: { postsPerHour: 3, postsPerDay: 10, commentsPerDay: 30 },
-    // 'established' (>7d) has no per-account ceiling — see PRD §2.
+    new:         { postsPerHour: 1, postsPerDay: 3,  commentsPerDay: 10 },
+    recent:      { postsPerHour: 3, postsPerDay: 10, commentsPerDay: 30 },
+    established: { postsPerHour: 6, postsPerDay: 20, commentsPerDay: 60 },
   }),
   // Per-sub topic-flood cap (still per-account, but scoped to one sub).
   // Tighter for newish accounts (<30d) than for trusted (>=30d).
@@ -56,8 +70,9 @@ const TRUSTED_AGE_MS = 30 * DAY_MS;
 export function resolveRateLimitConfig(overrides = {}) {
   const out = {
     perAccount: {
-      new:    { ...RATE_LIMIT_FLOOR.perAccount.new },
-      recent: { ...RATE_LIMIT_FLOOR.perAccount.recent },
+      new:         { ...RATE_LIMIT_FLOOR.perAccount.new },
+      recent:      { ...RATE_LIMIT_FLOOR.perAccount.recent },
+      established: { ...RATE_LIMIT_FLOOR.perAccount.established },
     },
     perSubDay: { ...RATE_LIMIT_FLOOR.perSubDay },
   };
@@ -71,7 +86,7 @@ export function resolveRateLimitConfig(overrides = {}) {
     }
   };
   if (overrides.perAccount) {
-    for (const tier of ['new', 'recent']) {
+    for (const tier of ['new', 'recent', 'established']) {
       const tierOverride = overrides.perAccount[tier];
       if (!tierOverride) continue;
       for (const k of ['postsPerHour', 'postsPerDay', 'commentsPerDay']) {
@@ -88,8 +103,9 @@ export function resolveRateLimitConfig(overrides = {}) {
   }
   return Object.freeze({
     perAccount: Object.freeze({
-      new:    Object.freeze(out.perAccount.new),
-      recent: Object.freeze(out.perAccount.recent),
+      new:         Object.freeze(out.perAccount.new),
+      recent:      Object.freeze(out.perAccount.recent),
+      established: Object.freeze(out.perAccount.established),
     }),
     perSubDay: Object.freeze(out.perSubDay),
   });
@@ -120,7 +136,7 @@ function countSince(db, table, handle, since) {
 // the limit that triggered. Caller renders 429 with the message.
 // `config` defaults to the floor; createApp threads operator overrides
 // through.
-export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG, { skipHourly = false } = {}) {
+export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CONFIG, { skipHourly = false, doubledForOwner = false } = {}) {
   const tier = accountAgeTier(db, handle, now);
   const limits = config.perAccount[tier];
   if (!limits) return null;
@@ -130,9 +146,18 @@ export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CON
       return { message: `posts limited to ${limits.postsPerHour}/hour for ${tier} accounts. try again in an hour.` };
     }
   }
+  // Owner of the destination sub gets 2× the daily post cap on the
+  // recent + established tiers. The new tier does NOT double — the
+  // brigading vector is "create fresh account → create fresh sub →
+  // flood with 6 posts in 24h"; doubling here opens it. Recent +
+  // established already have community history so the carve-out
+  // reads as engagement, not seed flooding.
+  const dailyCap = (doubledForOwner && tier !== 'new')
+    ? limits.postsPerDay * 2
+    : limits.postsPerDay;
   const dayCount = countSince(db, 'posts', handle, now - DAY_MS);
-  if (dayCount >= limits.postsPerDay) {
-    return { message: `posts limited to ${limits.postsPerDay}/day for ${tier} accounts. try again tomorrow.` };
+  if (dayCount >= dailyCap) {
+    return { message: `posts limited to ${dailyCap}/day for ${tier} accounts. try again tomorrow.` };
   }
   return null;
 }
