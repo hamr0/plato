@@ -50,4 +50,23 @@
     try { document.cookie = 'plato_theme=' + next + '; path=/; max-age=31536000; SameSite=Lax'; } catch (_) {}
     syncLabel();
   });
+
+  // Bfcache restoration handler. Mobile Firefox's pull-to-refresh
+  // (and some back-forward nav paths) restore the page from cache
+  // with stale DOM/class state — the inline anti-flash script in
+  // <head> does NOT re-run on bfcache restore. Without this listener
+  // the page would come back showing whatever theme it had when
+  // cached, even if the user has since toggled in another tab. We
+  // re-read persistence and re-apply on event.persisted === true.
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    let t = null;
+    try { t = localStorage.getItem('theme'); } catch (_) {}
+    if (t !== 'light' && t !== 'dark') {
+      const m = document.cookie.match(/(?:^|; )plato_theme=(light|dark)/);
+      if (m) t = m[1];
+    }
+    if (t === 'light' || t === 'dark') applyTheme(t);
+    syncLabel();
+  });
 })();

@@ -158,7 +158,7 @@ ${themePaletteOverrides()}
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
-<script src="/static/theme.js?v=4" defer></script>
+<script src="/static/theme.js?v=5" defer></script>
 </head>
 <body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);
