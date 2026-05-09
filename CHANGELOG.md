@@ -6,7 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.10.0 fixes land here before the next bump)
+(no entries yet — next: any post-0.10.1 fixes land here before the next bump)
+
+## [0.10.1] - 2026-05-09 — mobile theme-toggle hardening + status-row layout
+
+Reactive-fix wave from a long mobile testing session against terribic.com on iOS Safari, Firefox Focus (iOS WebKit), regular Firefox (mobile), and desktop browsers. The light-theme toggle had a series of layered bugs that each looked like a different problem and required separate fixes — they only became visible end-to-end on a real production deploy. Also folds in the mobile header status-row left-align decision from the same testing window.
+
+### Fixed — mobile header status row left-aligned under brand
+
+`align-self: flex-end` and `justify-content: flex-end` on `.status` in the mobile media query were tucking the status block (avatar + handle + subs + modlog + logout + theme toggle) against the right viewport edge. When the row got long enough to wrap, a single trailing item like `light` ended up alone on its own line at the right edge with empty space to the left — orphan-token in space. Removed both alignment overrides so the status block flows under the brand block on the same left edge. Matches what every mobile-shaped site does once columns collapse to one column. Block-level right-tuck was a desktop pattern; on mobile there's no second column to anchor against.
+
+### Fixed — iOS Safari light palette wasn't applying after click
+
+Reported on terribic mobile Safari: clicking the `light` toggle flipped the button label to `dark` (so theme.js click handler ran and `data-theme="light"` was set on `<html>`), but the page stayed dark. The light-palette CSS used `[data-theme="light"]:root` (attribute selector first, pseudo-class second). Both forms parse and match per spec, but iOS Safari's CSS-variable resolution path treats the two compound forms differently — chained pseudo selectors after attribute selectors don't always trigger a re-cascade when the attribute value changes mid-page-life via `setAttribute`. Initial fix: swap to `:root[data-theme="light"]` (the conventional form). Cascade reapplication then worked across browsers. *(`bc7239a`, `ab1d90d`)*
+
+### Fixed — iOS Safari theme stopped repainting after navigation
+
+Even with the selector swap, a deeper class of bug surfaced: toggling in-place worked, but after clicking the home logo (or any internal link) the toggle would flip the button label without repainting the page. iOS Safari has chronic CSSOM-invalidation bugs around `[attr]` selectors when attribute values churn on bfcache-restored or post-navigation pages.
+
+Switched the entire theme persistence model from the `data-theme` attribute to two mutually-exclusive classes (`.theme-light` / `.theme-dark`). Class selectors (`:root.theme-light`) don't have this bug in any rendering engine — classes are first-class citizens of the cascade machinery; attribute selectors hit a different code path with historical invalidation bugs. Affected files: `style.css`, `theme.js`, the inline anti-flash script in `app.js`, and `themePaletteOverrides()` for operator color overrides. localStorage value shape unchanged (string `'light'` / `'dark'`) so existing toggled state survives the upgrade. *(`8743639`)*
+
+### Added — first-party cookie as a fallback persistence layer for the theme
+
+Mobile Firefox testing surfaced one more failure mode: regular Firefox (not Focus) was flipping the button label between `dark` and `light` on every page refresh. The inline anti-flash script's `localStorage.getItem('theme')` was returning inconsistent values across reloads — Firefox's privacy mode / Total Cookie Protection sometimes session-clears localStorage between page refreshes while preserving first-party cookies.
+
+Added `plato_theme=light|dark` cookie persistence alongside localStorage. Cookie is set on every toggle (`path=/; max-age=31536000; SameSite=Lax`) by the click handler in `theme.js`. The inline anti-flash script reads localStorage first (warm path), falls back to the cookie if localStorage is empty or throws. Either persistence layer surviving across the refresh is enough to keep the theme stable. First-party functional cookie, no tracking value, parallel to the existing magic-link auth cookie pattern. *(`34800dc`, `67b164d`)*
+
+### Added — bfcache-restoration handler for mobile Firefox pull-to-refresh
+
+Mobile Firefox's pull-to-refresh restores the page from **bfcache**, which means the inline anti-flash script in `<head>` doesn't re-run on that path — the page comes back with whatever theme state was cached at navigation time. Added a `pageshow` event listener in `theme.js` gated on `event.persisted === true` (the bfcache-restoration signal) that re-reads localStorage with cookie fallback and re-applies the theme + label. `event.persisted` is `false` on a fresh navigation, so this code path only fires on actual bfcache restoration — no overhead on normal page loads. *(`d5a7638`)*
+
+### Known — mobile Firefox refresh occasionally drops the persisted theme
+
+After all of the above, the toggle works correctly across iOS Safari, Firefox Focus, regular Firefox normal navigation, and every desktop browser. **One residual edge case**: on regular mobile Firefox, F5 / pull-to-refresh occasionally restores the page to dark even when the user toggled to light. The cause is a Firefox-specific cache code path for refresh that bypasses both the inline anti-flash script *and* the bfcache `pageshow` event. Recoverable with a single tap on the toggle. Documented in operator-guide § Known limitations.
+
+### Cache-buster
+
+`style.css?v=37 → v=40`, `theme.js?v=1 → v=5`. Deploys spanning 0.10.0 → 0.10.1 should fully refresh on phones; users still seeing stale layout/theme behavior should close-and-reopen their tab (browser cache for plato is sticky on mobile).
 
 ## [0.10.0] - 2026-05-09 — rate-limit floor extension + post-launch polish
 

@@ -98,6 +98,10 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 The light blocks live under `:root.theme-light` plus a `@media (prefers-color-scheme: light)` mirror — both must change together if you swap the default. Look for the labelled comment line above each block.
 
+**Theme persistence.** A click stamps `.theme-light` or `.theme-dark` on `<html>` and persists to **both** `localStorage.theme` and a first-party `plato_theme` cookie (`SameSite=Lax`, 1-year expiry). The dual-persistence layer is intentional — mobile Firefox's privacy mode session-clears localStorage between page refreshes, and the cookie fallback keeps the toggle stable on those builds. Either source surviving across navigation is enough. No tracking value; functional first-party only.
+
+**Known limitations (mobile Firefox refresh).** On regular mobile Firefox, F5 / pull-to-refresh occasionally restores the page to dark even after toggling to light — Firefox's mobile refresh code path bypasses the inline anti-flash script *and* the bfcache `pageshow` re-sync handler in some build variants. Recoverable with one extra tap on the toggle. Every other interaction path (Safari iOS, Firefox Focus, regular Firefox normal navigation, Firefox Ctrl+R refresh, all desktop browsers) handles theme persistence cleanly. If the issue is reproducible enough to be worth fully fixing, the next step is server-side rendering of the theme class (read the cookie at the request handler, render `<html class="theme-light">` directly) — not yet implemented because the workaround is one tap.
+
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
 **Config surface map.** Quick reference: every `config.json` knob and where it shows up. Discursive paragraphs and validation rules below.
