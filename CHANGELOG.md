@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 The post-M8 deploy hardening arc, validated against the first canonical plato deploy at terribic.com (RackNerd VPS, Route 53, Gmail recipient). plato itself is now an operating instance, not just a build. Adds version visibility on three surfaces (footer, startup log, README badge) so operators can verify the running code matches what's on disk after a `git pull`.
 
-Versioning note: prior to 0.9.0 the project shipped `0.1.0` in `package.json` while milestones M5–M8 closed in the changelog. This release retroactively maps to 0.9.0 — it captures all post-M8 deploy work. Earlier milestone-close points (M5, M6, M7, M8) are tagged retroactively below at 0.5.0, 0.6.0, 0.7.0, 0.8.0 so the changelog version trail matches the actual development arc.
+Versioning note: prior to 0.9.0 the project shipped `0.1.0` in `package.json` while milestones M5–M8 closed in the changelog. This release retroactively maps to 0.9.0 — it captures all post-M8 deploy work. Earlier milestone-close points (M5, M6, M7, M8) are tagged retroactively below at 0.5.0, 0.6.0, 0.7.0, 0.8.0 so the changelog version trail matches the actual development arc. Where milestone work spilled into the next window (most notably the M5/B12 smoke-polish wave that landed during the M6 development cycle), the version bump that shipped first wins — those entries ride 0.6.0 rather than spawning a 0.5.1.
 
 ### Fixed — home-nav filter chips snake-wrap on narrow viewports
 
@@ -374,6 +374,10 @@ App-side: new `evalBanner` option on `createApp` (off by default).
 env. +3 tests covering off-by-default, on-everywhere when on, and
 the strip's position above the page header. 804 → 807 green.
 
+## [0.8.0] - 2026-05-08 — M8 closeout (operator surface)
+
+M8 — "operator surface + UX polish." Closes the operator-facing arc: light/dark theme toggle (B0), `/healthz` readiness probe (B2), `bin/backup.sh` local snapshot script (B3), `bin/health-watch.sh` cron-side `/healthz` watcher (B4), daily stats + weekly digest (B5), sticky note per sub (B1), plus Reddit-aligned content-cap locks and the comment "read more / show less" toggle. Also lands the import-dedupe-fails-fast fix that closes a lingering M7 retry foot-gun.
+
 ### Closed — M8 stats + alert-recipient cleanup (M8/B5 + B4 follow-up)
 
 - `bin/stats.js` daily snapshot now includes `votes` (count of cast
@@ -549,6 +553,10 @@ sub-create / sub-import submit buttons (`.sub-create-form button`)
 were also restyled as pill chips matching the create/import tab strip
 above them — the `/sub/create` action row reads as one consistent
 button family. No schema change.
+
+## [0.7.0] - 2026-05-07 — M7 closeout (archives)
+
+M7 — "archives + portability." Closes the data-portability arc: per-sub archive builder (B2-a) and HTTP routes / personal export (B2-b), Ed25519 archive signing (B4), URL-fetch sub-import with bracket-collision pseudonyms (B5), OpenTimestamps anchor (B6), plus the followup polish wave: imported-author render lock, sub-import + sub-export modlog rows, paginated static reader inside large archives, and the cross-side / auto-flip / clear-all overhaul of `/memlog` filters that the import surfaces drove.
 
 ### Added — sub-archive paginated reader mirrors personal archive
 
@@ -1165,6 +1173,12 @@ Operator note: set `branding.baseUrl` in `config.json` to the public
 URL so exported archives self-describe their origin in the README and
 index.html. Falls back to plain text when unset.
 
+## [0.6.0] - 2026-05-06 — M6 closeout (subscriptions + RSS) + final M5/B12 polish
+
+M6 — "subscriptions + pull-shape feeds." Sub subscriptions (B2), home-feed `subscribed | all` toggle (B3), per-sub Atom feed at `/sub/<name>/rss` (B4), inline subscribe on `/subs` (B5), token-gated personal RSS at `/u/<token>/{rss,subs.rss}` (B6), `/about` opening rebrand, default community rules baked-in. The original push channels — email digest and ntfy — are PRD-locked under §Permanently out; three-tier pull RSS replaces them.
+
+Also folds the M5/B12 smoke-polish wave that landed in this window: co-mod model + sub state lifecycle (commit 1+2), three smoke-pass polish rounds, daily inactivity cron, `/humans.txt` + `/.well-known/security.txt`, and the sensitive-flag / subscribe-count fixes that crossed the M5/M6 boundary. Chronologically these shipped after M6 closed but before M7 began, so they ride 0.6.0 rather than spawning a 0.5.1.
+
 ### Changed — M5/B12 smoke-pass UX polish
 
 Follow-up to M5/B12 after the first smoke run. All behavior locks; the
@@ -1488,6 +1502,10 @@ Replaces the placeholder chip pair on the home top-nav. `?feed=subscribed` filte
 ### Added — M6/B2: sub subscriptions
 
 Migration 014 added `subscriptions(user_handle, sub_name, created_at)` with composite PK + index on `sub_name`. Inline subscribe/unsubscribe button in the sub-page header (logged-in only); POST `/sub/<name>/subscribe` is idempotent (form `action=subscribe|unsubscribe`, missing action toggles current state). `/subs?filter=mine` filters the directory to subscribed subs (anonymous silently falls back to `all`); the previously placeholder subscribers column now shows real counts. Subscriber identities are never exposed publicly — only aggregate counts. Disallowed in `robots.txt` (`Disallow: /sub/*/subscribe`). Per PRD §Front Page → Sub subscription mechanics: private (no public follower lists), exportable (M7 archive), no notifications by default — every later M6 surface (digest, ntfy, RSS preferences) keys off these rows.
+
+## [0.5.0] - 2026-05-04 — M5 closeout (mod surface + defenses)
+
+M5 — "mod surface + spam-defense floor + branding." The biggest single milestone in plato's pre-v1 arc. Unified `/modlog` with three modes (open/inbox/audit), public modlog + footer + `/about` page, operator cron jobs, memlog activity unification (M6/B0–B1 lived here originally before being pulled into M6), spam-defense modules with PRD-locked floors (rate limits, link cap, regex patterns, URLhaus auto-collapse), system-attributed audit rows for spam triggers (B6), security & correctness audit fixes (B7), branding surface (B8 + B9: forumName / tagline / hostedBy / colors), per-sub flairs (B10), per-sub sensitive flag (B11), per-sub flag-threshold override + co-mod model + sub state lifecycle (B12), my-mod-decisions panel (B13), guest comment composer (B14), sub-description cap (B15), `[new]` tag in mod queue (B16). Plus cross-cutting polish: dev/prod env split, mobile-responsive layout, owner rate-cap carve-out, login popover layout, sham-token redirect leak.
 
 ### Added — M5/B16: `[new]` tag in `/modlog?mode=open` for fresh-account authors and flaggers
 
