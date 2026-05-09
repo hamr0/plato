@@ -613,6 +613,16 @@ header .nav a {
   margin-right: 0.8rem;
 }
 
+/* Inline page-subtitle / tagline next to the brand title in the h1.
+ * Smaller and muted so the title still reads as the heading; the
+ * `· prefix in the markup gives the visual separator. */
+header.site .brand .brand-subtitle {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  white-space: normal;
+}
+
 header.site {
   display: flex;
   justify-content: space-between;

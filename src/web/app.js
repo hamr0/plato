@@ -679,8 +679,11 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
     : subtitle;
   return html`<header class="site">
     <div class="brand">
-      <h1><a href="/" class="logo-home">${logoMark({ size: 32 })}${effectiveTitle}</a></h1>
-      ${effectiveSubtitle ? html`<div class="nav muted">${effectiveSubtitle}</div>` : html``}
+      <h1>
+        <a href="/" class="logo-home">${logoMark({ size: 32 })}${effectiveTitle}</a>${effectiveSubtitle
+          ? html` <span class="brand-subtitle muted">· ${effectiveSubtitle}</span>`
+          : html``}
+      </h1>
     </div>
     ${loginStatusFor(db, currentHandle)}
   </header>`;
