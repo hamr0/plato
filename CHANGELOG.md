@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+(no entries yet — next: any post-0.9.0 fixes land here before the next bump)
+
+## [0.9.0] - 2026-05-09 — first canonical deploy + version visibility
+
+The post-M8 deploy hardening arc, validated against the first canonical plato deploy at terribic.com (RackNerd VPS, Route 53, Gmail recipient). plato itself is now an operating instance, not just a build. Adds version visibility on three surfaces (footer, startup log, README badge) so operators can verify the running code matches what's on disk after a `git pull`.
+
+Versioning note: prior to 0.9.0 the project shipped `0.1.0` in `package.json` while milestones M5–M8 closed in the changelog. This release retroactively maps to 0.9.0 — it captures all post-M8 deploy work. Earlier milestone-close points (M5, M6, M7, M8) are tagged retroactively below at 0.5.0, 0.6.0, 0.7.0, 0.8.0 so the changelog version trail matches the actual development arc.
+
 ### Fixed — home-nav filter chips snake-wrap on narrow viewports
 
 The home-page filter chips (`posts | comments`, `new/old/top/hot`, `24h/week/all`) used `.filter-group` wrapper spans with `display: inline-flex`, which made each group a single layout unit. On narrow viewports each group claimed its own row with empty trailing space rather than chips wrapping individually as siblings. Setting `.home-nav .filter-group { display: contents }` makes the wrapper transparent for layout while preserving the DOM grouping — chips and separators now snake-wrap left-to-right, then to the next line, like words in a paragraph. No change on desktop where everything fits in one row anyway. Found during the first canonical mobile-Safari smoke at terribic.com.

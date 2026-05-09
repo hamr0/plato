@@ -1714,19 +1714,27 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
 @media (max-width: 640px) {
   body { padding: 1rem 0.6rem 3rem; }
 
-  /* Header: keep brand + status on one line. Brand truncates with
-   * ellipsis on very narrow viewports rather than wrapping the whole
-   * row. Status font tightens slightly to preserve room for the brand. */
-  header.site { flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
-  header.site .brand {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  /* Header: stack brand on top, status on its own row tucked right.
+   * Wide-screen `space-between` row layout breaks down on mobile when
+   * the title carries a page subtitle (e.g. "terribic · check your
+   * email") or when status grows (logged-in user icon + handle).
+   * Stacking gives both blocks the full viewport width — brand natural
+   * left, status hugs right — so they don't fight for space. */
+  header.site {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
   }
+  header.site .brand {
+    overflow: visible;
+    white-space: normal;
+    min-width: 0;
+  }
+  header.site .brand h1 { white-space: normal; }
   .status {
-    flex-wrap: nowrap;
-    flex-shrink: 0;
+    align-self: flex-end;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 0.3rem;
     font-size: 0.78rem;
   }
