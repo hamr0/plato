@@ -15,7 +15,7 @@
  *     on <html>; that wins over the OS hint forever (per-browser,
  *     stored in localStorage). No mid-session reverts.
  *   - Forks override the dark palette under :root and the light
- *     palette under [data-theme="light"]:root + the same media
+ *     palette under :root[data-theme="light"] + the same media
  *     query. Operator-supplied colorsLight values land via an
  *     inline <style> in <head> alongside the existing colors.
  * ============================================================ */
@@ -77,7 +77,7 @@
 }
 
 /* ---------- LIGHT PALETTE PRESETS ----------
- * Operators: copy any block over the [data-theme="light"]:root + media
+ * Operators: copy any block over the :root[data-theme="light"] + media
  * blocks above to swap. Mirror the same values into both blocks so the
  * post-click and OS-hint paths stay aligned.
  *

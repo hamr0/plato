@@ -96,7 +96,7 @@ These are the operator surfaces. The project assumes you'll touch them.
 | solarized-light | `#fdf6e3` | warm cream, paper-feel |
 | stone-warm | `#f5f4ed` | slight warm gray, less yellow than solarized |
 
-The light blocks live under `[data-theme="light"]:root` plus a `@media (prefers-color-scheme: light)` mirror — both must change together if you swap the default. Look for the labelled comment line above each block.
+The light blocks live under `:root[data-theme="light"]` plus a `@media (prefers-color-scheme: light)` mirror — both must change together if you swap the default. Look for the labelled comment line above each block.
 
 **Logo.** Drop your own SVG into `src/web/static/favicon.svg` and edit the `logoMark()` function in `src/web/app.js` to match. The default three-blue-dot mark is the project's; on your fork it doesn't have to be.
 
@@ -110,7 +110,7 @@ The light blocks live under `[data-theme="light"]:root` plus a `@media (prefers-
 | `branding.feedbackEmail` | optional | global footer link (`feedback · about · modlog`), `/about` "questions or feedback" link — both `mailto:`, address hidden behind link text |
 | `branding.rules` | optional, ≤4 lines (defaults ship if omitted) | `/about` rules section, footer of every magic-link email (single source of truth — knowless mail-footer cap, no URL schemes, no bare domains) |
 | `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables under `:root` (dark theme) — vote arrows, score color, "you voted here" memory shade |
-| `branding.colorsLight.up` / `branding.colorsLight.down` | optional | same `--up` / `--down` under `[data-theme="light"]:root` + `@media (prefers-color-scheme: light)` (M8/B0 light-theme toggle) |
+| `branding.colorsLight.up` / `branding.colorsLight.down` | optional | same `--up` / `--down` under `:root[data-theme="light"]` + `@media (prefers-color-scheme: light)` (M8/B0 light-theme toggle) |
 | `branding.metaDescription` | optional | `<meta name="description">` and `og:description` for `/`, link-unfurls (Slack/Signal/iMessage/Mastodon). Per-page descriptions for `/about`, `/modlog`, `/subs`, `/sub/<name>`, `/sub/<name>/post/<id>` are auto-derived and not operator-tunable |
 | `urlDisplayMax` | optional, default 30 | bare-URL truncation ceiling in rendered post + comment bodies (`href` always preserved; full URL on hover) |
 | `feedPageSize` | optional, default 50 | items per page on the home feed and on each sub feed before the `← prev | page N | next →` footer |
@@ -138,7 +138,7 @@ The forum process never reads the `operator.*` block — it exists purely for th
 - `hostedBy` (optional) renders in **two** places: the global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when empty), and the opening sentence of `/about` (`this is a <forumName> instance, hosted by <hostedBy>`). When unset on `/about`, falls back to `@<forumName>`.
 - `colors.up` (optional) overrides `--up` under `:root` (dark theme) — positive score color and the voted-up arrow's "you voted here" memory shade.
 - `colors.down` (optional) overrides `--down` under `:root` (dark theme) — negative score color and the voted-down arrow's "you voted here" memory shade.
-- `colorsLight.up` / `colorsLight.down` (optional, M8/B0) override the same two variables under `[data-theme="light"]:root` and the `@media (prefers-color-scheme: light)` block. Independent of `colors`; either or both may be set.
+- `colorsLight.up` / `colorsLight.down` (optional, M8/B0) override the same two variables under `:root[data-theme="light"]` and the `@media (prefers-color-scheme: light)` block. Independent of `colors`; either or both may be set.
 
 Color values accept any CSS color string (hex `#fff`, rgb `rgb(127, 217, 98)`, named `tomato`). Boot-time validation rejects any string containing `;{}<>"'` to block CSS-injection. Bad config throws at boot, not on first user request.
 
