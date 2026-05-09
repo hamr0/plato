@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
-<script>(function(){var r=document.documentElement;try{var t=localStorage.getItem('theme');if(t==='light'){r.classList.add('theme-light');r.style.colorScheme='light';}else if(t==='dark'){r.classList.add('theme-dark');r.style.colorScheme='dark';}}catch(e){}r.classList.add('has-js');})();</script>
+<script>(function(){var r=document.documentElement;var t=null;try{t=localStorage.getItem('theme');}catch(e){}if(t!=='light'&&t!=='dark'){var m=document.cookie.match(/(?:^|; )plato_theme=(light|dark)/);if(m)t=m[1];}if(t==='light'){r.classList.add('theme-light');r.style.colorScheme='light';}else if(t==='dark'){r.classList.add('theme-dark');r.style.colorScheme='dark';}r.classList.add('has-js');})();</script>
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
@@ -158,7 +158,7 @@ ${themePaletteOverrides()}
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
-<script src="/static/theme.js?v=3" defer></script>
+<script src="/static/theme.js?v=4" defer></script>
 </head>
 <body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);

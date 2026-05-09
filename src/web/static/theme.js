@@ -40,7 +40,14 @@
   btn.addEventListener('click', () => {
     const next = effective() === 'dark' ? 'light' : 'dark';
     applyTheme(next);
+    // Persist to BOTH localStorage and a first-party cookie. Mobile
+    // Firefox (and any browser on a strict privacy profile) sometimes
+    // session-clears localStorage between page refreshes, which made
+    // the toggle revert on every reload. First-party functional
+    // cookies survive these modes — the inline anti-flash script in
+    // <head> reads localStorage first and falls back to the cookie.
     try { localStorage.setItem('theme', next); } catch (_) {}
+    document.cookie = 'plato_theme=' + next + '; path=/; max-age=31536000; SameSite=Lax';
     syncLabel();
   });
 })();
