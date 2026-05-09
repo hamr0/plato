@@ -20,6 +20,10 @@ Switched `article pre` from `overflow-x: auto` to `white-space: pre-wrap; overfl
 
 `style.css?v=40 → v=41`. Mobile users will see the new behavior on next page load without a hard refresh; the bumped query string forces a fresh CSS fetch.
 
+### Eval image — refreshed for the first time since v0.1.1
+
+The `ghcr.io/hamr0/plato:latest` evaluation image was massively stale — the publish workflow only fires on `v*.*.*` tag pushes, and no version tag had been cut since `v0.1.1` on 2026-05-08. That meant anyone running `docker run --rm -p 8080:8080 ghcr.io/hamr0/plato:latest` got code from before M5 spam defenses, M6 RSS, M7 archives, M8 theme, the deploy guide, and every 0.10.x mobile fix. Pushed `v0.10.2` as the first proper release tag aligned to `package.json` semver — workflow built and published `sha256:b9afea0…` with both `:v0.10.2` and `:latest`. Convention going forward: every `release(0.X.Y)` commit gets a matching `git tag v0.X.Y && git push origin v0.X.Y` so the eval image stays current with main.
+
 ## [0.10.1] - 2026-05-09 — mobile theme-toggle hardening + status-row layout
 
 Reactive-fix wave from a long mobile testing session against terribic.com on iOS Safari, Firefox Focus (iOS WebKit), regular Firefox (mobile), and desktop browsers. The light-theme toggle had a series of layered bugs that each looked like a different problem and required separate fixes — they only became visible end-to-end on a real production deploy. Also folds in the mobile header status-row left-align decision from the same testing window.
