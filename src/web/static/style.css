@@ -1120,7 +1120,8 @@ article pre {
   border: 1px solid var(--border);
   padding: 0.7rem 0.9rem;
   border-radius: 4px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 article pre code { background: transparent; padding: 0; }
 article blockquote {

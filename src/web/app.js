@@ -146,7 +146,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=40">
+<link rel="stylesheet" href="/static/style.css?v=41">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
