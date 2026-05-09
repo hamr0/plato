@@ -1714,9 +1714,22 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
 @media (max-width: 640px) {
   body { padding: 1rem 0.6rem 3rem; }
 
-  /* Header: brand + status stack instead of overlap. */
-  header.site { flex-wrap: wrap; gap: 0.4rem; }
-  .status { flex-wrap: wrap; row-gap: 0.3rem; }
+  /* Header: keep brand + status on one line. Brand truncates with
+   * ellipsis on very narrow viewports rather than wrapping the whole
+   * row. Status font tightens slightly to preserve room for the brand. */
+  header.site { flex-wrap: nowrap; gap: 0.5rem; align-items: center; }
+  header.site .brand {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .status {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+  }
 
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,
