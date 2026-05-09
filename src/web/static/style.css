@@ -1741,10 +1741,16 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
     min-width: 0;
   }
   header.site .brand h1 { white-space: normal; }
+  /* Status block stacks under the brand on mobile, left-aligned to
+   * match. The desktop layout (brand-left + status-right on one row)
+   * relies on a second column to anchor the right-tuck against; once
+   * we collapse to one column there's no second column, so left-align
+   * reads as the natural "one column of stacked items" pattern that
+   * every mobile site uses. Removes the orphan-token problem (a
+   * single trailing item like `light` floating alone at the right
+   * edge of an otherwise-empty wrap line). */
   .status {
-    align-self: flex-end;
     flex-wrap: wrap;
-    justify-content: flex-end;
     gap: 0.3rem;
     font-size: 0.78rem;
   }
