@@ -146,11 +146,11 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=39">
+<link rel="stylesheet" href="/static/style.css?v=40">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
-<script>(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=t;}}catch(e){}document.documentElement.classList.add('has-js');})();</script>
+<script>(function(){var r=document.documentElement;try{var t=localStorage.getItem('theme');if(t==='light'){r.classList.add('theme-light');r.style.colorScheme='light';}else if(t==='dark'){r.classList.add('theme-dark');r.style.colorScheme='dark';}}catch(e){}r.classList.add('has-js');})();</script>
 <script src="/static/vote.js?v=2" defer></script>
 <script src="/static/comment.js?v=3" defer></script>
 <script src="/static/flair.js?v=2" defer></script>
@@ -158,7 +158,7 @@ ${themePaletteOverrides()}
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
-<script src="/static/theme.js?v=2" defer></script>
+<script src="/static/theme.js?v=3" defer></script>
 </head>
 <body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);
@@ -213,8 +213,8 @@ const APP_VERSION = (() => {
 
 // Operator-supplied vote-color overrides emitted as inline <style> in
 // <head>. Two scopes: the dark palette wins under :root; the light
-// palette wins under both data-theme="light" (post-click) and the
-// media query when the user hasn't clicked yet (and isn't sticky-dark).
+// palette wins under both .theme-light (post-click) and the media
+// query when the user hasn't clicked yet (and isn't sticky-dark).
 // resolveBrandingColors has already screened the values for CSS
 // injection at boot, so direct interpolation is safe.
 function themePaletteOverrides() {
@@ -227,8 +227,8 @@ function themePaletteOverrides() {
   const light = branding.colorsLight;
   if (light.up || light.down) {
     const decls = `${light.up ? `--up:${light.up};` : ''}${light.down ? `--down:${light.down};` : ''}`;
-    out.push(`:root[data-theme="light"]{${decls}}`);
-    out.push(`@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){${decls}}}`);
+    out.push(`:root.theme-light{${decls}}`);
+    out.push(`@media (prefers-color-scheme: light){:root:not(.theme-dark){${decls}}}`);
   }
   return out.length === 0 ? html`` : raw(`<style>${out.join('')}</style>`);
 }

@@ -1,44 +1,45 @@
-// Theme toggle (M8/B0). Anti-flash inline <script> in <head> already
-// stamps any saved data-theme on <html> + sets has-js. This file owns
-// only the click handler and the button label sync.
+// Theme toggle (M8/B0). Anti-flash inline <script> in <head> stamps
+// the saved theme class on <html> before first paint + sets has-js.
+// This file owns only the click handler and the button label sync.
 //
 // State model:
-//   - data-theme attribute on <html> ∈ {"light", "dark", absent}.
-//     Absent = "follow OS hint via @media (prefers-color-scheme)".
+//   - .theme-light or .theme-dark class on <html>; neither = follow
+//     OS hint via @media (prefers-color-scheme). Class-based, not
+//     attribute-based: iOS Safari has CSSOM-invalidation bugs around
+//     attribute selectors that classes don't trigger.
 //   - localStorage.theme persists the click. Once a user clicks, we
 //     stop following the OS hint forever (per browser).
 //   - Button label shows the action it'll perform: "light" when in
 //     dark, "dark" when in light. Reads same source of truth.
+//   - color-scheme inline style is set alongside the class flip so
+//     native UI elements (form inputs, scrollbars) match.
 (function () {
+  const root = document.documentElement;
   const btn = document.querySelector('button.theme-toggle');
   if (!btn) return;
   function effective() {
-    const attr = document.documentElement.getAttribute('data-theme');
-    if (attr === 'light' || attr === 'dark') return attr;
+    if (root.classList.contains('theme-light')) return 'light';
+    if (root.classList.contains('theme-dark')) return 'dark';
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
       ? 'light'
       : 'dark';
   }
+  function applyTheme(theme) {
+    root.classList.toggle('theme-light', theme === 'light');
+    root.classList.toggle('theme-dark', theme === 'dark');
+    root.style.colorScheme = theme;
+  }
   function syncLabel() {
     btn.textContent = effective() === 'dark' ? 'light' : 'dark';
   }
-  // Sync color-scheme on load too — iOS Safari uses it as the
-  // CSSOM-invalidation hint that data-theme alone doesn't reliably
-  // trigger after the first toggle.
-  document.documentElement.style.colorScheme = effective();
+  // Sync color-scheme on load — the inline anti-flash script already
+  // set the class; this just makes sure the inline-style hint matches
+  // for native UI.
+  root.style.colorScheme = effective();
   syncLabel();
   btn.addEventListener('click', () => {
     const next = effective() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    // iOS Safari has a long-standing bug where CSS custom properties
-    // resolved through an attribute selector (:root[data-theme="..."])
-    // don't always reinvalidate when only the attribute changes via
-    // setAttribute. Setting color-scheme explicitly forces the CSSOM
-    // to recompute, and the property is also semantically correct
-    // (tells the browser which native UI colors to use for inputs +
-    // scrollbars). Reproduces as "first toggle works, subsequent
-    // toggles flip the button label but don't repaint the page."
-    document.documentElement.style.colorScheme = next;
+    applyTheme(next);
     try { localStorage.setItem('theme', next); } catch (_) {}
     syncLabel();
   });

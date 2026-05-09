@@ -11,11 +11,11 @@
  * Light mode (M8/B0):
  *   - Pre-click default: prefers-color-scheme media query picks
  *     OS theme automatically.
- *   - Post-click: the toggle stamps data-theme="light" or "dark"
+ *   - Post-click: the toggle stamps .theme-light or .theme-dark
  *     on <html>; that wins over the OS hint forever (per-browser,
  *     stored in localStorage). No mid-session reverts.
  *   - Forks override the dark palette under :root and the light
- *     palette under :root[data-theme="light"] + the same media
+ *     palette under :root.theme-light + the same media
  *     query. Operator-supplied colorsLight values land via an
  *     inline <style> in <head> alongside the existing colors.
  * ============================================================ */
@@ -42,12 +42,18 @@
 
 /* Light palette — paper-light preset. Two activation paths:
  *   1. OS hint via @media when the user hasn't clicked the toggle.
- *   2. data-theme="light" stamped by static/theme.js after click.
- * Both resolve to the same variable values. data-theme="dark" is
- * the sticky-dark override for users on a light-default OS who
- * clicked the toggle to dark — wins back over the media query. */
+ *   2. .theme-light class stamped by static/theme.js after click.
+ * Both resolve to the same variable values. .theme-dark is the
+ * sticky-dark override for users on a light-default OS who clicked
+ * the toggle to dark — wins back over the media query.
+ *
+ * Class-based, not attribute-based: iOS Safari has long-standing
+ * CSSOM-invalidation bugs around `[attr]` selectors when attribute
+ * values churn (rapid theme toggles fail to repaint past the first
+ * transition). Class selectors don't have this problem in any
+ * engine. */
 /* DEFAULT: zinc-cool — soft cool gray, low brightness for long sessions. */
-:root[data-theme="light"] {
+:root.theme-light {
   --bg: #eef0f2;
   --bg-soft: #e3e6ea;
   --border: #c7ccd2;
@@ -61,7 +67,7 @@
   --note-bg: #fff8c5;      /* sticky-note fill — pale yellow over light bg */
 }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
+  :root:not(.theme-dark) {
     --bg: #eef0f2;
     --bg-soft: #e3e6ea;
     --border: #c7ccd2;
@@ -77,7 +83,7 @@
 }
 
 /* ---------- LIGHT PALETTE PRESETS ----------
- * Operators: copy any block over the :root[data-theme="light"] + media
+ * Operators: copy any block over the :root.theme-light + media
  * blocks above to swap. Mirror the same values into both blocks so the
  * post-click and OS-hint paths stay aligned.
  *
