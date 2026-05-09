@@ -47,7 +47,7 @@
     // cookies survive these modes — the inline anti-flash script in
     // <head> reads localStorage first and falls back to the cookie.
     try { localStorage.setItem('theme', next); } catch (_) {}
-    document.cookie = 'plato_theme=' + next + '; path=/; max-age=31536000; SameSite=Lax';
+    try { document.cookie = 'plato_theme=' + next + '; path=/; max-age=31536000; SameSite=Lax'; } catch (_) {}
     syncLabel();
   });
 })();
