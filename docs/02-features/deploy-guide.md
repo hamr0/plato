@@ -953,9 +953,12 @@ sudo -u plato -H bash -c 'cd /opt/plato && node --env-file=.env bin/migrate.js'
 sudo systemctl restart plato
 
 # 5. Verify the new version is live (three independent checks):
-sudo -u plato -H bash -c 'cd /opt/plato && git log -1 --oneline'    # commit on disk
-curl -sS https://${DOMAIN}/healthz | jq '{ok, version, last_migration}'   # version served
-sudo journalctl -u plato -n 5 --no-pager | grep "plato v"           # version logged at startup
+sudo -u plato -H bash -c 'cd /opt/plato && git log -1 --oneline'      # commit on disk
+curl -sS https://${DOMAIN}/healthz | jq '{ok, version, last_migration}'    # version served
+sudo tail -10 /var/log/plato.log | grep "plato v"                     # version logged at startup
+# (journalctl -u plato shows lifecycle events; plato's own console.log
+#  is redirected to /var/log/plato.log by the systemd unit — that's
+#  where the startup banner lands.)
 ```
 
 The footer of every page also shows `v<version>` next to the modlog link — eyeball check after refreshing the browser.
