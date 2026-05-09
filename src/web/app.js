@@ -146,7 +146,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=38">
+<link rel="stylesheet" href="/static/style.css?v=39">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -227,7 +227,7 @@ function themePaletteOverrides() {
   const light = branding.colorsLight;
   if (light.up || light.down) {
     const decls = `${light.up ? `--up:${light.up};` : ''}${light.down ? `--down:${light.down};` : ''}`;
-    out.push(`[data-theme="light"]:root{${decls}}`);
+    out.push(`:root[data-theme="light"]{${decls}}`);
     out.push(`@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){${decls}}}`);
   }
   return out.length === 0 ? html`` : raw(`<style>${out.join('')}</style>`);

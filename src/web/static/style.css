@@ -47,7 +47,7 @@
  * the sticky-dark override for users on a light-default OS who
  * clicked the toggle to dark — wins back over the media query. */
 /* DEFAULT: zinc-cool — soft cool gray, low brightness for long sessions. */
-[data-theme="light"]:root {
+:root[data-theme="light"] {
   --bg: #eef0f2;
   --bg-soft: #e3e6ea;
   --border: #c7ccd2;
