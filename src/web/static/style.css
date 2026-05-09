@@ -711,9 +711,15 @@ button:hover { filter: brightness(1.1); }
   padding: 0.55rem 0;
   border-bottom: 1px solid var(--border);
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* minmax(0, 1fr) lets the body track shrink below its content's
+   * intrinsic width — needed because a long post title in the .body
+   * column would otherwise force the grid wider than the viewport,
+   * dragging every paragraph in the rendered article past the right
+   * edge and producing page-level horizontal scroll on mobile. */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0.5rem;
 }
+.post > .body { min-width: 0; }
 
 .vote {
   display: flex;
@@ -748,8 +754,13 @@ button:hover { filter: brightness(1.1); }
 .post .body h2 { margin: 0; font-size: 1.2rem; font-weight: 700; line-height: 1.25; flex: 1; }
 .post .body h2 a { color: var(--text); }
 .post .body h2 a:hover { color: var(--accent); }
-.post-title-line { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.1rem; }
-.post-title-line h1 { flex: 1; margin: 0; }
+.post-title-line { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.1rem; flex-wrap: wrap; }
+/* min-width:0 lets the h1 shrink below intrinsic content width inside
+ * the flex row; overflow-wrap:anywhere catches the rare title that's
+ * one long unbreakable token (a URL, a hash, a kebab-cased phrase).
+ * Without these the title would push the grid track past viewport on
+ * narrow screens and force the post body to scroll sideways. */
+.post-title-line h1 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.6rem; line-height: 1.2; overflow-wrap: anywhere; }
 .post-title-line .post-actions { margin-top: 0; flex-shrink: 0; }
 
 .preview {
@@ -1737,6 +1748,13 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
     gap: 0.3rem;
     font-size: 0.78rem;
   }
+
+  /* Post-detail title: clamp h1 size on narrow viewports. Monospace
+   * at 1.6rem is ~22px-per-char; a 25-char title at that size still
+   * overflows a 320px iPhone SE viewport even with proper grid + flex
+   * shrinking applied. Smaller font + the existing overflow-wrap
+   * keeps long titles inside the column. */
+  .post-title-line h1 { font-size: 1.25rem; }
 
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,

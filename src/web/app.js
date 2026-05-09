@@ -317,6 +317,18 @@ function postExcerpt(body, max = 155) {
   return stripped.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
 }
 
+// Truncate a title to its first N whitespace-separated tokens with a
+// trailing ellipsis when truncated. Used in the brand wordmark on the
+// post-detail page so a 300-char post title doesn't push the header
+// sideways. The article body still renders the full title — this is
+// chrome, not the canonical display.
+function brandTitleTruncated(title, words = 3) {
+  if (typeof title !== 'string') return title;
+  const tokens = title.trim().split(/\s+/);
+  if (tokens.length <= words) return title;
+  return tokens.slice(0, words).join(' ') + '…';
+}
+
 // XML attribute / text escape for sitemap.xml output. The five XML
 // predefined entities cover both attribute-value and element-text
 // contexts safely.
@@ -2634,6 +2646,11 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
     pageView({
       db, currentHandle,
       title: post.title,
+      // Brand-area shows a 3-word truncation of the post title so the
+      // header chrome doesn't drag sideways on long titles. The full
+      // title still appears in <title>, og:title, and the article h1
+      // below.
+      titleHtml: html`${brandTitleTruncated(post.title)}`,
       // Removed posts → fall back to a minimal description so an indexed
       // snippet doesn't quote a body the operator already retracted.
       description: post.removed_at
