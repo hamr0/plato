@@ -22,10 +22,23 @@
   function syncLabel() {
     btn.textContent = effective() === 'dark' ? 'light' : 'dark';
   }
+  // Sync color-scheme on load too — iOS Safari uses it as the
+  // CSSOM-invalidation hint that data-theme alone doesn't reliably
+  // trigger after the first toggle.
+  document.documentElement.style.colorScheme = effective();
   syncLabel();
   btn.addEventListener('click', () => {
     const next = effective() === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
+    // iOS Safari has a long-standing bug where CSS custom properties
+    // resolved through an attribute selector (:root[data-theme="..."])
+    // don't always reinvalidate when only the attribute changes via
+    // setAttribute. Setting color-scheme explicitly forces the CSSOM
+    // to recompute, and the property is also semantically correct
+    // (tells the browser which native UI colors to use for inputs +
+    // scrollbars). Reproduces as "first toggle works, subsequent
+    // toggles flip the button label but don't repaint the page."
+    document.documentElement.style.colorScheme = next;
     try { localStorage.setItem('theme', next); } catch (_) {}
     syncLabel();
   });
