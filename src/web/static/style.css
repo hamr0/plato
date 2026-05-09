@@ -1769,6 +1769,23 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
 
   /* Login popover: anchor to viewport edge so it doesn't push off
    * screen on the narrowest phones. */
-  .login-form { right: 0.4rem; min-width: 14rem; }
-  .login-form input[type="email"] { min-width: 0; }
+  /* Login dropdown: switch to viewport-anchored positioning on narrow
+   * viewports. The default position:absolute anchors to .login-trigger
+   * (~50px wide), so a 14rem-wide form extended past the viewport's
+   * left edge. position:fixed pins to the viewport directly, and
+   * left/right both clamped means the form spans width-with-gutter.
+   * Input's flex:1 1 0 + width:0 overrides Safari's default input
+   * sizing (which uses size=20 even when CSS min-width is 0). */
+  .login-form {
+    position: fixed;
+    top: 3.6rem;
+    left: 0.6rem;
+    right: 0.6rem;
+    min-width: 0;
+  }
+  .login-form input[type="email"] {
+    min-width: 0;
+    width: 0;
+    flex: 1 1 0;
+  }
 }
