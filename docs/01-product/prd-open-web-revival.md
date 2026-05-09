@@ -113,7 +113,7 @@ This shape worked for phpBB-era forums of hundreds to thousands. It does not sca
 ## Content Model
 
 - **Sub-forums** ("subs"): named topical spaces. Anyone can browse without an account. Posting requires email magic-link.
-- **Posts**: text-first. Title + markdown body.
+- **Posts**: text-first. Title + markdown body. Code blocks and quoted prose wrap inside the column on narrow viewports — content never forces horizontal scroll, even when the markdown source is a single long line.
 - **Media**: links only, never hosted. The forum holds zero media files, ever — not in v1, not in v2, not ever. Users link to YouTube, Vimeo, Imgur, their own domain, wherever. Links display as clickable text — no inline embeds, no preview cards, no auto-rendered video players. If the link target dies, the link dies; the post text remains. This is a permanent design choice, not a v1 limitation.
 - **Comments**: hierarchical, unlimited depth, collapsible. Markdown.
 - **Voting**: upvote / downvote on posts and comments. One vote per email per item. Vote tallies visible. Downvote = "I disagree / low quality." Has no moderation consequence — it's an opinion signal.

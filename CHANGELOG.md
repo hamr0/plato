@@ -6,7 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.10.1 fixes land here before the next bump)
+(no entries yet — next: any post-0.10.2 fixes land here before the next bump)
+
+## [0.10.2] - 2026-05-09 — mobile-safe `<pre>` rendering for prose-shaped code blocks
+
+Single-issue patch from a real terribic.com post. Fenced code blocks (and 4-space-indented blocks) containing long prose lines were rendering with `overflow-x: auto`, so on narrow viewports the `<pre>` extended past the right edge of the viewport with an internal horizontal scrollbar. Inside a forum that's prose-first and where users reach for ` ``` ` to pull-quote essays, the default was wrong: it preserved horizontal layout fidelity at the cost of readability on phones.
+
+### Fixed — `<pre>` blocks now soft-wrap inside the column
+
+Switched `article pre` from `overflow-x: auto` to `white-space: pre-wrap; overflow-wrap: anywhere;`. Intentional newlines inside real code blocks are still preserved (that's what `pre-wrap` does); long lines wrap at word boundaries to fit the column; unbreakable strings (URLs, hashes) break to fit instead of forcing horizontal scroll. The trade-off — actual code with critical column-alignment loses that alignment when wrapped on a 320px viewport — is the right one for a prose-first forum: the alignment was already lost the moment the content didn't fit, and soft-wrap is the better failure mode. *(`c39bd38`)*
+
+### Cache-buster
+
+`style.css?v=40 → v=41`. Mobile users will see the new behavior on next page load without a hard refresh; the bumped query string forces a fresh CSS fetch.
 
 ## [0.10.1] - 2026-05-09 — mobile theme-toggle hardening + status-row layout
 
