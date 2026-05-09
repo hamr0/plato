@@ -937,16 +937,34 @@ Both are read-only — you can't change anything, only monitor. The value is ear
 
 ### Updating plato
 
+For production deploys tracking `main` (e.g. early-stage or pre-v1):
+
 ```bash
-sudo -u plato -H bash <<'EOF'
-cd /opt/plato
-git fetch origin
-git checkout v0.X.Y           # pin to a tag, not main
-npm ci --omit=dev
-node --env-file=.env bin/migrate.js
-EOF
-systemctl restart plato
-curl -sS https://${DOMAIN}/healthz | jq .ok    # expect: true
+# 1. Pull the latest source as the plato user:
+sudo -u plato -H bash -c 'cd /opt/plato && git pull origin main'
+
+# 2. Refresh dependencies if package.json changed (cheap if it didn't):
+sudo -u plato -H bash -c 'cd /opt/plato && npm ci --omit=dev'
+
+# 3. Apply any new migrations (idempotent — safe even if there are none):
+sudo -u plato -H bash -c 'cd /opt/plato && node --env-file=.env bin/migrate.js'
+
+# 4. Restart the service:
+sudo systemctl restart plato
+
+# 5. Verify the new version is live (three independent checks):
+sudo -u plato -H bash -c 'cd /opt/plato && git log -1 --oneline'    # commit on disk
+curl -sS https://${DOMAIN}/healthz | jq '{ok, version, last_migration}'   # version served
+sudo journalctl -u plato -n 5 --no-pager | grep "plato v"           # version logged at startup
+```
+
+The footer of every page also shows `v<version>` next to the modlog link — eyeball check after refreshing the browser.
+
+**Pinning to a tag for stable deploys** (recommended once plato has tagged releases):
+
+```bash
+sudo -u plato -H bash -c 'cd /opt/plato && git fetch origin && git checkout v0.X.Y'
+# then steps 2–5 above
 ```
 
 If you skipped a major version, read `CHANGELOG.md` between the two tags first — migrations are forward-compatible but config knobs may have moved.

@@ -10,6 +10,18 @@ import { createApp, resolveBrandingRules } from '../src/web/app.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 
+// Read version from package.json so the startup log line carries the
+// installed version. Operators can grep `journalctl -u plato | grep "plato v"`
+// or `tail /var/log/plato.log` after a `git pull && systemctl restart plato`
+// to confirm the new code is live without hitting /healthz.
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+})();
+
 const PORT = Number(process.env.PORT ?? 8080);
 const BASE_URL = process.env.KNOWLESS_BASE_URL ?? `http://localhost:${PORT}`;
 const DB_PATH = process.env.DB_PATH ?? resolve(ROOT, 'forum.db');
@@ -76,7 +88,10 @@ const handler = createApp({
 
 const server = http.createServer(handler);
 
-server.listen(PORT, () => console.log(`plato on ${BASE_URL}`));
+server.listen(PORT, () => {
+  const v = APP_VERSION ? `v${APP_VERSION} ` : '';
+  console.log(`plato ${v}on ${BASE_URL}`);
+});
 
 function shutdown() {
   server.close(() => {

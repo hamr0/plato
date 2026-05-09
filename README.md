@@ -6,6 +6,11 @@
 
 <p align="center"><em>"opinion is the medium between knowledge and ignorance."</em></p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/package-json/v/hamr0/plato?label=version&color=2a4f8c" alt="version (auto from package.json)">
+  <img src="https://img.shields.io/github/license/hamr0/plato?color=2a4f8c" alt="license">
+</p>
+
 ---
 
 **plato is a forum.** Reddit-shaped (subs, threads, votes, mods). Every sub is its own universe — the mod is its owner, the operator is a facilitator who runs the lights, not a referee for sub-level disputes. Every mod action lands in a public log; the community can reverse soft removals via votes; if a mod goes rogue, you fork the sub. People leave the mod, not the platform.

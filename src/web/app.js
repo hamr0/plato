@@ -430,10 +430,13 @@ function siteFooter() {
   const feedbackLink = branding.feedbackEmail
     ? html`<a href="mailto:${branding.feedbackEmail}">feedback</a> · `
     : html``;
+  const versionTag = APP_VERSION
+    ? html` · <span class="version" title="plato source version (from package.json)">v${APP_VERSION}</span>`
+    : html``;
   return html`<footer class="site-footer">
     <a href="/" class="logo-home">${logoMark({ size: 22 })}</a>
     <span class="hosted-by muted">a plato instance hosted by ${handle}</span>
-    <span class="footer-links muted">· ${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a></span>
+    <span class="footer-links muted">· ${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a>${versionTag}</span>
     <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
