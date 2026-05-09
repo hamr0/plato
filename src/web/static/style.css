@@ -1195,7 +1195,12 @@ table.communities tr:hover td { background: var(--bg-soft); }
 
 /* UX-E: home top nav (Posts | Comments tabs + sort + date) */
 .home-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0.6rem 0 0.4rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
-.home-nav .filter-group { display: inline-flex; gap: 0.3rem; align-items: center; }
+/* `.filter-group` is a semantic wrapper around a category of chips, but
+ * for layout we want chips + separators to wrap individually as siblings
+ * (snake-wrap: left-to-right, then to next line) rather than each group
+ * claiming its own row when widths are tight. `display: contents` makes
+ * the wrapper transparent for layout while preserving the DOM grouping. */
+.home-nav .filter-group { display: contents; }
 .filter-btn-disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
 /* memlog (per-user notification log) chrome. */
@@ -1716,6 +1721,9 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,
   .modlog-modes { flex-wrap: wrap; row-gap: 0.3rem; }
+
+  /* Tighter home-nav gap on narrow viewports for the snake-wrap rows. */
+  .home-nav { gap: 0.4rem; row-gap: 0.45rem; }
 
   /* Memlog table: hide from + where columns at narrow widths so
    * type/when/kind/snippet still fit one row per line. The where

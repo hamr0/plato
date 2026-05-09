@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — home-nav filter chips snake-wrap on narrow viewports
+
+The home-page filter chips (`posts | comments`, `new/old/top/hot`, `24h/week/all`) used `.filter-group` wrapper spans with `display: inline-flex`, which made each group a single layout unit. On narrow viewports each group claimed its own row with empty trailing space rather than chips wrapping individually as siblings. Setting `.home-nav .filter-group { display: contents }` makes the wrapper transparent for layout while preserving the DOM grouping — chips and separators now snake-wrap left-to-right, then to the next line, like words in a paragraph. No change on desktop where everything fits in one row anyway. Found during the first canonical mobile-Safari smoke at terribic.com.
+
+### Added — deploy-guide hardening from first canonical deploy at terribic.com
+
+First end-to-end deploy of the guide against a real RackNerd VPS + Route 53 + Gmail recipient surfaced ~15 small gaps. Every one now has a guide edit (the "fix the source, not the session" pattern):
+
+- **Step 0** — explicit handling for Ubuntu's `/etc/ssh/sshd_config.d/50-cloud-init.conf` re-enabling `PasswordAuthentication yes` (overrides the main config edit). Hostname rename block (`hostnamectl set-hostname $DOMAIN`). SSH private key backup callout (pass: `plato/vps/$DOMAIN/ssh-private-key`).
+- **Prerequisites** — env vars (DOMAIN/ADMIN_EMAIL/PLATO_PORT) now persisted to `/root/.bashrc` instead of one-shot `export` (didn't survive SSH reconnects, silently produced malformed configs across multiple steps). Added `FORUM_NAME` for `KNOWLESS_FROM` display name.
+- **Step 1** — `NEEDRESTART_MODE=a` to stop `apt -y upgrade` hanging on Ubuntu 24.04's needrestart prompt. Explicit "From this step onward, every command runs on the VPS" callout (caught a paste-on-laptop foot-gun mid-deploy).
+- **Step 4** — corrected `/opt/plato` mode prediction to `0750` (Ubuntu's `HOME_MODE` default) instead of `0700`.
+- **Step 5** — env-var sanity guard at top of step (Step 5.2/5.3 silently produced malformed `KeyTable`/`SigningTable` when `$DOMAIN` was empty after a reconnect). DKIM private key backup callout (pass: `plato/vps/$DOMAIN/dkim-default-private`).
+- **Step 5.3** — opendkim `Socket inet:8891@localhost` (Ubuntu defaults to UNIX socket; postfix's `inet:` milter URI can't use it). Neutralize `/etc/default/opendkim` SOCKET= override. `enable + restart` instead of `enable --now` (no-op when service is already running from package install).
+- **Step 5.5** — optional MX record callout while at registrar (saves a second trip if Step 14 inbound aliases is on the roadmap).
+- **Step 7** — friendly `KNOWLESS_FROM=$FORUM_NAME <auth@$DOMAIN>` template (recipients see "terribic" rather than just the email address). `KNOWLESS_SECRET` backup callout (pass: `plato/vps/$DOMAIN/knowless-secret`).
+- **Step 8** — clearer optional `tagline` field with concrete examples instead of generic placeholder.
+- **Step 11** — disable Ubuntu's stock `/etc/nginx/sites-enabled/default` (catchall `server_name _; listen 80 default_server;` was intercepting requests in some configurations).
+- **NEW Step 14** — inbound aliases (`abuse@`/`postmaster@`/`feedback@`/`security@` → `$ADMIN_EMAIL` via postfix `virtual_alias_maps` + MX record). RFC 2142 compliance + DMARC report inbox + domain-branded `feedback@`. Optional, post-deploy.
+- **NEW Step 15** — sender reputation monitoring signups: Google Postmaster Tools, Microsoft SNDS, Microsoft JMRP. Free, web-only, gives early warning when domain reputation drifts.
+- **Throughout** — `/var/log/mail.log` (Ubuntu/Debian) replaces `/var/log/maillog` (RHEL convention) wherever the path appeared.
+
 ### Added — Ubuntu 24.04 primary path + Step 0 SSH hardening (post-M8, deploy/5)
 
 The deploy guide privileged AlmaLinux 9 as the primary distro, but Ubuntu
