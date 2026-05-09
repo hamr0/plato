@@ -243,6 +243,8 @@ plato's per-sub feeds are public; the two **personal aggregated feeds** at `/u/<
 
 For repeat users, posting feels almost as fast as logged-in posting. For first-timers, it's two clicks more than a session-based platform.
 
+The mail body itself reads safety-first: the "this link expires in 15 minutes / if you didn't request this, ignore this email" warning leads above the click target, so a user who didn't request the mail sees the dismissal instruction before the URL. The Last-sign-in security signal stays in place ("If that wasn't you, do not click the link above"); the operator footer carries an instance attribution line (`a plato instance hosted by @<branding.hostedBy> . <branding.feedbackEmail>`) so the recipient can place the mail's origin and reach the operator if the email arrived unsolicited.
+
 ### Silent-miss extends to the link-click stage
 
 Plato's auth flow (via knowless) treats unknown emails, rate-limited new-handle creation, and valid emails identically at the POST `/login` stage — same response shape, same timing, same sham-mailing path. This is anti-enumeration: an attacker probing whether `victim@example.com` is a registered user can't tell from the response.

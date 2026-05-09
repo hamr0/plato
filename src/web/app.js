@@ -399,6 +399,45 @@ export function resolveBrandingRules(val) {
   return out;
 }
 
+// Compose the magic-link email body in plato's preferred order. Plato uses
+// knowless's bodyOverride to take the wheel on body shape: the security
+// warning ("expires in 15 minutes / if you didn't request this") leads, the
+// URL follows, the Last-sign-in security signal sits below it, and the
+// instance stub ("a plato instance hosted by @X . Y") joins the civility
+// rules under the standard `-- ` signature delimiter.
+//
+// Drift note: the Last-sign-in wording is duplicated from knowless's default
+// composeBody (mailer.js). knowless's GUIDE.md §bodyOverride documents the
+// recipe (deriveHandle + createStore + getLastLogin) but leaves wording to
+// the adopter. If knowless ever revises that exact phrasing, this function
+// drifts — check knowless's CHANGELOG when upgrading.
+//
+// All inputs are pre-validated upstream (branding fields by their resolvers,
+// rules by resolveBrandingRules) so this function trusts its arguments.
+// Returns ASCII text suitable for knowless's bodyOverride contract: ≤2048
+// chars, URL appears exactly once on its own line.
+export function composeMailBody({ url, lastLoginAt = null, hostedBy = null, feedbackEmail = null, rules = [] }) {
+  let body =
+    "This link expires in 15 minutes. If you didn't request this,\n" +
+    'ignore this email.\n\n' +
+    'Click to sign in:\n\n' +
+    `${url}\n`;
+  if (lastLoginAt != null) {
+    body +=
+      `\nLast sign-in: ${new Date(lastLoginAt).toISOString()}.\n` +
+      "If that wasn't you, do not click the link above.\n";
+  }
+  const stubParts = [];
+  if (hostedBy) stubParts.push(`hosted by ${hostedBy}`);
+  if (feedbackEmail) stubParts.push(feedbackEmail);
+  const stub = stubParts.length > 0 ? `a plato instance ${stubParts.join(' . ')}` : null;
+  const footerLines = [stub, ...(rules ?? [])].filter(Boolean);
+  if (footerLines.length > 0) {
+    body += `\n-- \n${footerLines.join('\n')}\n`;
+  }
+  return body;
+}
+
 // Inline SVG of the mark. `loading` adds the wave animation (the only
 // animation in the entire app). aria-hidden because the wordmark next to
 // it carries the meaning for screen readers. ViewBox is sized so dots
@@ -2243,7 +2282,7 @@ async function handleSubMods(req, res, { db, auth }, subName) {
   redirect(res, back);
 }
 
-async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }) {
+async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
@@ -2346,6 +2385,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     email,
     nextUrl: `${baseUrl}/draft/${draftId}/finalize`,
     sourceIp: req.socket?.remoteAddress,
+    bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
 
   send(
@@ -5328,7 +5368,7 @@ function renderLogin(req, res, { db, auth }, searchParams) {
   `));
 }
 
-async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains }) {
+async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, return_to: returnTo } = form;
@@ -5347,6 +5387,7 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains }) {
     email,
     nextUrl: `${baseUrl}${landing}`,
     sourceIp: req.socket?.remoteAddress,
+    bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
   send(
     res,
@@ -5416,7 +5457,7 @@ function resolveFeedPageSize(override) {
   return override;
 }
 
-export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined, evalBanner = false }) {
+export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined, evalBanner = false, lookupLastLoginAt = null }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -5451,6 +5492,18 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
   // and read fresh at app boot. Restart picks up new entries; an empty
   // cache means the matcher is a no-op (safe default for fresh installs).
   const urlhausHosts = loadUrlhausCache(urlhausCacheFile);
+  // Magic-link body factory: derive handle from the email at submit time,
+  // look up the per-handle last-sign-in (knowless v1.1.5 GUIDE.md recipe),
+  // and compose plato's body shape via composeMailBody. lookupLastLoginAt
+  // is the parallel-store reader passed in by bin/server.js; tests omit
+  // it and the resulting body just skips the security-signal block.
+  const mailBodyOverride = (email) => ({ url }) => composeMailBody({
+    url,
+    lastLoginAt: lookupLastLoginAt ? lookupLastLoginAt(auth.deriveHandle(email)) : null,
+    hostedBy: branding.hostedBy,
+    feedbackEmail: branding.feedbackEmail,
+    rules: branding.rules,
+  });
   return async function handler(req, res) {
     try {
       const url = new URL(req.url, baseUrl);
@@ -5466,7 +5519,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
       if (path === '/.well-known/plato-pubkey' && method === 'GET') return renderPubkey(res, { db });
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
-      if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains });
+      if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride });
       if (path === '/auth/callback') return auth.callback(req, res);
       if (path === '/verify') return auth.verify(req, res);
       if (path === '/logout' && method === 'POST') return handleLogout(req, res, { db, auth });
@@ -5475,7 +5528,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/about' && method === 'GET') return renderAbout(req, res, { db, auth });
       if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
-        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts });
+        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride });
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });

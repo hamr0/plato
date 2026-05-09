@@ -2,6 +2,7 @@ import http from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createStore } from 'knowless';
 import { openDb } from '../src/db/index.js';
 import { createAuth } from '../src/auth/index.js';
 import { loadDisposableDomains } from '../src/content/disposable-domain.js';
@@ -66,11 +67,19 @@ const mailEvents = {
   },
 };
 
+const KNOWLESS_DB_PATH = process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db');
 const auth = createAuth(process.env, {
-  dbPath: process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db'),
-  bodyFooter: brandingRules.length > 0 ? brandingRules.join('\n') : undefined,
+  dbPath: KNOWLESS_DB_PATH,
   ...mailEvents,
 });
+// Parallel read-only store handle pointing at the same SQLite file knowless
+// uses internally. Lets the magic-link bodyOverride look up Last-sign-in for
+// a derived handle without reaching into knowless internals — the v1.1.5
+// GUIDE.md "composing the security signal under bodyOverride" recipe.
+// SQLite supports many concurrent readers; we never write through this
+// handle. plato's app code stays decoupled from knowless's storage by
+// receiving only a `lookupLastLoginAt(handle) -> number|null` function.
+const knowlessStore = createStore(KNOWLESS_DB_PATH);
 const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
 
 const handler = createApp({
@@ -84,6 +93,7 @@ const handler = createApp({
   urlDisplayMax: operatorConfig.urlDisplayMax,
   feedPageSize: operatorConfig.feedPageSize,
   evalBanner: process.env.PLATO_EVAL_BANNER === '1',
+  lookupLastLoginAt: (handle) => knowlessStore.getLastLogin(handle),
 });
 
 const server = http.createServer(handler);
@@ -96,6 +106,7 @@ server.listen(PORT, () => {
 function shutdown() {
   server.close(() => {
     auth.close();
+    knowlessStore.close();
     db.close();
     process.exit(0);
   });

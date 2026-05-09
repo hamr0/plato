@@ -6,7 +6,62 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.10.2 fixes land here before the next bump)
+(no entries yet — next: any post-0.10.3 fixes land here before the next bump)
+
+## [0.10.3] - 2026-05-09 — magic-link email body reordered + per-instance footer stub
+
+Real terribic.com sign-in surfaced two ergonomics issues with the magic-link mail. First, the security warning ("This link expires in 15 minutes. If you didn't request this, ignore this email.") sat at the **bottom** of the body — readers who got an unsolicited link had to scroll past the click target to find the "ignore this email" instruction. Second, the operator footer carried only the civility rules; there was no per-instance attribution showing which plato instance the mail came from or where to send feedback.
+
+Both fixes land in plato. knowless stayed at v1.1.5 with a single doc-only paragraph (the GUIDE.md "composing the security signal under bodyOverride" recipe). Walk-away preserved on the library side: zero source change, the discoverability bug was the actual gap.
+
+### Changed — magic-link body order: warning leads, URL follows, security signal stays
+
+plato now composes the entire magic-link body via knowless's `bodyOverride` mechanism (AF-26, shipped in knowless v0.2.2). The new shape:
+
+```
+This link expires in 15 minutes. If you didn't request this,
+ignore this email.
+
+Click to sign in:
+
+<URL>
+
+Last sign-in: 2026-05-09T16:57:05.667Z.
+If that wasn't you, do not click the link above.
+
+-- 
+a plato instance hosted by @<branding.hostedBy> . <branding.feedbackEmail>
+<civility rule 1>
+<civility rule 2>
+<civility rule 3>
+<civility rule 4>
+```
+
+The Last-sign-in security-signal block is preserved end-to-end. Under `bodyOverride` knowless doesn't auto-append it — instead plato follows the v1.1.5 GUIDE.md recipe: open a parallel read-only `createStore(KNOWLESS_DB_PATH)` handle in `bin/server.js`, derive the handle from the submitted email via `auth.deriveHandle(email)`, look up `lastLoginAt` via the parallel store, pass the value into `composeMailBody` through the per-call closure. `bodyFooter` was dropped from `createAuth`'s config — the override owns the whole tail now, including the `-- ` signature delimiter.
+
+The Last-sign-in wording is duplicated verbatim from knowless's default `composeBody` (`mailer.js`). Drift note in `composeMailBody`'s comment: if knowless ever revises that exact phrasing, plato emits stale wording until someone updates the helper. Recoverable, contained, the cost of having taken the wheel. *(`<commit-after-cut>`)*
+
+### Added — per-instance attribution line in the magic-link footer
+
+When `branding.hostedBy` and/or `branding.feedbackEmail` are set in `config.json`, the magic-link footer's first line reads:
+
+```
+a plato instance hosted by @terribic . feedback@terribic.com
+```
+
+Rendered as the first line *under* the `-- ` delimiter, above the existing civility rules. If either field is unset, the line collapses gracefully — only the populated half shows; if both are unset, the stub is omitted entirely and the footer falls back to the existing civility-rules-only shape. No knowless-side limit relaxation needed: under `bodyOverride` plato owns the whole footer block and knowless's 4-line / 240-char `bodyFooter` cap doesn't apply (only the broader 2048-char `bodyOverride` cap, which the worst-case body comes nowhere near). *(`<commit-after-cut>`)*
+
+### Internal — `composeMailBody` exported as a pure helper for test isolation
+
+`src/web/app.js` exports `composeMailBody({url, lastLoginAt, hostedBy, feedbackEmail, rules})` — pure function, no I/O, no dependencies. The wired path inside `createApp` builds a per-email closure that calls `auth.deriveHandle` + `lookupLastLoginAt` and threads the resulting `lastLoginAt` into `composeMailBody`. 10 new tests in `test/integration/mail-body.test.js` pin output shape: warning leads, URL on its own line (knowless invariant), Last-sign-in block present/absent, stub composition under `--`, ASCII-only output, length within knowless's `bodyOverride` 2048-char cap. *(`<commit-after-cut>`)*
+
+### Not changed — knowless
+
+knowless stayed at v1.1.5 (the doc-only release that added the recipe paragraph). I drafted a callback-arg-widening change first (extend `bodyOverride({url})` to `bodyOverride({url, lastLoginAt})`) and the maintainer rejected it as out-of-shape under walk-away — callback-arg widening normalizes "every adopter who needs one more value" as a default-yes precedent, which is what walk-away exists to refuse. The recipe was already there; the discoverability bug was the actual gap. plato hardcoding the security-line wording is the agreed cost. *(`<commit-after-cut>`)*
+
+### Tests
+
+809 → 819 (10 new in `test/integration/mail-body.test.js`).
 
 ## [0.10.2] - 2026-05-09 — mobile-safe `<pre>` rendering for prose-shaped code blocks
 
