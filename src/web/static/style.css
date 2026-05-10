@@ -394,6 +394,19 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
  * categories; optional 280-char note. */
 .post-actions { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.15rem; flex-wrap: wrap; }
 .post-actions .mod-controls { gap: 0.4rem; margin-top: 0; }
+/* Middot between .post-actions siblings so an author+mod row reads
+ * `edit · collapse · remove · ban` instead of `edit  collapse · remove`
+ * (gap-only spacing between edit and the mod-controls block made the
+ * boundary look like an accidental indent). The ::before lands as the
+ * first flex item of the second child (.mod-controls), getting flex-gap
+ * to each side from .post-actions / .mod-controls respectively — no
+ * margin needed. Mutually-exclusive-with-flag means flag rows never
+ * have multiple children, so this only fires when edit + mod-controls
+ * coexist. */
+.post-actions > * + *::before {
+  content: "·";
+  color: var(--text-dim);
+}
 .flag-form-wrap { display: inline-block; }
 .flag-trigger {
   cursor: pointer;
