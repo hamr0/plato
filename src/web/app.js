@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=44">
+<link rel="stylesheet" href="/static/style.css?v=45">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -1533,7 +1533,7 @@ function renderCommunities(req, res, { db, auth }, searchParams) {
     : html`<table class="communities">
         <thead><tr><th>sub</th><th>description</th><th>posts</th><th>mem</th><th class="col-active">active</th><th class="col-owner">owner</th>${subscribeHead}</tr></thead>
         <tbody>${subs.map((s) => html`<tr>
-          <td>${modSet.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${importedSubChip({ sub: s })}${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}</td>
+          <td>${modSet.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${importedSubChip({ sub: s })}${s.sensitive ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}${s.disabled_at != null ? html` <span class="muted" title="this sub is read-only — awaiting reactivation or community-fork">[read-only]</span>` : html``}${subscribedSet && subscribedSet.has(s.name) && !modSet.has(s.name) ? html` <span class="subscribed-mark" title="you're subscribed to this sub">[in]</span>` : html``}</td>
           <td class="muted desc-cell">${s.description || ''}</td>
           <td class="num">${s.post_count}</td>
           <td class="num muted" data-mem-count="${s.name}">${subCounts.get(s.name) ?? 0}</td>

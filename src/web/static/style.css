@@ -1511,6 +1511,11 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 .sensitive-banner strong { text-decoration: underline dotted; text-underline-offset: 0.2em; }
 .sensitive-mark { color: var(--accent-warm); font-family: monospace; font-size: 0.85em; }
 .new-account-mark { color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
+/* Subscribed-state marker on the subs index. Hidden on desktop (the
+ * subscribe column already conveys this); revealed at narrow widths
+ * where the column hides, so the reader still knows which subs they're
+ * in. Same bracketed-tag family as .sensitive-mark / imported chip. */
+.subscribed-mark { display: none; color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
 /* Imported-sub banner (M7/B5). Sits below the sensitive-banner and above
    the sub-state-banner on /sub/<name>. Visually quieter than sensitive
@@ -1865,17 +1870,48 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
   .modlog-page table.modlog td[data-label="reason"] ~ td:not(:empty)::before { content: ""; }
 
   /* Subs index: drop description, subscribers (placeholder anyway),
-   * and owner columns. Keeps sub link, post count, and last-active
-   * — the navigational essentials. */
+   * owner, and the subscribe-action column. Keeps sub link, post
+   * count, and last-active — the navigational essentials. The
+   * subscribe action moves to the per-sub page; subscription state
+   * surfaces via .subscribed-mark inline after the sub name. */
   table.communities th:nth-child(2),
   table.communities td:nth-child(2),
   table.communities th:nth-child(4),
   table.communities td:nth-child(4),
   table.communities th:nth-child(6),
-  table.communities td:nth-child(6) { display: none; }
+  table.communities td:nth-child(6),
+  table.communities th:nth-child(7),
+  table.communities td:nth-child(7) { display: none; }
   table.communities { table-layout: auto; width: 100%; }
   table.communities th, table.communities td {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .subscribed-mark { display: inline; margin-left: 0.3rem; }
+
+  /* Mod controls (collapse / remove / ban) drop their pill chrome and
+   * render as text verbs at narrow widths. Reason: at desktop the
+   * outlined pills are visually distinct from the solid-filled flair
+   * chips, but at mobile sizes they rhyme — both rectangles of
+   * similar dimensions — and a fast scan reads them as the same kind
+   * of thing. As text verbs separated by `·` they join plato's
+   * action-strip vocabulary (← home · public //modlog · …) instead. */
+  .mod-controls .mod-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-dim);
+    border-radius: 0;
+  }
+  .mod-controls .mod-btn:hover {
+    color: var(--accent-warm);
+    border-color: transparent;
+  }
+  .mod-controls .mod-btn-warn { border-color: transparent; }
+  .mod-controls .mod-form + .mod-form::before {
+    content: "·";
+    color: var(--text-dim);
+    margin-right: 0.4rem;
+    align-self: center;
   }
 
   /* Forms: inputs stretch to viewport rather than overflowing. */
