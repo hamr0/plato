@@ -44,6 +44,7 @@ Plato is *not* for: image-first communities, communities that want voice/video, 
 - Magic-link login. No passwords ever. Your email never lands in the database in plaintext.
 - Deterministic pseudonyms and robot avatars. Same user, same display, no uploads.
 - Markdown-only post bodies, with raw HTML escaped, image-markdown turned into plain links, and dangerous URL schemes stripped.
+- Post in any language. Every Unicode script the user's browser can render — Arabic, Hebrew, Persian, Urdu, Chinese, Japanese, Korean, Cyrillic, Greek, Devanagari, Tamil, Bengali, Thai, anything. Post titles, post bodies, comment bodies, and feed-view excerpts carry `dir="auto"` so RTL scripts flip automatically; `unicode-bidi: plaintext` on block-level children means a post mixing English and Arabic paragraphs renders each block in its own direction. UI chrome (header, action pills, vote arrows, modlog labels) stays English-LTR by design — *post any language, the UI speaks one*. No locale switcher, no translation pipeline, no ambition to ever build either; that's a separate product.
 
 ---
 

@@ -146,7 +146,7 @@ function layout(title, body, seo = {}) {
 <meta property="og:image" content="${siteMeta.baseUrl}/static/og.png?v=1">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="plato">
+<meta property="og:image:alt" content="${branding.forumName}">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
@@ -732,7 +732,7 @@ function siteHeader({ db, currentHandle, title, subtitle }) {
   const effectiveSubtitle = title === undefined && subtitle === undefined
     ? branding.tagline
     : subtitle;
-  return html`<header class="site">
+  return html`<header class="site" dir="ltr">
     <div class="brand">
       <h1>
         <a href="/" class="logo-home">${logoMark({ size: 32 })}${effectiveTitle}</a>${effectiveSubtitle
@@ -1707,7 +1707,7 @@ function renderSubPage(req, res, { db, auth, postsDir }, subName, sort, searchPa
       ${sub.sensitive ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
       ${importedBanner({ sub, db })}
       ${subStateBanner({ db, sub, modRole })}
-      ${sub.sticky_note ? html`<div class="sub-sticky-note" role="note" aria-label="mod note">${raw(renderMarkdown(sub.sticky_note))}</div>` : html``}
+      ${sub.sticky_note ? html`<div class="sub-sticky-note" role="note" aria-label="mod note" dir="auto">${raw(renderMarkdown(sub.sticky_note))}</div>` : html``}
       ${anonHintFor(currentHandle)}
       <details class="new-post-toggle">
         <summary>+ new post</summary>

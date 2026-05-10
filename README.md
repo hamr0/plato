@@ -24,6 +24,8 @@ The modern web has trained us to accept that what you see isn't what you get —
 - **Plain text, loads anywhere.** Markdown for posts, hyperlinks for everything else.
   No image / video hosting; image markdown becomes a clickable link. Renders on any device, any connection, any decade.
 
+- **Post in any language.** Every Unicode script the browser can render — Arabic, Hebrew, Persian, Urdu, Chinese, Japanese, Korean, Cyrillic, Greek, Devanagari, Tamil, Bengali, Thai, anything. Right-to-left scripts auto-flip per paragraph; mixed-script posts render each block in its own direction. The forum's chrome (header, action pills, modlog labels) stays in plato's English voice — *post any language, the UI speaks one*.
+
 - **Magic-link sign-in, no identity lock.** Click an emailed link, you're in — no password, no profile, no captcha.
   Email is hashed on receipt and never stored; only a one-way fingerprint scoped to this site remains.
   Same email on two plato instances = two unrelated pseudonyms.

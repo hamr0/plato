@@ -160,7 +160,7 @@ test('GET /: head includes description, canonical, OG, twitter card, theme-color
   assert.match(body, new RegExp(`<meta property="og:image" content="${ctx.baseUrl}/static/og.png\\?v=1">`));
   assert.match(body, /<meta property="og:image:width" content="1200">/);
   assert.match(body, /<meta property="og:image:height" content="630">/);
-  assert.match(body, /<meta property="og:image:alt" content="plato">/);
+  assert.match(body, /<meta property="og:image:alt" content="tests">/);
   assert.match(body, /<meta name="twitter:card" content="summary_large_image">/);
 });
 
@@ -208,6 +208,33 @@ test('GET /sub/<name>/post/<id>: og:type = article; description = body excerpt',
   // Latin/CJK stay LTR. UI chrome stays LTR by design — see PRD.
   assert.match(body, /<h1 dir="auto">/);
   assert.match(body, /<article dir="auto">/);
+});
+
+test('GET /sub/<name>/post/<id>: Arabic-titled post round-trips with dir="auto" wrapping the title text', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl, postsDir } = ctx;
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('alpha', Date.now());
+  const author = 'a'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now());
+  const id = '0123456789abcde0';
+  const filename = `${id}.md`;
+  const arabicTitle = 'مرحبا بالعالم';
+  const arabicBody = 'هذه فقرة عربية لاختبار الاتجاه من اليمين إلى اليسار.';
+  const fm = `---\ntitle: ${arabicTitle}\nhandle: ${author}\ncreated_at: ${Date.now()}\nsub_name: alpha\n---\n${arabicBody}\n`;
+  writeFileSync(join(postsDir, filename), fm);
+  db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, 'alpha', author, arabicTitle, filename, 0, Date.now());
+  const res = await fetch(baseUrl + `/sub/alpha/post/${id}`);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  // Title must round-trip verbatim AND be wrapped by dir="auto" — proves
+  // we're testing the user-content path specifically, not a global rule.
+  assert.match(body, new RegExp(`<h1 dir="auto">${arabicTitle}</h1>`));
+  assert.ok(body.includes(arabicBody), 'Arabic body must round-trip in the article');
+  // Chrome lock: site header carries dir="ltr" so the Arabic title injected
+  // into the wordmark via brandTitleTruncated doesn't reorder logo + text.
+  assert.match(body, /<header class="site" dir="ltr">/);
 });
 
 test('GET /modlog: canonical = /modlog regardless of query params', async (t) => {

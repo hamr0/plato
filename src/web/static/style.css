@@ -775,7 +775,7 @@ button:hover { filter: brightness(1.1); }
    makes every block-level child detect independently from its own first
    strong char. So a post that mixes Arabic and English paragraphs gets
    each paragraph rendered in its own direction. UI chrome stays LTR. */
-article > *, .comment-body > *, .preview > * { unicode-bidi: plaintext; }
+article > *, .comment-body > *, .preview > *, .sub-sticky-note > * { unicode-bidi: plaintext; }
 
 .preview {
   margin-top: 0.5rem;
