@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=48">
+<link rel="stylesheet" href="/static/style.css?v=49">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}

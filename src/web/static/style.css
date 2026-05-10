@@ -1288,18 +1288,29 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 
 /* Edit window affordances */
 .edited-note { margin: 0.2rem 0; font-size: 0.8rem; }
+/* .action-link is the broader sibling of .mod-btn (author `edit`,
+ * sub-admin verbs on /sub/<n>/edit, modlog `revoke`). Same warm-accent
+ * text-verb register so a strip mixing author + mod actions reads as
+ * one vocabulary instead of "old outlined pill + new text verb." */
 .action-link {
   font-size: 0.78rem;
-  color: var(--text-dim);
+  color: var(--accent-warm);
   text-decoration: none;
-  border: 1px solid var(--border);
-  padding: 0.15rem 0.5rem;
-  border-radius: 3px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
   display: inline-flex;
   align-items: center;
   line-height: 1.2;
+  cursor: pointer;
+  font-family: inherit;
 }
-.action-link:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
+.action-link:hover {
+  color: var(--accent-warm);
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
 
 /* Inline two-step confirmation: <details> wraps a destructive form so the
    submit only appears after the user opens the disclosure. Replaces native
