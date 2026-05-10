@@ -462,6 +462,8 @@ Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the 
 
 **Source**: no external dependency. Account-age timestamps are stored at signup.
 
+**User-facing message opacity (0.10.4)**: when a rate-limit check trips, the message returned to the user is deliberately opaque — *"you've hit a posting limit. try again in a few hours."* — with the time-to-unblock bucketed into one of six coarse English ranges (`shortly` / `in less than an hour` / `in a few hours` / `later today` / `tomorrow` / `in a couple of days`). The cap number, the tier label, and the exact countdown are never surfaced in the message; revealing them would help a probing attacker calibrate the cap-and-window pair. Operator-facing precision is preserved through a `block.reason` field returned alongside the message (`{ tier, capField, cap, count, msUntilUnblocked }`) which feeds server logs, modlog audit notes, and tests — so diagnostics stay rigorous on the server side while the user-facing string stays opaque.
+
 ### 3. Per-sub rate limits
 
 **Criteria**: rate limits apply per-sub, not just per-account. An account that posts 5 times in 5 different subs is normal; 5 times in 1 sub triggers the per-sub limit (default: 5 posts/day per sub for accounts under 30 days old, 20/day for established).

@@ -88,6 +88,38 @@ test('matchSpamPatterns: returns every matching pattern in order', () => {
   assert.deepEqual(matchSpamPatterns('xyz', patterns), []);
 });
 
+test('default phone-shape regex: requires ≥9 digits, not just digit-and-separator', () => {
+  // Loads the canonical spam-patterns.txt that ships with plato so this
+  // test guards the deployed file's behavior end-to-end. 0.10.4 tightened
+  // the pattern after a real terribic.com false positive on a beeperbox
+  // post that listed messengers (WhatsApp, Telegram, ...) in prose.
+  const patterns = loadSpamPatterns(join(import.meta.dirname, '../../spam-patterns.txt'));
+  const phoneShape = patterns.find((p) => /telegram/.test(p.source));
+  assert.ok(phoneShape, 'expected the phone-shape pattern to be present in shipped file');
+
+  // Should match: real phone-spam shapes
+  assert.deepEqual(matchSpamPatterns('text me on +1 555 123 4567', [phoneShape]), [phoneShape.source]);
+  assert.deepEqual(matchSpamPatterns('whatsapp +44 7700 900123', [phoneShape]), [phoneShape.source]);
+  assert.deepEqual(matchSpamPatterns('telegram me on +1 555-123-4567', [phoneShape]), [phoneShape.source]);
+
+  // Should NOT match: prose mentioning messengers without a phone number,
+  // dates, or version-shaped tokens within 30 chars of telegram/whatsapp
+  assert.deepEqual(
+    matchSpamPatterns('WhatsApp, Signal, iMessage, Telegram, Instagram, Messenger', [phoneShape]),
+    [],
+  );
+  assert.deepEqual(
+    matchSpamPatterns('telegram release 2026-05-09 in beta', [phoneShape]),
+    [],
+    'a date with 8 digits should not trip the phone-shape regex',
+  );
+  assert.deepEqual(
+    matchSpamPatterns('whatsapp module version v1.2.3.4.5.6 stable', [phoneShape]),
+    [],
+    'a version string with 6 digits should not trip the phone-shape regex',
+  );
+});
+
 test('applySpamMatches: collapses target + inserts system flag', () => {
   const db = setup();
   const result = applySpamMatches(db, {

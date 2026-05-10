@@ -5,7 +5,7 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 import { createSub } from '../../src/content/sub.js';
 import {
   accountAgeTier, checkPostRate, checkPostRatePerSub, checkCommentRate,
-  resolveRateLimitConfig, RATE_LIMIT_FLOOR,
+  resolveRateLimitConfig, RATE_LIMIT_FLOOR, bucketTimeToUnblock,
 } from '../../src/content/rateLimit.js';
 
 const OWNER = 'a'.repeat(64);
@@ -66,7 +66,9 @@ test('checkPostRate blocks new accounts at 1 post/hour', () => {
   // second post within the hour blocks
   const block = checkPostRate(db, NEW, now);
   assert.ok(block, 'expected block');
-  assert.match(block.message, /1\/hour/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 1);
+  assert.equal(block.reason.capField, 'postsPerHour');
 });
 
 test('checkPostRate blocks new accounts at 3 posts/day even spread across hours', () => {
@@ -77,7 +79,9 @@ test('checkPostRate blocks new accounts at 3 posts/day even spread across hours'
   seedPost(db, NEW, now - 12 * HOUR, 'c');        // 12h ago
   const block = checkPostRate(db, NEW, now);
   assert.ok(block);
-  assert.match(block.message, /3\/day/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 3);
+  assert.equal(block.reason.capField, 'postsPerDay');
 });
 
 test('checkPostRate allows recent-tier 3 posts/hour', () => {
@@ -91,7 +95,9 @@ test('checkPostRate allows recent-tier 3 posts/hour', () => {
   // 3 in last hour — at the limit, next blocks
   const block = checkPostRate(db, REC, now);
   assert.ok(block);
-  assert.match(block.message, /3\/hour/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 3);
+  assert.equal(block.reason.capField, 'postsPerHour');
 });
 
 test('checkPostRate blocks established accounts at 20 posts/day', () => {
@@ -107,7 +113,9 @@ test('checkPostRate blocks established accounts at 20 posts/day', () => {
   seedPost(db, EST, now - 20 * 72 * 60 * 1000, 'e19');
   const block = checkPostRate(db, EST, now);
   assert.ok(block);
-  assert.match(block.message, /20\/day/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 20);
+  assert.equal(block.reason.capField, 'postsPerDay');
 });
 
 test('checkPostRate doubledForOwner: new-tier owner does NOT get post-cap doubling', () => {
@@ -119,7 +127,8 @@ test('checkPostRate doubledForOwner: new-tier owner does NOT get post-cap doubli
   for (let i = 0; i < 3; i++) seedPost(db, NEW, now - (i + 1) * 90 * 60 * 1000, `n${i}`);
   const block = checkPostRate(db, NEW, now, undefined, { skipHourly: true, doubledForOwner: true });
   assert.ok(block);
-  assert.match(block.message, /3\/day/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 3);
 });
 
 test('checkPostRate doubledForOwner: recent-tier owner gets 20/day (2× of 10)', () => {
@@ -130,14 +139,17 @@ test('checkPostRate doubledForOwner: recent-tier owner gets 20/day (2× of 10)',
   // Without owner flag: blocked at 10/day.
   const baseBlock = checkPostRate(db, REC, now, undefined, { skipHourly: true });
   assert.ok(baseBlock);
-  assert.match(baseBlock.message, /10\/day/);
+  assert.match(baseBlock.message, /posting limit/);
+  assert.equal(baseBlock.reason.cap, 10);
   // With owner flag: still under doubled cap.
   assert.equal(checkPostRate(db, REC, now, undefined, { skipHourly: true, doubledForOwner: true }), null);
   // Push to 20 → doubled cap also bites.
   for (let i = 10; i < 20; i++) seedPost(db, REC, now - (i + 1) * 60 * 60 * 1000, `r${i}`);
   const ownerBlock = checkPostRate(db, REC, now, undefined, { skipHourly: true, doubledForOwner: true });
   assert.ok(ownerBlock);
-  assert.match(ownerBlock.message, /20\/day/);
+  assert.match(ownerBlock.message, /posting limit/);
+  assert.equal(ownerBlock.reason.cap, 20);
+  assert.equal(ownerBlock.reason.doubledForOwner, true);
 });
 
 test('checkPostRate doubledForOwner: established-tier owner gets 40/day (2× of 20)', () => {
@@ -148,7 +160,8 @@ test('checkPostRate doubledForOwner: established-tier owner gets 40/day (2× of 
   // Base cap blocks at 20.
   const baseBlock = checkPostRate(db, EST, now, undefined, { skipHourly: true });
   assert.ok(baseBlock);
-  assert.match(baseBlock.message, /20\/day/);
+  assert.match(baseBlock.message, /posting limit/);
+  assert.equal(baseBlock.reason.cap, 20);
   // Owner flag lifts to 40 — still under.
   assert.equal(checkPostRate(db, EST, now, undefined, { skipHourly: true, doubledForOwner: true }), null);
 });
@@ -164,7 +177,9 @@ test('checkCommentRate blocks new accounts at 10 comments/day', () => {
   }
   const block = checkCommentRate(db, NEW, now);
   assert.ok(block);
-  assert.match(block.message, /10\/day/);
+  assert.match(block.message, /commenting limit/);
+  assert.equal(block.reason.cap, 10);
+  assert.equal(block.reason.capField, 'commentsPerDay');
 });
 
 test('checkCommentRate doubledForOwner: new owner gets 20/day instead of 10', () => {
@@ -181,7 +196,9 @@ test('checkCommentRate doubledForOwner: new owner gets 20/day instead of 10', ()
   for (let i = 10; i < 20; i++) seedComment(db, NEW, now - i * 60 * 1000, `i${i}`);
   const block = checkCommentRate(db, NEW, now, undefined, { doubledForOwner: true });
   assert.ok(block);
-  assert.match(block.message, /20\/day/);
+  assert.match(block.message, /commenting limit/);
+  assert.equal(block.reason.cap, 20);
+  assert.equal(block.reason.doubledForOwner, true);
 });
 
 test('checkCommentRate counts only the calling handle', () => {
@@ -203,8 +220,11 @@ test('checkPostRatePerSub: under-30d account blocked at 5/day per sub', () => {
   }
   const block = checkPostRatePerSub(db, REC, 'lobby', now);
   assert.ok(block);
-  assert.match(block.message, /5\/day/);
+  assert.match(block.message, /posting limit/);
   assert.match(block.message, /lobby/);
+  assert.equal(block.reason.cap, 5);
+  assert.equal(block.reason.capField, 'perSubDay');
+  assert.equal(block.reason.subName, 'lobby');
 });
 
 test('checkPostRatePerSub: posts in other subs do not count', () => {
@@ -229,7 +249,9 @@ test('checkPostRatePerSub: established (>=30d) account allowed 20/day per sub', 
   seedPost(db, EST, now - 20 * 60 * 1000, 'e19', 'lobby');
   const block = checkPostRatePerSub(db, EST, 'lobby', now);
   assert.ok(block);
-  assert.match(block.message, /20\/day/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 20);
+  assert.equal(block.reason.capField, 'perSubDay');
 });
 
 test('rolloff: posts older than the window do not count', () => {
@@ -286,5 +308,42 @@ test('checkPostRate honors operator config when passed', () => {
   seedPost(db, REC, now - 10 * 60 * 1000, 'a');
   const block = checkPostRate(db, REC, now, cfg);
   assert.ok(block);
-  assert.match(block.message, /1\/hour/);
+  assert.match(block.message, /posting limit/);
+  assert.equal(block.reason.cap, 1);
+  assert.equal(block.reason.capField, 'postsPerHour');
+});
+
+// 0.10.4: bucket boundaries pinned. Time-to-unblock is opaque to the
+// user (coarse English buckets); each bucket covers a wide range of
+// underlying durations so probing the boundary doesn't reveal the
+// rolling-window length precisely.
+test('bucketTimeToUnblock: ladder maps durations to coarse English', () => {
+  const MIN = 60 * 1000;
+  // boundaries
+  assert.equal(bucketTimeToUnblock(0), 'shortly');
+  assert.equal(bucketTimeToUnblock(5 * MIN), 'shortly');
+  assert.equal(bucketTimeToUnblock(5 * MIN + 1), 'in less than an hour');
+  assert.equal(bucketTimeToUnblock(59 * MIN), 'in less than an hour');
+  assert.equal(bucketTimeToUnblock(60 * MIN), 'in a few hours');
+  assert.equal(bucketTimeToUnblock(3 * 60 * MIN), 'in a few hours');
+  assert.equal(bucketTimeToUnblock(4 * 60 * MIN), 'later today');
+  assert.equal(bucketTimeToUnblock(11 * 60 * MIN), 'later today');
+  assert.equal(bucketTimeToUnblock(12 * 60 * MIN), 'tomorrow');
+  assert.equal(bucketTimeToUnblock(35 * 60 * MIN), 'tomorrow');
+  assert.equal(bucketTimeToUnblock(36 * 60 * MIN), 'in a couple of days');
+  assert.equal(bucketTimeToUnblock(72 * 60 * MIN), 'in a couple of days');
+});
+
+test('checkPostRate: block message carries a bucket phrase, not a numeric cap', () => {
+  const now = Date.now();
+  const db = freshDb(now);
+  for (let i = 0; i < 3; i++) seedPost(db, NEW, now - (i + 1) * 90 * 60 * 1000, `n${i}`);
+  const block = checkPostRate(db, NEW, now);
+  assert.ok(block);
+  // user-facing message must NOT contain "3" (the cap) or "new" (the tier)
+  assert.ok(!/\b3\b/.test(block.message), `cap leaked: ${block.message}`);
+  assert.ok(!/\bnew\b/.test(block.message), `tier leaked: ${block.message}`);
+  // but it must contain a recognized bucket phrase
+  const buckets = ['shortly', 'in less than an hour', 'in a few hours', 'later today', 'tomorrow', 'in a couple of days'];
+  assert.ok(buckets.some((b) => block.message.includes(b)), `no bucket phrase: ${block.message}`);
 });

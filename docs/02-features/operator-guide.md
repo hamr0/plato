@@ -298,6 +298,28 @@ The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/d
 
 Every threshold that gates behavior. Floors are PRD-locked safe minimums; you tighten via `config.json` but cannot loosen — overrides above the floor reject at boot. Per-sub thresholds are set at `/sub/create` and can only be raised by the owner. See `docs/02-features/plato.context.md` §Numeric reference for the full developer-facing table including source files.
 
+### Spam defenses at a glance
+
+What each defense protects against, where it lives, and how operators reach it. Every layer is designed to fail safe (collapsed-but-recoverable, not deleted) so a false positive is a one-tap mod overrule, not a lost message.
+
+| Defense | What it stops | Mechanism | Floor / default | Operator surface |
+|---|---|---|---|---|
+| **Per-account rate limits** (posts/hour, posts/day, comments/day) | One handle flooding the home feed across many subs | Tiered by account age (`new` <24h, `recent` 1d–7d, `established` >7d); rolling 24h window, not calendar day | 1/3/10 → 3/10/30 → 6/20/60 | `config.json:rateLimits.perAccount` (tighten only) |
+| **Per-sub topic-flood cap** | One handle dominating a single sub | Per-handle, per-sub posts/day count; tighter under 30d account age | 5/day under 30d, 20/day at ≥30d | `config.json:rateLimits.perSubDay` |
+| **Per-post outbound link cap** | Drive-by promotion / link spam | URL count in a single post body; tier'd by account age | new=1, recent=3, established=5 | `config.json:linkCaps` |
+| **`spam-patterns.txt` regex** | Known spam shapes (crypto scams, fake jobs, wire fraud, romance, phone-shape "text me at +1…") | One JS regex per line; matches auto-collapse the target + insert a system flag with `note='pattern: <source>'` | Conservative starter set (7 lines) | Edit file, restart |
+| **URLhaus host blocklist** | Posts linking to malware-distributing hosts | Hourly cron pulls the URLhaus text feed; hostname match (after `www.` strip) auto-collapses with `note='blocked-url: <host>'` | Default refreshed hourly | `config.json:urlhausCacheFile`, `bin/refresh-urlhaus.js` cron |
+| **Disposable-email blocklist** | Sign-up from throwaway domains | Submit-time domain check before knowless even sends the magic link | ~5 400 domains shipped (snapshot of the disposable-email-domains community list) | `disposable-domains.txt`, restart; quarterly refresh cron |
+| **Per-IP signup cap (knowless)** | Fresh-handle creation flood from one IP | Knowless's `maxNewHandlesPerIpPerHour` per-hour bucket | 3/hour | `KNOWLESS_MAX_NEW_HANDLES_PER_IP_PER_HOUR` env |
+| **Per-IP login cap (knowless)** | Login-form pounding (sham-work probe to enumerate users) | Knowless's `maxLoginRequestsPerIpPerHour` per-hour bucket; silent same-shape responses preserve enumeration resistance | 30/hour | `KNOWLESS_MAX_LOGIN_REQUESTS_PER_IP_PER_HOUR` env |
+| **Flag threshold (per sub)** | Ad-hoc spam / harassment that slips past the static defenses | Distinct-flagger count → auto-collapse for mod review; floor 3 distinct flaggers, raisable per sub | 3 distinct flaggers | per-sub `flagThreshold` at `/sub/create` (raise only) |
+| **Account-age tiers** | Brigade-guard on freshly-created accounts | First 24h: 1 post/hour cap; first 7d: vote weight halved + no comment voting + post age cutoff for votes; <30d: tighter per-sub flood cap | hardcoded ladder | not operator-tunable |
+| **Owner doubling carve-outs** (in own sub only) | Lets a sub mod seed/lead in their own community without spam-gating themselves | `recent` + `established` owners get 2× daily posts + 2× daily comments. New-tier owner gets 2× **comments only** — posts stay at 3/day to keep the brigading vector "fresh account → fresh sub → flood seed posts" closed | hardcoded; new-tier post asymmetry is deliberate | — |
+
+**Default failure mode for every server-side detection above is *soft removal*** (`collapsed_at` set, `removed_at` null) plus a system flag visible in `/modlog`. Mods can dismiss the flag and uncollapse — and as of 0.10.4 the audit row reads `system: <reason> → mod: <reply>` so the false-positive trail stays honest. Hard removal happens only when a mod explicitly chooses it.
+
+**User-facing rate-limit messages are deliberately opaque** (0.10.4): they say *"you've hit a posting limit. try again in a few hours."* — no cap, no tier name, no exact countdown. The bucketed time-to-unblock is one of `shortly` / `in less than an hour` / `in a few hours` / `later today` / `tomorrow` / `in a couple of days`. Operators see precise diagnostic detail through the `block.reason` field on each check function and through `mod_actions.reason` audit notes; the user-facing string never leaks the cap-and-window pair to a probing attacker.
+
 ### Rate limits — posts and comments
 
 | Tier | posts/hour | posts/day | comments/day | per-sub posts/day |

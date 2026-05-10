@@ -34,8 +34,38 @@
 // human-readable retry hint is returned. Drafts are NOT rate-limited
 // (they're an email-confirmation step, not a post yet).
 
-const HOUR_MS = 60 * 60 * 1000;
+const MIN_MS  = 60 * 1000;
+const HOUR_MS = 60 * MIN_MS;
 const DAY_MS  = 24 * HOUR_MS;
+
+// Map a millisecond duration to a coarse English bucket. The user gets a
+// real expectation of when they're unblocked; an attacker probing the
+// boundary sees the same bucket across a wide range of underlying
+// values, so the cap-and-window pair stays opaque.
+//
+// 0.10.4: replaces "try again tomorrow" / "try again in an hour" wording
+// that revealed the precise tier ladder + window. Operators still see
+// precise reasons in modlog audit notes and server logs.
+export function bucketTimeToUnblock(ms) {
+  if (ms <= 5 * MIN_MS)        return 'shortly';
+  if (ms <  60 * MIN_MS)       return 'in less than an hour';
+  if (ms <  4 * 60 * MIN_MS)   return 'in a few hours';
+  if (ms < 12 * 60 * MIN_MS)   return 'later today';
+  if (ms < 36 * 60 * MIN_MS)   return 'tomorrow';
+  return 'in a couple of days';
+}
+
+// Oldest in-window content timestamp. Used to compute "when does the
+// rolling cap free up" without revealing the cap to the user.
+function oldestSince(db, table, handle, since, subName = null) {
+  const sql = subName
+    ? `SELECT MIN(created_at) AS oldest FROM ${table} WHERE handle = ? AND sub_name = ? AND created_at >= ?`
+    : `SELECT MIN(created_at) AS oldest FROM ${table} WHERE handle = ? AND created_at >= ?`;
+  const row = subName
+    ? db.prepare(sql).get(handle, subName, since)
+    : db.prepare(sql).get(handle, since);
+  return row?.oldest ?? null;
+}
 
 // RATE_LIMIT_FLOOR is the PRD-locked safe minimum for the entire forum.
 // Operators of a plato fork can tighten via config (createApp({ rateLimits }))
@@ -143,7 +173,12 @@ export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CON
   if (!skipHourly) {
     const hourCount = countSince(db, 'posts', handle, now - HOUR_MS);
     if (hourCount >= limits.postsPerHour) {
-      return { message: `posts limited to ${limits.postsPerHour}/hour for ${tier} accounts. try again in an hour.` };
+      const oldest = oldestSince(db, 'posts', handle, now - HOUR_MS);
+      const ms = oldest != null ? Math.max(0, oldest + HOUR_MS - now) : HOUR_MS;
+      return {
+        message: `you've hit a posting limit. try again ${bucketTimeToUnblock(ms)}.`,
+        reason: { tier, capField: 'postsPerHour', cap: limits.postsPerHour, count: hourCount, msUntilUnblocked: ms },
+      };
     }
   }
   // Owner of the destination sub gets 2× the daily post cap on the
@@ -157,9 +192,43 @@ export function checkPostRate(db, handle, now = Date.now(), config = DEFAULT_CON
     : limits.postsPerDay;
   const dayCount = countSince(db, 'posts', handle, now - DAY_MS);
   if (dayCount >= dailyCap) {
-    return { message: `posts limited to ${dailyCap}/day for ${tier} accounts. try again tomorrow.` };
+    // Time-to-unblock is the soonest of: (a) oldest in-window post falls
+    // off the rolling 24h window, (b) account ages into the next tier
+    // whose cap admits the current count. New tier's 3/day count of 3
+    // is well under recent's 10/day, so the tier flip path matters.
+    const oldest = oldestSince(db, 'posts', handle, now - DAY_MS);
+    const windowMs = oldest != null ? Math.max(0, oldest + DAY_MS - now) : DAY_MS;
+    const tierFlipMs = msUntilTierFlipThatLifts({ tier, db, handle, now, currentCount: dayCount, capField: 'postsPerDay', config });
+    const ms = Math.min(windowMs, tierFlipMs);
+    return {
+      message: `you've hit a posting limit. try again ${bucketTimeToUnblock(ms)}.`,
+      reason: { tier, capField: 'postsPerDay', cap: dailyCap, count: dayCount, msUntilUnblocked: ms, doubledForOwner },
+    };
   }
   return null;
+}
+
+// When the cap is binding because of the *current* tier, but a near-
+// future tier flip would lift the user above the count, return how long
+// until that flip. Otherwise return Infinity (only the rolling-window
+// path can free them). Independent of the current rolling-window math —
+// caller takes min of the two.
+function msUntilTierFlipThatLifts({ tier, db, handle, now, currentCount, capField, config }) {
+  if (tier === 'established') return Infinity; // no further tier
+  const row = db.prepare('SELECT first_seen_at FROM handles WHERE handle = ?').get(handle);
+  if (!row) return Infinity;
+  if (tier === 'new') {
+    // new → recent at first_seen_at + 24h
+    if (currentCount < config.perAccount.recent[capField]) {
+      return Math.max(0, row.first_seen_at + DAY_MS - now);
+    }
+  } else if (tier === 'recent') {
+    // recent → established at first_seen_at + 7d
+    if (currentCount < config.perAccount.established[capField]) {
+      return Math.max(0, row.first_seen_at + 7 * DAY_MS - now);
+    }
+  }
+  return Infinity;
 }
 
 // Per-sub variant — catches the topic-flood pattern where one account
@@ -175,8 +244,19 @@ export function checkPostRatePerSub(db, handle, subName, now = Date.now(), confi
     .prepare('SELECT COUNT(*) AS n FROM posts WHERE handle = ? AND sub_name = ? AND created_at >= ?')
     .get(handle, subName, now - DAY_MS).n;
   if (count >= limit) {
+    // Time-to-unblock: rolling 24h window expiry on the per-sub count, OR
+    // (when newish AND the trusted limit would admit the current count)
+    // the 30-day "trusted" tier flip — whichever's sooner.
+    const oldest = oldestSince(db, 'posts', handle, now - DAY_MS, subName);
+    const windowMs = oldest != null ? Math.max(0, oldest + DAY_MS - now) : DAY_MS;
+    let ms = windowMs;
+    if (ageMs < TRUSTED_AGE_MS && count < config.perSubDay.trusted) {
+      ms = Math.min(ms, Math.max(0, handleRow.first_seen_at + TRUSTED_AGE_MS - now));
+    }
+    const tierLabel = ageMs < TRUSTED_AGE_MS ? 'newish' : 'trusted';
     return {
-      message: `posts in /sub/${subName} limited to ${limit}/day per account. try a different sub or wait it out.`,
+      message: `you've hit a posting limit in /sub/${subName}. try again ${bucketTimeToUnblock(ms)}, or post in a different sub.`,
+      reason: { tier: tierLabel, capField: 'perSubDay', cap: limit, count, msUntilUnblocked: ms, subName },
     };
   }
   return null;
@@ -192,7 +272,14 @@ export function checkCommentRate(db, handle, now = Date.now(), config = DEFAULT_
   const cap = doubledForOwner ? limits.commentsPerDay * 2 : limits.commentsPerDay;
   const dayCount = countSince(db, 'comments', handle, now - DAY_MS);
   if (dayCount >= cap) {
-    return { message: `comments limited to ${cap}/day for ${tier} accounts. try again tomorrow.` };
+    const oldest = oldestSince(db, 'comments', handle, now - DAY_MS);
+    const windowMs = oldest != null ? Math.max(0, oldest + DAY_MS - now) : DAY_MS;
+    const tierFlipMs = msUntilTierFlipThatLifts({ tier, db, handle, now, currentCount: dayCount, capField: 'commentsPerDay', config });
+    const ms = Math.min(windowMs, tierFlipMs);
+    return {
+      message: `you've hit a commenting limit. try again ${bucketTimeToUnblock(ms)}.`,
+      reason: { tier, capField: 'commentsPerDay', cap, count: dayCount, msUntilUnblocked: ms, doubledForOwner },
+    };
   }
   return null;
 }

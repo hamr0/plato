@@ -3878,10 +3878,21 @@ async function handleModlogResolve(req, res, { db, auth }) {
       // public modlog reflects the override.
       const table = targetType === 'post' ? 'posts' : 'comments';
       const target = db.prepare(`SELECT collapsed_at FROM ${table} WHERE id = ?`).get(targetId);
+      // 0.10.4: when a mod overrules a system auto-collapse (spam-pattern
+      // hit or URLhaus blocked-url), prepend the original system note to
+      // the audit reason so future readers of /modlog see "system: <note>
+      // → mod: <reason>" instead of just the mod's reply. Keeps the
+      // false-positive audit trail honest.
+      const systemFlag = db.prepare(
+        `SELECT note FROM flags WHERE target_id = ? AND target_type = ? AND flagger_handle = ? ORDER BY created_at DESC LIMIT 1`
+      ).get(targetId, targetType, SYSTEM_HANDLE);
+      const auditReason = systemFlag?.note
+        ? `system: ${systemFlag.note} → mod: ${trimmedReason}`
+        : trimmedReason;
       resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'dismissed' });
       if (target && target.collapsed_at != null) {
-        recordAction(db, { subName, modHandle: handle, action: 'uncollapse', targetType, targetId, reason: trimmedReason });
-        notifyModAction(db, { subName, action: 'uncollapse', targetType, targetId, modHandle: handle, reason: trimmedReason });
+        recordAction(db, { subName, modHandle: handle, action: 'uncollapse', targetType, targetId, reason: auditReason });
+        notifyModAction(db, { subName, action: 'uncollapse', targetType, targetId, modHandle: handle, reason: auditReason });
       }
     }
   } catch (err) {

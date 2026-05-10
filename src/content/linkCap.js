@@ -74,6 +74,7 @@ export function checkLinkCap(db, handle, text, now = Date.now(), config = DEFAUL
   const cap = config[tier];
   if (count <= cap) return null;
   return {
-    message: `posts limited to ${cap} link${cap === 1 ? '' : 's'} for ${tier} accounts (this one has ${count}). trim and try again.`,
+    message: `this post has too many links (${count}). trim and try again.`,
+    reason: { tier, cap, count },
   };
 }

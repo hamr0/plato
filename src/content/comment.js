@@ -23,6 +23,12 @@ export function addComment(db, { postId, parentId = null, handle, body, now = Da
   if (typeof body !== 'string' || body.trim().length === 0) {
     throw new Error('addComment: body is required');
   }
+  // 0.10.4: normalize CRLF → LF before length check + storage. Browsers
+  // submit textarea bodies with CRLF; the client counter measures LF
+  // (textareas internally hold values with LF), so a body at the LF cap
+  // arrives over the CRLF cap and trips the server check while the
+  // counter still reads under cap. Match counts on both sides.
+  body = body.replace(/\r\n/g, '\n');
   if (body.length > COMMENT_BODY_MAX) {
     throw new Error(`addComment: body exceeds ${COMMENT_BODY_MAX} characters`);
   }
@@ -68,6 +74,8 @@ export function editComment(db, { commentId, handle, body, now = Date.now() }) {
   if (!commentId) throw new Error('editComment: commentId is required');
   if (!handle) throw new Error('editComment: handle is required');
   if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editComment: body is required');
+  // 0.10.4: normalize CRLF → LF before length check + storage. See addComment.
+  body = body.replace(/\r\n/g, '\n');
   if (body.length > COMMENT_BODY_MAX) throw new Error(`editComment: body exceeds ${COMMENT_BODY_MAX} characters`);
 
   const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(commentId);

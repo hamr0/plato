@@ -44,8 +44,10 @@ test('checkLinkCap: new tier blocked at >1 link', () => {
   assert.equal(checkLinkCap(db, NEW, 'one https://a.com', now), null);
   const block = checkLinkCap(db, NEW, 'two https://a.com https://b.com', now);
   assert.ok(block);
-  assert.match(block.message, /1 link/);
-  assert.match(block.message, /new accounts/);
+  assert.match(block.message, /too many links/);
+  assert.equal(block.reason.tier, 'new');
+  assert.equal(block.reason.cap, 1);
+  assert.equal(block.reason.count, 2);
 });
 
 test('checkLinkCap: recent tier blocked at >3 links', () => {
@@ -54,7 +56,9 @@ test('checkLinkCap: recent tier blocked at >3 links', () => {
   assert.equal(checkLinkCap(db, REC, 'a https://a.com b https://b.com c https://c.com', now), null);
   const block = checkLinkCap(db, REC, 'a https://a.com b https://b.com c https://c.com d https://d.com', now);
   assert.ok(block);
-  assert.match(block.message, /3 links/);
+  assert.match(block.message, /too many links/);
+  assert.equal(block.reason.tier, 'recent');
+  assert.equal(block.reason.cap, 3);
 });
 
 test('checkLinkCap: established tier blocked at >5 links', () => {
@@ -65,7 +69,9 @@ test('checkLinkCap: established tier blocked at >5 links', () => {
   const sixLinks = fiveLinks + ' https://x6.com';
   const block = checkLinkCap(db, EST, sixLinks, now);
   assert.ok(block);
-  assert.match(block.message, /5 links/);
+  assert.match(block.message, /too many links/);
+  assert.equal(block.reason.tier, 'established');
+  assert.equal(block.reason.cap, 5);
 });
 
 test('checkLinkCap: zero links is always allowed regardless of tier', () => {
@@ -104,5 +110,7 @@ test('checkLinkCap honors tightened config', () => {
   assert.equal(checkLinkCap(db, EST, 'one https://a.com', now, cfg), null);
   const block = checkLinkCap(db, EST, 'two https://a.com https://b.com', now, cfg);
   assert.ok(block);
-  assert.match(block.message, /1 link\b/);
+  assert.match(block.message, /too many links/);
+  assert.equal(block.reason.cap, 1);
+  assert.equal(block.reason.count, 2);
 });

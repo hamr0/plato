@@ -68,14 +68,22 @@ export function submitDraft(db, { title, body, subName, flairSlug = null, sensit
   if (title.length > TITLE_MAX) {
     throw new Error(`submitDraft: title exceeds ${TITLE_MAX} characters`);
   }
-  if (body.length > BODY_MAX) {
+  // 0.10.4: normalize CRLF → LF before length-checking. Browsers send
+  // textarea bodies with CRLF line breaks per the application/x-www-
+  // form-urlencoded spec, but the client-side counter (charcount.js)
+  // measures `ta.value.length` which uses LF (textareas internally hold
+  // values with LF). A 39 961-char body in the textarea arrived as
+  // 40 001 chars on the server when it had 40+ newlines, blocking
+  // submission while the user's counter still read under cap.
+  const normalizedBody = body.replace(/\r\n/g, '\n');
+  if (normalizedBody.length > BODY_MAX) {
     throw new Error(`submitDraft: body exceeds ${BODY_MAX} characters`);
   }
 
   const draftId = newId();
   db.prepare(
     'INSERT INTO drafts (id, sub_name, title, body, flair_slug, sensitive, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(draftId, subName, title, body, flairSlug, sensitive ? 1 : 0, Date.now());
+  ).run(draftId, subName, title, normalizedBody, flairSlug, sensitive ? 1 : 0, Date.now());
 
   return { draftId };
 }
@@ -175,7 +183,9 @@ export function editPost(db, { postId, handle, body, sensitive, postsDir, now = 
   if (!postId) throw new Error('editPost: postId is required');
   if (!handle) throw new Error('editPost: handle is required');
   if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editPost: body is required');
-  if (body.length > BODY_MAX) throw new Error(`editPost: body exceeds ${BODY_MAX} characters`);
+  // 0.10.4: normalize CRLF → LF before length-check + write. See submitDraft.
+  const normalizedBody = body.replace(/\r\n/g, '\n');
+  if (normalizedBody.length > BODY_MAX) throw new Error(`editPost: body exceeds ${BODY_MAX} characters`);
 
   const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId);
   if (!post) throw new Error(`editPost: post ${postId} not found`);
@@ -189,7 +199,7 @@ export function editPost(db, { postId, handle, body, sensitive, postsDir, now = 
   const rest = raw.slice(4);
   const closeIdx = rest.indexOf('\n---\n');
   const header = raw.slice(0, 4 + closeIdx + 5);
-  writeFileSync(absPath, `${header}\n${body.trim()}\n`);
+  writeFileSync(absPath, `${header}\n${normalizedBody.trim()}\n`);
 
   if (sensitive === undefined) {
     db.prepare('UPDATE posts SET edited_at = ? WHERE id = ?').run(now, postId);

@@ -6,7 +6,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.10.3 fixes land here before the next bump)
+(no entries yet — next: any post-0.10.4 fixes land here before the next bump)
+
+## [0.10.4] - 2026-05-10 — UX-honesty wave: opaque rate-limit messaging, CRLF body cap, audit-trail enrichment, regex tightening
+
+Four user-visible fixes from a single terribic.com session of "what just happened?" surprises. Each one is a different UX-honesty paper-cut: the user thought they were within a limit, the system thought they weren't, and the message didn't help reconcile the two. None of these are scope expansions; they're alignment passes.
+
+### Changed — rate-limit messages stop revealing the cap and the tier name
+
+Old shape: *"posts limited to 3/day for new accounts. try again tomorrow."* The cap (3) and the tier label (new) are operational details a spammer wants — and "try again tomorrow" implies a calendar-day reset, but the actual model is rolling 24h. New shape: *"you've hit a posting limit. try again in a few hours."*
+
+The time-to-unblock is computed from observable state (oldest in-window post ages out, plus tier-flip eligibility) and bucketed into six coarse English ranges (`shortly`, `in less than an hour`, `in a few hours`, `later today`, `tomorrow`, `in a couple of days`). Each bucket covers a wide range of underlying durations, so probing the boundary doesn't reveal the rolling-window length precisely. Cap and tier stay internal — operators still see precise reasons through the new `block.reason` return field (`{ tier, capField, cap, count, msUntilUnblocked }`), so server-side logging and tests retain full diagnostic precision while the user-facing message goes opaque.
+
+Same shape for: `checkPostRate` (per-hour + per-day), `checkPostRatePerSub`, `checkCommentRate`, `checkLinkCap`. The link-cap message stays content-shaped (no time component — the user trims links and re-tries; that's not a wait): *"this post has too many links (N). trim and try again."* *(`<commit-after-cut>`)*
+
+### Fixed — `<textarea>` body cap rejected at-cap submissions due to CRLF/LF mismatch
+
+The user's client-side counter (`charcount.js`) read `ta.value.length`, which uses LF line breaks (textareas internally normalize values to LF on read). Browsers then submit form-encoded textarea content with CRLF line breaks per the HTML spec, so a body the user wrote at exactly 40 000 chars (LF-counted) arrived at the server as 40 000 + N chars (CRLF-counted, where N = number of newlines) and tripped the `body exceeds 40000 characters` guard while the user's counter still read under cap.
+
+Fix: `submitDraft`, `editPost`, `addComment`, `editComment` all normalize CRLF → LF before the length check AND before storage. The on-disk markdown file and the DB row both end up LF-only — markdown rendering doesn't care about line-ending choice, and uniformity simplifies archive/export byte counts. Two new regression tests in `test/integration/post.test.js` lock the LF-counted view as the authoritative measurement, including a 100-line body at exactly `BODY_MAX` after normalization. *(`<commit-after-cut>`)*
+
+### Fixed — phone-shape spam regex was matching dates and version strings
+
+Line 38 of `spam-patterns.txt` (the "phone-number-with-text-me" rule) used `[\d\s().-]{8,}` to match the phone-number portion. That character class accepts any 10-char string of digits and separators — including 10-char dates (`2026-05-09`) and version-shaped tokens (`v1.2.3.4.5.6.7`). On a real terribic.com beeperbox post that listed messengers ("WhatsApp, Signal, iMessage, Telegram, Instagram, Messenger") within 30 chars of a date elsewhere in the body, the regex tripped — auto-collapse + system flag for what was unambiguously legitimate prose.
+
+Fix: replace `[\d\s().-]{8,}\d` with `\d(?:[\s().-]*\d){8,}` — same shape, but every separator must be followed by a digit, so the captured phone-shape is guaranteed to contain ≥9 actual digits. International phone numbers are 8–15 digits; 9 is the safe lower bound. Dates have at most 8 digits, version strings rarely cross 9, ISBNs (10 digits) almost never abut "telegram"/"whatsapp" within 30 chars. New test in `test/integration/spamPatterns.test.js` loads the shipped pattern file and pins both the positive (real phone-spam shapes) and negative (beeperbox-style messenger lists, dates, version tokens) cases. *(`<commit-after-cut>`)*
+
+### Added — modlog audit reason enriched when a mod overrules a system auto-collapse
+
+When a mod dismisses flags on a target that was auto-collapsed by either spam-pattern matching (`pattern: <regex>`) or URLhaus (`blocked-url: <host>`), the resulting `uncollapse` `mod_actions` row now carries the original system note in its `reason` column. Before: the audit row read only the mod's typed reply (often empty for routine false-positive uncollapses), and the future reader of `/modlog` had to cross-reference the earlier system-attributed `collapse` row to see why the target was flagged in the first place. After: the audit row reads `system: blocked-url: github.com → mod: false positive — github is fine` — both halves visible in one place, the false-positive trail honest.
+
+Mechanism: in the dismiss branch of the `/modlog/resolve` handler, look up the most recent `flags` row for the target whose `flagger_handle = SYSTEM_HANDLE`. If found, prepend `system: <flag.note> → mod: <reason>` to the recorded action's reason. No-op when no system flag exists (mod-initiated soft-removes that other mods later overrule still record only the dismissing mod's text). *(`<commit-after-cut>`)*
+
+### Tests
+
+819 → 825 (+6 new):
+- `spamPatterns.test.js` (+1) — phone-shape regex regression on shipped file.
+- `rateLimit.test.js` (+2) — `bucketTimeToUnblock` ladder boundaries; opacity check on the post-block message.
+- `post.test.js` (+2) — CRLF body normalization, including a body at exactly `BODY_MAX` after normalization.
+- `modlog-http.test.js` (+1) — system-flag audit-reason enrichment on dismiss.
 
 ## [0.10.3] - 2026-05-09 — magic-link email body reordered + per-instance footer stub
 

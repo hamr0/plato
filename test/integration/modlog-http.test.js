@@ -446,6 +446,36 @@ test('POST /modlog/resolve: dismiss closes flags + uncollapses if auto-hidden', 
   assert.equal(uncollapse.n, 1);
 });
 
+test('POST /modlog/resolve: dismiss of system-flagged target prepends system note to audit reason (0.10.4)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const author = 'j'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'auj', Date.now() - 90 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_sys', sub: 'lobby', handle: author });
+  db.prepare(`UPDATE posts SET collapsed_at = ?, score_at_collapse = 0 WHERE id = 'p_sys'`).run(Date.now());
+  // Simulate URLhaus auto-collapse: a system-flagger flag with the
+  // canonical "blocked-url: ..." note that urlhaus.js writes.
+  seedFlag(db, {
+    id: 'fsys', targetType: 'post', targetId: 'p_sys',
+    flagger: SYSTEM_HANDLE, category: 'spam', note: 'blocked-url: github.com',
+  });
+
+  const res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p_sys', sub_name: 'lobby',
+      decision: 'dismiss', reason: 'false positive — github is fine',
+    }),
+  });
+  assert.equal(res.status, 302);
+  const audit = db.prepare(`SELECT reason FROM mod_actions WHERE target_id = 'p_sys' AND action = 'uncollapse'`).get();
+  assert.ok(audit, 'expected an uncollapse audit row');
+  assert.match(audit.reason, /^system: blocked-url: github\.com → mod: false positive — github is fine$/);
+});
+
 test('POST /modlog/resolve: invalid decision returns 400', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { jar } = await bootstrapMod(ctx);

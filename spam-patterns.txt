@@ -35,4 +35,12 @@ payment via gift cards?\b
 \bgod[- ]fearing\b.{0,80}\b(?:looking for|seeking)\b.{0,40}\b(?:relationship|partner|husband|wife)\b
 
 # === Phone-number-with-text-me ===
-\b(?:text|whatsapp|telegram).{0,30}(?:\+?\d[\d\s().-]{8,}\d)\b
+# The phone shape requires ≥9 actual digits via `\d(?:[\s().-]*\d){8,}`
+# (one digit, then 8+ separator-or-digit-then-digit groups). Real phone
+# numbers internationally are 8–15 digits; 9 is the safe lower bound.
+# Without this, the old `[\d\s().-]{8,}` pattern matched any 10-char
+# digit-and-separator string — dates (2026-05-09), version numbers
+# (v1.2.3.4.5.6.7), version-shaped tokens — within 30 chars of "telegram"
+# or "whatsapp", which is a common shape in posts that legitimately list
+# popular messengers in prose.
+\b(?:text|whatsapp|telegram).{0,30}\+?\d(?:[\s().-]*\d){8,}\b
