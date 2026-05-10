@@ -1777,6 +1777,16 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
    * keeps long titles inside the column. */
   .post-title-line h1 { font-size: 1.25rem; }
 
+  /* Mod feed actions wrap below the title at narrow widths. Desktop
+   * lays h2/h1 + .post-actions inline (flex row); on a phone the
+   * action chips ate enough horizontal space that long titles
+   * crushed into 4–5 lines next to a column of buttons. Forcing
+   * flex-basis:100% on the title pushes .post-actions to the next
+   * row; the verb labels (collapse / remove / ban) stay text rather
+   * than collapsing to icons. */
+  .post-title-line h1,
+  .post-title-line h2 { flex-basis: 100%; }
+
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,
   .modlog-modes { flex-wrap: wrap; row-gap: 0.3rem; }
@@ -1807,6 +1817,42 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
    * (mod /modlog, subs index) get this fallback. */
   table.modlog { display: block; overflow-x: auto; }
   .memlog-page table.modlog { display: table; overflow: visible; }
+
+  /* /modlog pages: card-stack each row at narrow widths instead of
+   * the generic horizontal-scroll fallback above (which hid the
+   * reason / target columns behind a sideways scroll mods rarely
+   * discover). The 6–8 column tables would always overflow a phone
+   * viewport; stacking gives every cell its own line and surfaces
+   * the column meaning via data-label::before, so the audit log is
+   * actually readable on mobile. <thead> hides; each <tr> becomes
+   * a card with a subtle divider; cells with no value (null reason,
+   * empty events count, non-revokable rows) drop entirely. */
+  .modlog-page table.modlog,
+  .modlog-page table.modlog thead,
+  .modlog-page table.modlog tbody,
+  .modlog-page table.modlog tr,
+  .modlog-page table.modlog td { display: block; }
+  .modlog-page table.modlog { overflow: visible; }
+  .modlog-page table.modlog thead { display: none; }
+  .modlog-page table.modlog tr {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0.55rem 0;
+  }
+  .modlog-page table.modlog td {
+    border: none;
+    padding: 0.12rem 0;
+  }
+  .modlog-page table.modlog td:empty { display: none; }
+  .modlog-page table.modlog td::before {
+    content: attr(data-label);
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-right: 0.4rem;
+  }
+  .modlog-page table.modlog td[data-label=""]::before { content: ""; margin: 0; }
 
   /* Subs index: drop description, subscribers (placeholder anyway),
    * and owner columns. Keeps sub link, post count, and last-active

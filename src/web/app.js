@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=42">
+<link rel="stylesheet" href="/static/style.css?v=43">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -4559,12 +4559,12 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
     : html`<table class="modlog">
         <thead><tr><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
-          <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${modCell(a)}</td>
-          <td>${userCell(a)}</td>
-          <td>${modActionCell(a)}</td>
-          <td>${targetCell(a)}</td>
-          <td class="muted">${a.reason ?? ''}</td>
+          <td class="muted" data-label="when">${relativeTime(a.created_at)}</td>
+          <td data-label="mod">${modCell(a)}</td>
+          <td data-label="user">${userCell(a)}</td>
+          <td data-label="action">${modActionCell(a)}</td>
+          <td data-label="target">${targetCell(a)}</td>
+          <td class="muted" data-label="reason">${a.reason ?? ''}</td>
         </tr>`)}</tbody>
       </table>`;
 
@@ -4574,12 +4574,14 @@ function renderModLog(req, res, { db, auth }, subName, searchParams) {
     description: `public moderation log for ${branding.forumName} //${subName}: every soft removal, hard removal, ban, and system auto-action.`,
     canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/modlog`,
   }, html`
-    <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a>${importedSubChip({ sub })} · //modlog</p>
-    <h2>// modlog</h2>
-    <p class="muted">every moderator action in this sub. public.</p>
-    ${filterBar}
-    ${summary}
-    ${rowsView}
+    <div class="modlog-page">
+      <p><a href="/">← home</a> · <a href="/sub/${subName}">${subName}</a>${importedSubChip({ sub })} · //modlog</p>
+      <h2>// modlog</h2>
+      <p class="muted">every moderator action in this sub. public.</p>
+      ${filterBar}
+      ${summary}
+      ${rowsView}
+    </div>
   `));
 }
 
@@ -4876,14 +4878,14 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     : html`<table class="modlog">
         <thead><tr><th>sub</th><th>when</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>reason</th><th></th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
-          <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
-          <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${modCell(a)}</td>
-          <td>${userCell(a)}</td>
-          <td>${modActionCell(a)}</td>
-          <td>${targetCell(a)}</td>
-          <td class="muted">${a.reason ?? ''}</td>
-          <td>${revokeCell(a)}</td>
+          <td data-label="sub"><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
+          <td class="muted" data-label="when">${relativeTime(a.created_at)}</td>
+          <td data-label="mod">${modCell(a)}</td>
+          <td data-label="user">${userCell(a)}</td>
+          <td data-label="action">${modActionCell(a)}</td>
+          <td data-label="target">${targetCell(a)}</td>
+          <td class="muted" data-label="reason">${a.reason ?? ''}</td>
+          <td data-label="">${revokeCell(a)}</td>
         </tr>`)}</tbody>
       </table>`;
 
@@ -4895,14 +4897,16 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
     description: `every moderation action on ${branding.forumName}, public and audited.`,
     canonical: `${siteMeta.baseUrl}/modlog`,
   }, html`
-    <p><a href="/">← home</a> · my modlog</p>
-    <h2>// my modlog</h2>
-    ${modlogModeBar(filters)}
-    ${modlogFilterBar(filters, currentHandle, subControl.inline, isMod)}
-    ${subControl.strip ?? ''}
-    ${modlogActiveSummary(filters, pseudonyms, modHandle)}
-    ${rowsView}
-    ${pager}
+    <div class="modlog-page">
+      <p><a href="/">← home</a> · my modlog</p>
+      <h2>// my modlog</h2>
+      ${modlogModeBar(filters)}
+      ${modlogFilterBar(filters, currentHandle, subControl.inline, isMod)}
+      ${subControl.strip ?? ''}
+      ${modlogActiveSummary(filters, pseudonyms, modHandle)}
+      ${rowsView}
+      ${pager}
+    </div>
   `));
 }
 
@@ -5184,14 +5188,14 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     : html`<table class="modlog">
         <thead><tr><th>sub</th><th>last event</th><th>mod</th><th>user</th><th>action</th><th>target</th><th>events</th><th>reason</th></tr></thead>
         <tbody>${actions.map((a) => html`<tr>
-          <td><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
-          <td class="muted">${relativeTime(a.created_at)}</td>
-          <td>${modCell(a)}</td>
-          <td>${userCell(a)}</td>
-          <td>${modActionCell(a)}</td>
-          <td>${targetCell(a)}</td>
-          <td class="muted">${a.event_count > 1 ? html`<span class="event-count">${a.event_count}×</span>` : ''}</td>
-          <td class="muted">${a.reason ?? ''}</td>
+          <td data-label="sub"><a href="/sub/${a.sub_name}/modlog">${a.sub_name}</a></td>
+          <td class="muted" data-label="last event">${relativeTime(a.created_at)}</td>
+          <td data-label="mod">${modCell(a)}</td>
+          <td data-label="user">${userCell(a)}</td>
+          <td data-label="action">${modActionCell(a)}</td>
+          <td data-label="target">${targetCell(a)}</td>
+          <td class="muted" data-label="events">${a.event_count > 1 ? html`<span class="event-count">${a.event_count}×</span>` : ''}</td>
+          <td class="muted" data-label="reason">${a.reason ?? ''}</td>
         </tr>`)}</tbody>
       </table>`;
 
@@ -5203,15 +5207,17 @@ function renderModlogInbox(res, { currentHandle, db, modSubs, scopedSubs, filter
     description: `every moderation action on ${branding.forumName}, public and audited.`,
     canonical: `${siteMeta.baseUrl}/modlog`,
   }, html`
-    <p><a href="/">← home</a> · my modlog</p>
-    <h2>// my modlog</h2>
-    ${modlogModeBar(filters)}
-    ${modlogFilterBar(filters, currentHandle, subControl.inline, true)}
-    ${subControl.strip ?? ''}
-    ${modlogActiveSummary(filters, pseudonyms, modHandle)}
-    <p class="muted">deduped — one row per affected user or piece of content. click ${actions.length === 0 ? 'audit' : 'a row'} for the per-target history (coming with row expansion in next step).</p>
-    ${rowsView}
-    ${pager}
+    <div class="modlog-page">
+      <p><a href="/">← home</a> · my modlog</p>
+      <h2>// my modlog</h2>
+      ${modlogModeBar(filters)}
+      ${modlogFilterBar(filters, currentHandle, subControl.inline, true)}
+      ${subControl.strip ?? ''}
+      ${modlogActiveSummary(filters, pseudonyms, modHandle)}
+      <p class="muted">deduped — one row per affected user or piece of content. click ${actions.length === 0 ? 'audit' : 'a row'} for the per-target history (coming with row expansion in next step).</p>
+      ${rowsView}
+      ${pager}
+    </div>
   `));
 }
 
