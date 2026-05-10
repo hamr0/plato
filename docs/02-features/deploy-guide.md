@@ -952,16 +952,40 @@ sudo -u plato -H bash -c 'cd /opt/plato && node --env-file=.env bin/migrate.js'
 # 4. Restart the service:
 sudo systemctl restart plato
 
-# 5. Verify the new version is live (three independent checks):
+# 5. Verify the new version is live (three independent checks; substitute
+#    your actual domain for terribic.com):
 sudo -u plato -H bash -c 'cd /opt/plato && git log -1 --oneline'      # commit on disk
-curl -sS https://${DOMAIN}/healthz | jq '{ok, version, last_migration}'    # version served
+curl -sS https://terribic.com/healthz | jq '{ok, version, last_migration}'   # version served
 sudo tail -10 /var/log/plato.log | grep "plato v"                     # version logged at startup
 # (journalctl -u plato shows lifecycle events; plato's own console.log
 #  is redirected to /var/log/plato.log by the systemd unit — that's
 #  where the startup banner lands.)
 ```
 
+**One-shot bundle (routine bumps, when you've already read the CHANGELOG).** Steps 1–3 collapse into a single `&&`-chained invocation; the chain short-circuits on the first failure, which is what you want:
+
+```bash
+sudo -u plato -H bash -c '
+  cd /opt/plato &&
+  git pull origin main &&
+  npm ci --omit=dev &&
+  node --env-file=.env bin/migrate.js
+' &&
+sudo systemctl restart plato
+```
+
+If a step fails mid-bundle, fix the underlying issue and re-run the bundle from scratch — the steps are all idempotent (git pull is a no-op if up to date, npm ci re-installs cleanly, migrations are idempotent).
+
 The footer of every page also shows `v<version>` next to the modlog link — eyeball check after refreshing the browser.
+
+**CSS-bumping releases** carry a `?v=N` cache token on the stylesheet link (`/static/style.css?v=N`). A 200 on that exact token after deploy proves the new CSS is being served — useful when a release moves visual chrome (mobile pass, theme changes, layout shifts) and you want to be sure browsers aren't showing the old stylesheet from a CDN or local cache:
+
+```bash
+curl -sI https://terribic.com/static/style.css?v=$(grep 'style.css?v=' /opt/plato/src/web/app.js | head -1 | sed 's/.*style.css?v=\([0-9]*\).*/\1/')
+# expect: HTTP/1.1 200 OK
+```
+
+A 404 on this URL after a deploy means the on-disk source has the new `?v=` token but the running server is still serving the old one — restart didn't pick up the new code. Re-run step 4.
 
 **Pinning to a tag for stable deploys** (recommended once plato has tagged releases):
 
