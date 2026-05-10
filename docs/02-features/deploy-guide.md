@@ -1155,6 +1155,20 @@ git config --global --add safe.directory /opt/plato   # /root/.gitconfig
 
 This disables the ownership check for `/opt/plato` only. Don't use it on shared / production boxes — it's an exit hatch, not the right pattern. The recipe in the upgrade section is.
 
+### Already deployed as root and now `git pull` / `npm ci` fail with `EACCES` or `insufficient permission for adding an object to repository database`
+
+You took the safe.directory exit hatch (or just ran `git pull` / `npm ci` as root before reading this) and now `/opt/plato` is uid-mixed: some files in `.git/objects/` and `node_modules/` are owned by `root`, others by `plato`. Git can't write new objects, npm can't unlink old binaries. The service is fine (plato runs as `plato`, reads files it can read); only updates are blocked.
+
+One chown rewrites every file back to `plato:plato` — cheap, idempotent, doesn't restart the service:
+
+```bash
+sudo chown -R plato:plato /opt/plato
+```
+
+Then run the canonical upgrade recipe. The service keeps serving the running version throughout — `chown` doesn't touch open file descriptors, and the systemd unit isn't restarted until step 4.
+
+If you also see `error: Your local changes to package-lock.json would be overwritten by merge`, that's the same root cause showing up at a different layer — `npm install` (run as one uid) wrote a lockfile diff that `git pull` (run as another uid) refuses to overwrite. After the chown, discard the drifted lockfile (`sudo -u plato -H bash -c 'cd /opt/plato && git checkout -- package-lock.json'`) and retry the recipe; the lockfile in the repo is the canonical truth.
+
 ### SELinux blocks something I added
 
 ```bash
