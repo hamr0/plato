@@ -6,7 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.1 fixes land here before the next bump)
+### Documented — no viewer-facing profile / per-user portal (PRD lock)
+
+PRD §User Display historically described a profile page (display name + account age + active subs + recent 30-day posts/comments + bio + 90-day mod verdicts) and a hover-popup verdicts surface. Both were aspirational — neither was implemented; pseudonyms render as plain `<span class="name">`, never as a link. After live mobile-review sessions on terribic, the decision-on-reflection is that neither should be built: even carefully-designed aggregation surfaces (no karma totals, 30-day recency, mod verdicts only) train parasocial scrutiny patterns ("let me see this person's history before I judge their post") that the byline already obviates. The byline carries account age + sub tenure + per-post score, which is the entire context worth showing for an individual post; anything beyond is aggregation, which is the stalky surface forums historically didn't have. Mods retain `/modlog?user=<handle>` as the operational cross-sub-context affordance — public-audited, explicit. Promoted to a permanent design lock under §Permanently out → *Viewer-facing profile / per-user portal*; sister PRD `prd-forum.md` updated to match; §User Display rewritten to describe the byline as the entire surface. No code change — implementation already aligned with the new lock.
 
 ## [0.12.1] - 2026-05-10 — post-0.12.0 mobile follow-ups: `[in]` on mod-subs, `edit` matches mod verbs, deploy-guide tightening
 

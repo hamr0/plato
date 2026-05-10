@@ -69,7 +69,7 @@ pseudonym_id = HMAC-SHA256(instance_secret, normalize(email))
 
 ## User Display
 
-What appears next to a username and on a profile page is a deliberate design choice. Show readers enough context to weight what they're reading without creating metrics that turn the forum into a reputation casino.
+What appears next to a username is a deliberate design choice. Show readers enough context to weight what they're reading without creating metrics that turn the forum into a reputation casino, and without building portals that aggregate per-user history into a stalkable surface.
 
 ### Shown next to every post and comment
 
@@ -78,16 +78,7 @@ What appears next to a username and on a profile page is a deliberate design cho
 - **Sub tenure** (only on posts within a sub): "active here for X months."
 - **Per-post score**: upvote/downvote total for *this specific post*, not career-wide.
 
-### Shown on the user's profile
-
-- Pseudonym, avatar, account age bucket, list of subs they're active in (no rank or stats).
-- Recent posts and comments (chronological, last 30 days), each with per-post scores.
-- Optional one-line bio (text only, 200 char limit, **no links** — kills the "profile as billboard" trap).
-
-### Shown on profile and on hover from any post — verdicts only, never accusations
-
-- **Mod-confirmed removals in the last 90 days, per-sub.** "3 posts removed in /sub/cooking, 1 in /sub/politics." Old removals roll off.
-- **Active sub-level bans, if any.** "Currently banned from /sub/news."
+This is the entire viewer-facing user-context surface. Pseudonyms render as plain text, not links — no profile page, no hover-popup, no per-user portal. Mods who need per-user cross-sub context use `/modlog?user=<handle>`. See the canonical PRD's *Permanently out → Viewer-facing profile / per-user portal* entry for the lock.
 
 ### Never shown — anywhere
 
