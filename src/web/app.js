@@ -3891,7 +3891,7 @@ async function handleModlogResolve(req, res, { db, auth }) {
         `SELECT note FROM flags WHERE target_id = ? AND target_type = ? AND flagger_handle = ? ORDER BY created_at DESC LIMIT 1`
       ).get(targetId, targetType, SYSTEM_HANDLE);
       const auditReason = systemFlag?.note
-        ? `system: ${systemFlag.note} → mod: ${trimmedReason}`
+        ? `system: ${systemFlag.note} → mod: ${trimmedReason ?? 'dismissed without reason'}`
         : trimmedReason;
       resolveFlagsForTarget(db, { targetType, targetId, resolverHandle: handle, resolution: 'dismissed' });
       if (target && target.collapsed_at != null) {

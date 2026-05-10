@@ -476,6 +476,34 @@ test('POST /modlog/resolve: dismiss of system-flagged target prepends system not
   assert.match(audit.reason, /^system: blocked-url: github\.com → mod: false positive — github is fine$/);
 });
 
+test('POST /modlog/resolve: dismiss of system-flagged target with no reason renders "dismissed without reason" instead of "null"', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const author = 'k'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'auk', Date.now() - 90 * 24 * 60 * 60 * 1000);
+  seedPost(db, { id: 'p_sys2', sub: 'lobby', handle: author });
+  db.prepare(`UPDATE posts SET collapsed_at = ?, score_at_collapse = 0 WHERE id = 'p_sys2'`).run(Date.now());
+  seedFlag(db, {
+    id: 'fsys2', targetType: 'post', targetId: 'p_sys2',
+    flagger: SYSTEM_HANDLE, category: 'spam', note: 'blocked-url: github.com',
+  });
+  // Dismiss WITHOUT supplying reason — pre-fix this rendered "→ mod: null".
+  const res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      target_type: 'post', target_id: 'p_sys2', sub_name: 'lobby', decision: 'dismiss',
+    }),
+  });
+  assert.equal(res.status, 302);
+  const audit = db.prepare(`SELECT reason FROM mod_actions WHERE target_id = 'p_sys2' AND action = 'uncollapse'`).get();
+  assert.ok(audit, 'expected an uncollapse audit row');
+  assert.equal(audit.reason, 'system: blocked-url: github.com → mod: dismissed without reason');
+  assert.doesNotMatch(audit.reason, /null/);
+});
+
 test('POST /modlog/resolve: invalid decision returns 400', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { jar } = await bootstrapMod(ctx);
