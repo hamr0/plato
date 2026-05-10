@@ -6,7 +6,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.11.1 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.0 fixes land here before the next bump)
+
+## [0.12.0] - 2026-05-10 — mobile mod-surface pass: actions wrap below title, modlog card-stack, `[in]` chip, warm-accent verbs
+
+Driven by a Firefox mobile-view session reviewing posts on terribic. Three mobile-readability gaps the desktop layout doesn't have: collapse/remove buttons crushed long titles into 4–5 lines next to a button column, `/modlog` tables side-scrolled and hid the reason/target columns behind a swipe gesture, and the subs index subscribe column ate horizontal space on an already-cramped table. None are correctness bugs; all are presentation-only fixes.
+
+### Changed — mod-feed post titles get their full row back on mobile; collapse/remove drops to the next line
+
+At ≤640px, `.post-title-line h1, h2` get `flex-basis: 100%` so `.post-actions` wraps below the title rather than competing for the same row. The 0.11.0 multilingual-posts feature was the trigger — `dir="auto"` happily wraps long Arabic/Greek/CJK titles to 5 vertical lines next to a button column on a phone, and the result is unreadable. Specificity fix: `.post .body h2 { flex: 1 }` further up beat a same-specificity override, so the mobile rule reads `.post .body .post-title-line h2`. Desktop unchanged. Title → mod tools → context → body is the mod's natural scan order; the row-stack restores it.
+
+### Changed — `/modlog` tables card-stack at narrow widths; inline-flow with `·` separators replaces table chrome
+
+Three modlog page renders (per-sub, `/modlog?mode=audit`, `/modlog?mode=inbox`) wrap their body in `.modlog-page`, and at ≤640px each `<tr>` becomes a `display: block` card with cells flowing inline separated by `·`. Reason gets its own line because it's the variable-length tail. Empty cells (null reason, single-event rows, non-revokable rows) drop entirely via `:empty`. Result: one or two visual lines per audit record instead of six, no horizontal scroll. The memlog page already had its own narrow-viewport treatment (column hide) — that path is preserved unchanged via `.memlog-page table.modlog { display: table }`.
+
+### Added — `[in]` subscribed-state chip on the subs index (mobile only)
+
+At ≤640px the subscribe column hides (it was the 7th column on a 6-collapsed table — too much horizontal pressure) and a passive `<span class="subscribed-mark">[in]</span>` renders inline after the sub name for subs the current user is subscribed to but does not mod. The chip is mobile-only via `display: none` on the base rule + `display: inline` inside the existing `@media (max-width: 640px)` block. Discovery flow shifts: tap a sub → land on its page → subscribe button sits in the sub's existing action strip. Costs one extra tap for a "from-directory subscribe" flow that essentially never happens in practice (users subscribe to subs they're already reading).
+
+### Changed — mod controls render as warm-accent text verbs across all viewports
+
+`collapse · remove · ban` now renders in `var(--accent-warm)` plain text instead of outlined pills with `var(--text-dim)` text. The palette comment in `style.css` already reserved `--accent-warm` for "flair pills, NSFW badges, **mod highlights**" — mod-controls were the one site not honoring that reservation. The temperature shift mirrors `read more →` (which uses `--accent` for "tap-to-read"): cool-accent = nav, warm-accent = mod tool. Hover: dotted underline (matches plato's existing `.sensitive-banner strong` idiom). Open-state on the confirm-details summary now uses `font-weight: 600` instead of the old border-color flip (the verb has no border now). Disabled fallback keeps the 0.4 opacity, no hover decoration. Removed `.mod-btn-warn` entirely along with the `warn` parameter on `modActionForm` and the call-site `warn: authorBanned` argument — the verb itself carries the state (`unban` vs `ban`), so duplicating it via underline was redundant chrome.
+
+### Fixed — empty modlog reason cell rendered as 0-height block on mobile instead of collapsing
+
+Specificity bug: `td[data-label="reason"] { display: block }` (0,3,2) beat the global `td:empty { display: none }` (0,2,2), so cells where `a.reason` was null rendered as 0-height blocks with `margin-top: 0.15rem` instead of falling through to the empty-cell hide. Added `:not(:empty)` to the block-treatment selector so empty reason cells collapse as intended.
+
+### Fixed — `·` separator between mod-action verbs wasn't rendering
+
+Initial selector targeted `.mod-controls .mod-form + .mod-form::before`, but the visible chip is `<summary class="mod-btn">` inside `<details class="mod-confirm">` — `.mod-form` lives further down and only renders when the details is open. Corrected to `.mod-controls > * + *::before` which targets direct-child siblings of the strip regardless of whether each is the active `<details>` or the disabled-state `<span>` fallback.
+
+### Tests
+
+829/829, unchanged. All changes are CSS-only or template-attribute-only (`data-label` on cells, `.modlog-page` wrapper div). Structural verification via `curl /sub/<name>/modlog` confirmed wrapper + `data-label` render on every cell. Visual verification on Firefox mobile view (≤640px viewport).
+
+### Files touched
+
+- `src/web/app.js` — `.modlog-page` wrappers on 3 modlog page renders, `data-label` attrs on every `<td>`, `.subscribed-mark` chip in subs-index row render, `warn` parameter dropped from `modActionForm` + call site, style.css cache `v=42 → v=48`
+- `src/web/static/style.css` — mobile `flex-basis: 100%` on title-line, modlog card-stack at ≤640px, `.subscribed-mark` base + mobile reveal, mobile subscribe-column hide, mod-controls warm-accent + text-verb restyle in base (all viewports), `.mod-confirm[open]` open-state via `font-weight: 600`, `.mod-btn-warn` rule deleted
 
 ## [0.11.1] - 2026-05-10 — `/healthz` and `/static/*` answer HEAD as well as GET; deploy-guide gets a "dubious ownership" entry
 
