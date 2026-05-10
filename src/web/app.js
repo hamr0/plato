@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=41">
+<link rel="stylesheet" href="/static/style.css?v=42">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -1048,7 +1048,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
       })}
       <div class="body">
         <div class="post-title-line">
-          <h2><a href="${link}">${post.title}</a>${(post.sensitive || post.sub_sensitive) ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
+          <h2 dir="auto"><a href="${link}">${post.title}</a>${(post.sensitive || post.sub_sensitive) ? html` <span class="sensitive-mark" title="sensitive content — use discretion">[!]</span>` : html``}</h2>
           <div class="post-actions">
             ${currentHandle && currentHandle !== post.handle && post.removed_at == null && !(modRole && subName === post.sub_name)
               ? flagButton({
@@ -1066,7 +1066,7 @@ function postRowsView({ posts, pseudonyms, previews, linksMap, flairMap, voteSta
         </div>
         ${authorMeta(post, name, { showComments: true, flair: flairMap?.get(post.id) ?? null })}
         ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: preview
-          ? html`<div class="preview">${raw(preview.html)}</div>`
+          ? html`<div class="preview" dir="auto">${raw(preview.html)}</div>`
           : html`` })}
         ${postLinksView(linksMap?.get(post.id), preview?.truncated ? link : null)}
       </div>
@@ -1292,7 +1292,7 @@ function commentRowsView({ comments, pseudonyms, currentHandle }) {
         <span class="sep">·</span>
         <span class="muted">on <a href="/sub/${c.sub_name}/post/${c.post_id}#comment-${c.id}">${c.post_title}</a></span>
       </div>
-      <div class="comment-body">${raw(renderMarkdown(preview))}</div>
+      <div class="comment-body" dir="auto">${raw(renderMarkdown(preview))}</div>
     </article>`;
   })}</div>`;
 }
@@ -2549,7 +2549,7 @@ function commentNodeView(node, ctx, depth) {
   if (removed) {
     inner = modStateView({ removedAt: node.removed_at, collapsedAt: null, body: html`` });
   } else {
-    const fullBody = html`<div class="comment-body">${raw(renderMarkdown(node.body))}</div>`;
+    const fullBody = html`<div class="comment-body" dir="auto">${raw(renderMarkdown(node.body))}</div>`;
     const isLong = node.body.length > COMMENT_PREVIEW_CHARS;
     const longBody = isLong
       ? html`<details class="comment-long">
@@ -2711,7 +2711,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         ${voteWidget({ targetType: 'post', targetId: postId, score: post.score, currentVote: postVote, currentHandle, returnTo })}
         <div class="body">
           <div class="post-title-line">
-            <h1>${post.title}</h1>
+            <h1 dir="auto">${post.title}</h1>
             <div class="post-actions">
               ${currentHandle === post.handle && post.removed_at == null && (Date.now() - post.created_at) <= POST_EDIT_WINDOW_MS
                 ? html`<a class="action-link" href="/sub/${subName}/post/${postId}/edit">edit</a>`
@@ -2733,7 +2733,7 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
           ${authorMeta({ ...post, comment_count: comments.length }, pseudonyms.get(post.handle), { showComments: true, flair: postFlair })}
           ${post.edited_at != null ? html`<p class="edited-note muted">(edited)</p>` : html``}
           ${(post.sensitive || sub.sensitive) ? html`<div class="sensitive-banner">[!] sensitive content — use discretion</div>` : html``}
-          ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article>${raw(bodyHtml)}</article>` })}
+          ${modStateView({ removedAt: post.removed_at, collapsedAt: post.collapsed_at, body: html`<article dir="auto">${raw(bodyHtml)}</article>` })}
         </div>
       </div>
 

@@ -203,6 +203,11 @@ test('GET /sub/<name>/post/<id>: og:type = article; description = body excerpt',
   assert.match(body, /<meta property="og:type" content="article">/);
   assert.match(body, /<meta name="description" content="This is the post body/);
   assert.match(body, new RegExp(`<link rel="canonical" href="${baseUrl}/sub/alpha/post/${id}">`));
+  // i18n: the user-content surfaces (title h1, body article) carry
+  // dir="auto" so Arabic/Hebrew/Persian posts auto-flip to RTL while
+  // Latin/CJK stay LTR. UI chrome stays LTR by design — see PRD.
+  assert.match(body, /<h1 dir="auto">/);
+  assert.match(body, /<article dir="auto">/);
 });
 
 test('GET /modlog: canonical = /modlog regardless of query params', async (t) => {

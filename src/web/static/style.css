@@ -769,6 +769,14 @@ button:hover { filter: brightness(1.1); }
 .post-title-line h1 { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.6rem; line-height: 1.2; overflow-wrap: anywhere; }
 .post-title-line .post-actions { margin-top: 0; flex-shrink: 0; }
 
+/* Per-paragraph bidi detection inside user content. The `dir="auto"` on
+   the container (article, .comment-body, .preview, h1/h2 titles) only
+   detects from the *first* strong char of the whole element; this rule
+   makes every block-level child detect independently from its own first
+   strong char. So a post that mixes Arabic and English paragraphs gets
+   each paragraph rendered in its own direction. UI chrome stays LTR. */
+article > *, .comment-body > *, .preview > * { unicode-bidi: plaintext; }
+
 .preview {
   margin-top: 0.5rem;
   color: var(--text);
