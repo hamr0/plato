@@ -270,6 +270,18 @@ Replies-by-email are DKIM-verified before posting. Originating address must matc
 
 Two-tier system, both visible to users.
 
+### Flair edits cascade — rename moves posts, remove nulls them
+
+Flairs are categorization slots, not content contracts. (The post's *contract* is its title, and titles are immutable; see *Permanently out → Editing post titles*.) When a mod edits a sub's flair list:
+
+- **Rename** (label change that produces a different slug at the same editor row): `UPDATE posts SET flair_slug = <new> WHERE sub_name = ? AND flair_slug = <old>` — old posts follow the new slug. Drafts likewise.
+- **Remove** (label cleared, or row's old slug no longer appears anywhere in the new list): `UPDATE posts SET flair_slug = NULL WHERE sub_name = ? AND flair_slug = <old>` — old posts lose their flair pill, render unflaired.
+- **Color-only change / slug-stable label tweak / reorder / swap**: no cascade. Posts keep their slug; render picks up the new color/label from the sub's JSON automatically.
+
+Row identity is preserved by tracking the previous slug per row via a hidden `flair_old_slug_${i}` input in the editor; carry-over detection prevents spurious cascades on swap or move (if a slug exists at any row position after the edit, it's considered carried, not removed). The whole edit — flair JSON update + cascade UPDATEs — runs in one SQLite transaction so a failure mid-cascade can't leave posts pointing at a slug the sub no longer declares.
+
+This is a deliberate divergence from the "post is a historical record" posture that locks titles and bodies. Title is what early voters cast on and what feed scanners read — mutability there is bait-and-switch. Flair is *which folder is this post filed under*, the answer to which is naturally a mod's call to redefine. WYSIWYG: what the flair editor shows is what posts display. See `src/content/flair.js#computeFlairChanges` for the rename/remove derivation and `src/content/sub.js#cascadeFlairChanges` for the UPDATEs.
+
 ### Tier 1: Soft removal (collapse)
 
 - Mod marks a post or comment as "hidden."

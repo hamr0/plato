@@ -53,3 +53,43 @@ export function serializeFlairs(flairs) {
   return JSON.stringify(parseFlairs(flairs));
 }
 
+// Compute cascade operations needed when the flair editor regenerates a
+// sub's flair list. Row identity is preserved: row i before the edit maps
+// to row i after, so a slug change at the same row index is a "rename"
+// and that row's old slug should cascade to the new slug on posts and
+// drafts. A row whose label was cleared (or whose slug isn't preserved
+// anywhere in the new list) is a "remove" — those rows' old slugs
+// cascade to NULL.
+//
+// Inputs:
+//   oldSlugs: array length = number of editor rows; value is slug at row i
+//             before edit, '' if row was empty
+//   newSlugByRow: Map<rowIndex, slug> for rows that have a slug after edit
+//
+// Returns: { renames: [{fromSlug, toSlug}], removes: [slug] }
+//
+// Carry-over rule: if an old slug appears at any new row position, no
+// cascade fires for it (it's just been moved — same identity). Renames
+// require row-position match AND new slug not used at any other row's
+// old slug position, so swap-style edits don't trigger spurious cascades.
+export function computeFlairChanges(oldSlugs, newSlugByRow) {
+  const oldSlugSet = new Set(oldSlugs.filter(Boolean));
+  const newSlugSet = new Set(newSlugByRow.values());
+  const renames = [];
+  for (let i = 0; i < oldSlugs.length; i++) {
+    const oldSlug = oldSlugs[i];
+    const newSlug = newSlugByRow.get(i);
+    if (oldSlug && newSlug && oldSlug !== newSlug && !oldSlugSet.has(newSlug)) {
+      renames.push({ fromSlug: oldSlug, toSlug: newSlug });
+    }
+  }
+  const renameFroms = new Set(renames.map((r) => r.fromSlug));
+  const removes = [];
+  for (const oldSlug of oldSlugSet) {
+    if (!newSlugSet.has(oldSlug) && !renameFroms.has(oldSlug)) {
+      removes.push(oldSlug);
+    }
+  }
+  return { renames, removes };
+}
+

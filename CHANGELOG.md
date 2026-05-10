@@ -6,7 +6,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.2 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.3 fixes land here before the next bump)
+
+## [0.12.3] - 2026-05-10 — flair edits cascade: rename moves posts, remove nulls them
+
+Before this release: editing a sub's flair list regenerated the JSON definition on `subs.flairs` but never touched the posts/drafts referencing those slugs. A rename (label change that produced a different slug) silently orphaned every post that had been tagged with the old slug — those posts stopped rendering a flair pill because the render-time lookup `parseFlairs(sub.flairs).find((f) => f.slug === post.flair_slug)` returned `undefined`. A clearing of the label removed the flair from the sub's list but left posts pointing at a slug that no longer existed.
+
+After: flair edits cascade. WYSIWYG semantics — what the editor shows is what the sub displays, on every post and draft, retroactively.
+
+### Changed — flair edits propagate to existing posts and drafts in the sub
+
+Two cascade operations, both scoped to the sub being edited:
+
+- **Rename** (label change that produces a different slug at the same editor row): `UPDATE posts SET flair_slug = <new> WHERE sub_name = ? AND flair_slug = <old>`. Drafts in the same sub get the same treatment so a half-written reply doesn't lose its flair selection if the mod is editing the list at the same time.
+- **Remove** (label cleared, or the row's old slug no longer appears anywhere in the new list): `UPDATE posts SET flair_slug = NULL WHERE sub_name = ? AND flair_slug = <old>`. Posts revert to no flair pill, as if they were posted unflaired.
+
+**Carry-over rule**: if an old slug appears at any row in the new list — including a different row position (e.g., a mod cleared row 0 and retyped the same label at row 3) — it counts as carried, not removed. No cascade fires. Same for swap-style edits (row 0 'AI'(ai) ↔ row 1 'Tools'(tools)): both old slugs still exist in the new list, so neither cascades.
+
+Color-only changes and slug-stable label tweaks (case/punctuation differences that slugify to the same value) cascade automatically without any UPDATE — the render-time lookup picks up the new color/label from the sub's current JSON.
+
+### Implementation
+
+- **`src/content/flair.js`** gains `computeFlairChanges(oldSlugs, newSlugByRow)` — pure function deriving the `{renames, removes}` plan from "what was at each editor row before" vs "what is at each row now."
+- **`src/content/sub.js`** gains `cascadeFlairChanges(db, subName, { renames, removes })` — runs the UPDATEs on `posts` and `drafts`, scoped to one sub.
+- **`src/web/app.js`** flair editor template (`flairEditorView`) gains a hidden `flair_old_slug_${i}` input per row carrying the previous slug. The parser (`parseFlairFormFields`) now returns `{ flairs, oldSlugs, newSlugByRow }` instead of a bare flair array. The `/sub/<name>/edit` handler wraps `setSubFlairs` + `cascadeFlairChanges` + the other sub setters in a single `BEGIN`/`COMMIT`/`ROLLBACK` transaction so a mid-cascade failure can't leave the JSON and the post references out of sync.
+
+### Documented — PRD §Moderation gains "Flair edits cascade" as a behavior lock
+
+New §Moderation entry directly above *Tier 1: Soft removal (collapse)* documents the rename/remove semantics, the carry-over rule, the deliberate divergence from the post-title immutability posture (title = contract, flair = filing-slot), and the transactional guarantee. Implementation pointers to `computeFlairChanges` and `cascadeFlairChanges`.
+
+### Tests
+
+9 new tests in `test/integration/flair.test.js` covering:
+- `computeFlairChanges` pure cases: rename, remove, swap, slug-stable tweak, clear-and-retype-elsewhere.
+- `cascadeFlairChanges`: rename updates both posts and drafts; remove nulls both; empty inputs are a no-op; sibling subs are untouched.
+
+829 → 838 tests. All pass.
+
+### Files touched
+
+- `src/content/flair.js` — added `computeFlairChanges`
+- `src/content/sub.js` — added `cascadeFlairChanges`
+- `src/web/app.js` — hidden `flair_old_slug` input + parser refactor + transactional edit handler
+- `test/integration/flair.test.js` — 9 new tests
+- `docs/01-product/prd-open-web-revival.md` — new §Moderation entry "Flair edits cascade"
 
 ## [0.12.2] - 2026-05-10 — mobile overflow fixes + PRD lock: no viewer-facing profile page
 

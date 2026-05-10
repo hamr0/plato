@@ -144,6 +144,40 @@ export function setSubFlairs(db, name, { flairs, flairsRequired }) {
     .run(flairsJson, requiredFlag, name);
 }
 
+// Cascade flair-list edits to existing posts and drafts in the sub.
+// Caller passes the rename/remove ops produced by computeFlairChanges
+// (in src/content/flair.js). Wrapped in the same transaction as
+// setSubFlairs by the caller so the JSON definition and the row
+// references move atomically. No-op when both arrays are empty.
+//
+// Semantics — flairs are categorization slots, not content contracts:
+//   rename: posts/drafts with the old slug get the new slug
+//   remove: posts/drafts with the removed slug get NULL flair_slug
+// See PRD §Moderation → "Flair edits cascade" for the design lock.
+export function cascadeFlairChanges(db, subName, { renames = [], removes = [] }) {
+  if (renames.length === 0 && removes.length === 0) return;
+  const updatePosts = db.prepare(
+    'UPDATE posts SET flair_slug = ? WHERE sub_name = ? AND flair_slug = ?'
+  );
+  const updateDrafts = db.prepare(
+    'UPDATE drafts SET flair_slug = ? WHERE sub_name = ? AND flair_slug = ?'
+  );
+  for (const { fromSlug, toSlug } of renames) {
+    updatePosts.run(toSlug, subName, fromSlug);
+    updateDrafts.run(toSlug, subName, fromSlug);
+  }
+  const nullPosts = db.prepare(
+    'UPDATE posts SET flair_slug = NULL WHERE sub_name = ? AND flair_slug = ?'
+  );
+  const nullDrafts = db.prepare(
+    'UPDATE drafts SET flair_slug = NULL WHERE sub_name = ? AND flair_slug = ?'
+  );
+  for (const slug of removes) {
+    nullPosts.run(subName, slug);
+    nullDrafts.run(subName, slug);
+  }
+}
+
 export function setSubFlagThreshold(db, name, threshold) {
   const sub = db.prepare('SELECT name FROM subs WHERE name = ?').get(name);
   if (!sub) throw new Error(`sub "${name}" not found`);

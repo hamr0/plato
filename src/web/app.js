@@ -26,6 +26,7 @@ import {
   validateSubName,
   listAllSubs,
   setSubFlairs,
+  cascadeFlairChanges,
   setSubSensitive,
   setSubFlagThreshold,
   setSubDescription,
@@ -33,7 +34,7 @@ import {
   STICKY_NOTE_MAX,
   RESERVED_SUB_NAMES,
 } from '../content/sub.js';
-import { parseFlairs } from '../content/flair.js';
+import { parseFlairs, computeFlairChanges } from '../content/flair.js';
 import {
   subscribe, unsubscribe, isSubscribed,
   listSubscribedSubs, subscriberCounts,
@@ -767,6 +768,7 @@ function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
       ? (f.color.startsWith('#') ? f.color : `#${f.color}`)
       : FLAIR_DEFAULT_COLOR;
     rows.push(html`<div class="flair-row">
+      <input type="hidden" name="flair_old_slug_${i}" value="${f?.slug ?? ''}">
       <input class="flair-row-label" name="flair_label_${i}" placeholder="label (e.g. Discussion)" value="${f?.label ?? ''}" maxlength="24">
       <input class="flair-row-color" type="color" name="flair_color_${i}" value="${color}" title="pill background">
       <div class="flair-palette" data-flair-target="flair_color_${i}">
@@ -785,10 +787,22 @@ function flairEditorView({ flairs = [], flairsRequired = false } = {}) {
   </fieldset>`;
 }
 
+// Returns { flairs, oldSlugs, newSlugByRow }:
+//   flairs:        dense [{slug,label,color}] for storage/validation
+//   oldSlugs:      array length FLAIR_EDITOR_ROWS, slug stored at row i
+//                  before this submit ('' if row was empty). Fed by the
+//                  hidden flair_old_slug_${i} inputs the editor emits.
+//   newSlugByRow:  Map<rowIndex, slug> for rows that have a slug now.
+// computeFlairChanges() in src/content/flair.js consumes oldSlugs +
+// newSlugByRow to derive rename/remove cascades. /sub/create callers
+// can ignore everything except .flairs.
 function parseFlairFormFields(form) {
-  const out = [];
+  const flairs = [];
+  const oldSlugs = [];
+  const newSlugByRow = new Map();
   const seen = new Set();
   for (let i = 0; i < FLAIR_EDITOR_ROWS; i++) {
+    oldSlugs.push((form[`flair_old_slug_${i}`] ?? '').trim());
     const label = (form[`flair_label_${i}`] ?? '').trim();
     const color = (form[`flair_color_${i}`] ?? '').trim();
     if (!label) continue;
@@ -800,9 +814,10 @@ function parseFlairFormFields(form) {
       slug = `${slug}-${n}`.slice(0, 20);
     }
     seen.add(slug);
-    out.push({ slug, label, color: color || FLAIR_DEFAULT_COLOR });
+    flairs.push({ slug, label, color: color || FLAIR_DEFAULT_COLOR });
+    newSlugByRow.set(i, slug);
   }
-  return out;
+  return { flairs, oldSlugs, newSlugByRow };
 }
 
 function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], flairsRequired = false, defaults = {}, subSensitive = false }) {
@@ -1810,7 +1825,7 @@ async function handleSubCreate(req, res, { db, auth }) {
   const autoUncollapsePost = Number.parseInt(form.autoUncollapsePost ?? '50', 10);
   const autoUncollapseComment = Number.parseInt(form.autoUncollapseComment ?? '20', 10);
   const flagThreshold = Number.parseInt(form.flagThreshold ?? '3', 10);
-  const flairs = parseFlairFormFields(form);
+  const { flairs } = parseFlairFormFields(form);
   const flairsRequired = form.flairs_required === '1';
   const sensitive = form.sensitive === '1';
 
@@ -2098,7 +2113,7 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
   const body = await readBody(req);
   const form = parseForm(body);
   const description = (form.description ?? '').trim();
-  const flairs = parseFlairFormFields(form);
+  const { flairs, oldSlugs, newSlugByRow } = parseFlairFormFields(form);
   const flairsRequired = form.flairs_required === '1';
   const sensitive = form.sensitive === '1';
   const flagThreshold = Number.parseInt(form.flagThreshold ?? '3', 10);
@@ -2116,12 +2131,23 @@ async function handleSubEdit(req, res, { db, auth }, subName) {
       title: 'edit failed', message: err.message, links: tryAgain,
     }));
   }
+  // Flair edits cascade to posts and drafts: a row whose slug changed
+  // pulls its old slug along (UPDATE → new slug); a row whose label was
+  // cleared nulls the slug on rows that referenced it. The whole edit
+  // — sub JSON + cascade UPDATEs — runs in one transaction so a failure
+  // mid-cascade can't leave posts pointing at a slug the sub no longer
+  // declares (or vice versa).
+  const { renames, removes } = computeFlairChanges(oldSlugs, newSlugByRow);
   try {
+    db.exec('BEGIN');
     setSubFlairs(db, subName, { flairs, flairsRequired });
+    cascadeFlairChanges(db, subName, { renames, removes });
     setSubSensitive(db, subName, sensitive);
     setSubFlagThreshold(db, subName, flagThreshold);
     setSubDescription(db, subName, description);
+    db.exec('COMMIT');
   } catch (err) {
+    db.exec('ROLLBACK');
     return send(res, 400, errorPage(req, { db, auth }, {
       title: 'edit failed', message: err.message, links: tryAgain,
     }));
