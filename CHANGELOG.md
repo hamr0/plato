@@ -6,7 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.0 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.1 fixes land here before the next bump)
+
+## [0.12.1] - 2026-05-10 — post-0.12.0 mobile follow-ups: `[in]` on mod-subs, `edit` matches mod verbs, deploy-guide tightening
+
+Three follow-ups surfaced once 0.12.0 was live on terribic. Each was a small fix that fell out of actually using the new mobile surface.
+
+### Fixed — `[in]` chip now renders on subs you mod (you're subscribed to those too)
+
+The 0.12.0 render condition was `subscribedSet.has(s.name) && !modSet.has(s.name)`, suppressing the chip for mod-subs on the reasoning that mods can't unsubscribe while modding (the unsubscribe button is disabled) so the chip "carries no actionable info." That reasoning ignored the data layer: mods are auto-subscribed at sub creation (`src/content/sub.js:113`) and stay subscribed if they step down (`mod.js:142`). So a mod-sub really is in your subscribed set; the UI was hiding a true fact. The `>` (you mod this) and `[in]` (you're subscribed) indicators carry orthogonal information and a mod-sub is both. Dropped the `!modSet.has(s.name)` clause — one-line template fix.
+
+### Fixed — `edit` link rendered as outlined pill while `collapse · remove · ban` rendered as warm text verbs (visual mismatch in one strip)
+
+The 0.12.0 mod-controls redesign updated `.mod-btn` to warm-accent text verbs but left `.action-link` (the broader sibling used by author `edit`, sub-admin verbs on `/sub/<n>/edit`, and the modlog `revoke` button) at its pre-redesign outlined-pill chrome. Result on a post-feed row where the viewer is both author and mod: `[edit]  collapse · remove · ban` — one strip, two visual registers. Unified `.action-link` with `.mod-btn`: drop the border/padding/radius, switch color from `--text-dim` to `--accent-warm`, dotted-underline hover. Scope note: `/sub/manage` action-links are wrapped in `.inline-confirm` which provides its own blue-pill chrome — those rules win on specificity, so that surface intentionally stays as blue pills (a deliberate separate visual family for sub-admin actions, not part of this change). Modlog audit `revoke` button has no wrapper, so it inherits the new warm-verb treatment — consistent with the rest of the modlog row's mod actions.
+
+### Documented — deploy-guide gets a one-shot upgrade bundle option and a `?v=N` cache-token verify step
+
+Two gaps surfaced from the 0.12.0 deploy session against terribic. (1) The stepwise upgrade form has 4 separate `sudo -u plato -H` invocations; routine bumps are cleaner as a single `&&`-chained bundle that short-circuits on failure. Added as an option after the stepwise form (the stepwise stays the canonical recipe for cautious deploys). (2) The verify block used `${DOMAIN}` shell-template form, which works during initial deploy when the var was set in earlier sections but silently resolves to `https://.healthz` for a routine bump months later in a fresh shell. Hardcoded `terribic.com` in the example (operators on other instances substitute, same convention as elsewhere in the guide). Also added a `?v=N` cache-token check — a 200 on the new style.css token after deploy proves the running server is serving the new CSS, not stale bytes from a CDN or local cache. Useful for CSS-bumping releases like 0.12.0 where "version says new but layout looks old" is the failure mode that worried users would report.
+
+### Files touched
+
+- `src/web/app.js` — drop `!modSet.has(s.name)` from `[in]` render condition, style.css cache `v=48 → v=49`
+- `src/web/static/style.css` — `.action-link` switched from outlined pill to warm-accent text verb, matching `.mod-btn`
+- `docs/02-features/deploy-guide.md` — one-shot bundle option + hardcoded verify URL + `?v=N` cache-token paragraph
 
 ## [0.12.0] - 2026-05-10 — mobile mod-surface pass: actions wrap below title, modlog card-stack, `[in]` chip, warm-accent verbs
 
