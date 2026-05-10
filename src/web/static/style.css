@@ -1783,9 +1783,14 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
    * crushed into 4–5 lines next to a column of buttons. Forcing
    * flex-basis:100% on the title pushes .post-actions to the next
    * row; the verb labels (collapse / remove / ban) stay text rather
-   * than collapsing to icons. */
-  .post-title-line h1,
-  .post-title-line h2 { flex-basis: 100%; }
+   * than collapsing to icons.
+   *
+   * Specificity note: `.post .body h2 { flex: 1 }` further up
+   * resets flex-basis to 0% via shorthand; a lower-specificity
+   * `.post-title-line h2` rule can't override it. Match the .post
+   * .body prefix here to win on specificity. */
+  .post .body .post-title-line h1,
+  .post .body .post-title-line h2 { flex-basis: 100%; }
 
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,
@@ -1818,41 +1823,46 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
   table.modlog { display: block; overflow-x: auto; }
   .memlog-page table.modlog { display: table; overflow: visible; }
 
-  /* /modlog pages: card-stack each row at narrow widths instead of
-   * the generic horizontal-scroll fallback above (which hid the
-   * reason / target columns behind a sideways scroll mods rarely
-   * discover). The 6–8 column tables would always overflow a phone
-   * viewport; stacking gives every cell its own line and surfaces
-   * the column meaning via data-label::before, so the audit log is
-   * actually readable on mobile. <thead> hides; each <tr> becomes
-   * a card with a subtle divider; cells with no value (null reason,
-   * empty events count, non-revokable rows) drop entirely. */
+  /* /modlog pages: at narrow widths, flow row cells inline with a
+   * dot-separator instead of stacking one cell per line. The first
+   * attempt stacked (one LABEL: value row per cell), which turned
+   * three audit entries into a full phone screen. Inline-flow reads
+   * like the breadcrumb chrome elsewhere and packs a record into
+   * one or two visual lines. Reason gets its own line because it's
+   * the variable-length tail and benefits from breathing room.
+   * Empty cells (null reason, single-event rows, non-revokable
+   * rows) drop entirely via :empty. */
   .modlog-page table.modlog,
   .modlog-page table.modlog thead,
   .modlog-page table.modlog tbody,
-  .modlog-page table.modlog tr,
-  .modlog-page table.modlog td { display: block; }
+  .modlog-page table.modlog tr { display: block; }
   .modlog-page table.modlog { overflow: visible; }
   .modlog-page table.modlog thead { display: none; }
   .modlog-page table.modlog tr {
     border: none;
     border-bottom: 1px solid var(--border);
     padding: 0.55rem 0;
+    line-height: 1.5;
   }
   .modlog-page table.modlog td {
+    display: inline;
     border: none;
-    padding: 0.12rem 0;
+    padding: 0;
   }
   .modlog-page table.modlog td:empty { display: none; }
-  .modlog-page table.modlog td::before {
-    content: attr(data-label);
+  .modlog-page table.modlog td:not(:empty) ~ td:not(:empty)::before {
+    content: " · ";
     color: var(--text-dim);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-right: 0.4rem;
   }
-  .modlog-page table.modlog td[data-label=""]::before { content: ""; margin: 0; }
+  /* Reason wraps to its own line; suppress the dot-separator before
+   * and after it so the line-break replaces the bullet visually. */
+  .modlog-page table.modlog td[data-label="reason"] {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 0.9rem;
+  }
+  .modlog-page table.modlog td[data-label="reason"]::before,
+  .modlog-page table.modlog td[data-label="reason"] ~ td:not(:empty)::before { content: ""; }
 
   /* Subs index: drop description, subscribers (placeholder anyway),
    * and owner columns. Keeps sub link, post count, and last-active
