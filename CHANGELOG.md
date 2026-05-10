@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 Every page now emits `<meta property="og:image">` pointing to a static 1200×630 PNG of plato's three-dot mark on `--bg`, served from `/static/og.png`. Previously plato emitted `og:title`/`og:description`/`og:url` but no image, so link-preview clients that prefer banner cards (WhatsApp, Slack) fell back to the compact chain-icon shape. The image is part of plato's identity (same dots as the favicon) and ships with the repo — no per-fork config knob; every instance carries it. `twitter:card` upgraded from `summary` to `summary_large_image` to match. WhatsApp caches previews ~7 days globally per URL, so existing terribic.com previews will refresh after the cache window or via the FB sharing debugger.
 
+### Documented — post titles are immutable; only `body` and `sensitive` are editable inside the 24h edit window
+
+No code change — the existing `editPost(db, { postId, handle, body, sensitive, ... })` signature already accepts no `title` parameter. This release promotes that behavior from incidental-implementation to a PRD-locked design decision under §Permanently out. Reasoning: title is the post's contract (shows in feeds, RSS, sub indexes, archive snapshots, is what early voters cast on), so a mutable title would open a 24h bait-and-switch lane invisible at the surface where the title was originally read. Asymmetry vs body-edit is deliberate: body edits are local to the post page, titles propagate. Typo'd titles → delete and re-post (the modlog records the deletion). A defensive comment in `src/content/post.js` flags the omission so future "fix the asymmetry" PRs re-read the lock first.
+
 ## [0.10.4] - 2026-05-10 — UX-honesty wave: opaque rate-limit messaging, CRLF body cap, audit-trail enrichment, regex tightening
 
 Four user-visible fixes from a single terribic.com session of "what just happened?" surprises. Each one is a different UX-honesty paper-cut: the user thought they were within a limit, the system thought they weren't, and the message didn't help reconcile the two. None of these are scope expansions; they're alignment passes.

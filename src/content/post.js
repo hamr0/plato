@@ -179,6 +179,10 @@ export function getPost(db, postId, postsDir) {
   return { post, body, bodyHtml };
 }
 
+// Title is intentionally NOT in the parameter list — titles are immutable
+// once a post is submitted. See PRD §Permanently out → "Editing post titles"
+// for the bait-and-switch reasoning. Future "fix the asymmetry" PRs should
+// re-read that lock first.
 export function editPost(db, { postId, handle, body, sensitive, postsDir, now = Date.now() }) {
   if (!postId) throw new Error('editPost: postId is required');
   if (!handle) throw new Error('editPost: handle is required');
