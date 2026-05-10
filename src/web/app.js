@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=46">
+<link rel="stylesheet" href="/static/style.css?v=47">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -4885,7 +4885,7 @@ function renderModlogAudit(res, { currentHandle, db, modSubs, scopedSubs, filter
           <td data-label="action">${modActionCell(a)}</td>
           <td data-label="target">${targetCell(a)}</td>
           <td class="muted" data-label="reason">${a.reason ?? ''}</td>
-          <td data-label="">${revokeCell(a)}</td>
+          <td data-label="revoke">${revokeCell(a)}</td>
         </tr>`)}</tbody>
       </table>`;
 

@@ -292,9 +292,19 @@ header h1 .logo-mark {
 .mod-controls .mod-btn-disabled:hover {
   text-decoration: none;
 }
+/* Warn variant: the action is a state-flip (e.g., `unban` shown when the
+ * author is currently banned). Permanent solid underline distinguishes
+ * it from neutral verbs (which underline dotted only on hover), so a mod
+ * scanning a row sees at a glance which post is in a non-default state. */
 .mod-controls .mod-btn-warn {
   color: var(--accent-warm);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
+/* Separator between mod-control children. Assumes element-only children
+ * (currently <details class="mod-confirm"> + <span class="mod-btn"> for
+ * the disabled fallback). A raw text node sibling would skip the
+ * separator; an empty element sibling would gain a phantom one. */
 .mod-controls > * + *::before {
   content: "·";
   color: var(--text-dim);
@@ -353,7 +363,10 @@ header h1 .logo-mark {
 .mod-confirm { display: inline-block; }
 .mod-confirm > summary { list-style: none; cursor: pointer; }
 .mod-confirm > summary::-webkit-details-marker { display: none; }
-.mod-confirm[open] > summary { color: var(--accent-warm); border-color: var(--accent-warm); }
+/* Open-state feedback: the summary verb gets weight so a mod sees which
+ * action they've expanded without scanning down to the form. Border-color
+ * is no longer relevant (verb has no border) and color is already warm. */
+.mod-confirm[open] > summary { font-weight: 600; }
 .mod-confirm > .mod-form {
   display: flex;
   gap: 0.4rem;
@@ -1525,7 +1538,9 @@ table.modlog tr.memlog-row-read:hover td { opacity: 1; }
 /* Subscribed-state marker on the subs index. Hidden on desktop (the
  * subscribe column already conveys this); revealed at narrow widths
  * where the column hides, so the reader still knows which subs they're
- * in. Same bracketed-tag family as .sensitive-mark / imported chip. */
+ * in. Shape (monospace, 0.85em, bracketed text) mirrors .sensitive-mark
+ * and .new-account-mark; color stays --text-dim since subscription is a
+ * neutral state, not a warning. */
 .subscribed-mark { display: none; color: var(--text-dim); font-family: monospace; font-size: 0.85em; }
 
 /* Imported-sub banner (M7/B5). Sits below the sensitive-banner and above
@@ -1870,9 +1885,12 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
     content: " · ";
     color: var(--text-dim);
   }
-  /* Reason wraps to its own line; suppress the dot-separator before
-   * and after it so the line-break replaces the bullet visually. */
-  .modlog-page table.modlog td[data-label="reason"] {
+  /* Reason wraps to its own line when present; suppress the dot-separator
+   * before and after it so the line-break replaces the bullet visually.
+   * :not(:empty) guards the display: block — without it, an empty reason
+   * cell beats the global td:empty { display: none } on specificity and
+   * leaves a 0-height block with a margin. */
+  .modlog-page table.modlog td[data-label="reason"]:not(:empty) {
     display: block;
     margin-top: 0.15rem;
     font-size: 0.9rem;
