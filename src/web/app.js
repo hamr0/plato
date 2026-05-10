@@ -150,7 +150,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=47">
+<link rel="stylesheet" href="/static/style.css?v=48">
 ${feedTag}
 ${headExtra}
 ${themePaletteOverrides()}
@@ -3422,7 +3422,7 @@ function modStateView({ removedAt, collapsedAt, body }) {
 // requires a reason; soft removal (collapse) makes it optional. The
 // expand-form pattern is the friction that makes hard moderation
 // deliberate without needing a JS modal.
-function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled, warn }) {
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled }) {
   if (disabled) {
     // Dimmed marker: only one mod-state should be active at a time. When
     // the target is hard-removed, the collapse/uncollapse pair is meaningless
@@ -3430,9 +3430,8 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
     // the <details> button. The mod must `unremove` first to re-enable.
     return html`<span class="mod-btn mod-btn-disabled" aria-disabled="true" title="not available while ${MOD_ACTION_LABELS.remove ?? 'removed'}">${action}</span>`;
   }
-  const summaryClass = warn ? 'mod-btn mod-btn-warn' : 'mod-btn';
   return html`<details class="mod-confirm">
-    <summary class="${summaryClass}">${action}</summary>
+    <summary class="mod-btn">${action}</summary>
     <form method="POST" action="/sub/${subName}/mod" class="mod-form">
       <input type="hidden" name="action" value="${action}">
       <input type="hidden" name="target_type" value="${targetType}">
@@ -3460,9 +3459,8 @@ function modControls({
   // Ban: target_type='handle', target_id=author. Reason required on the
   // ban direction (it cuts a user out of every write path in this sub),
   // optional on unban. Skipped entirely when authorHandle isn't known.
-  // When the author is currently banned in this sub, render the unban
-  // form with a "warn" class so the banned-state is visible at a glance.
-  // Plain "ban" on a non-banned author is the usual neutral mod-btn.
+  // The verb itself carries the state — `unban` vs `ban` is the signal,
+  // no extra chrome needed.
   // Self-ban is a footgun — banning yourself out of a sub you mod has
   // no legitimate use. Hide (not dim) the ban control when the author
   // is the current mod. Collapse/remove stay visible because mod-acting
@@ -3476,7 +3474,6 @@ function modControls({
         targetId: authorHandle,
         returnTo,
         reasonRequired: !authorBanned,
-        warn: authorBanned,
       })
     : html``;
   return html`<div class="mod-controls">

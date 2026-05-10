@@ -292,15 +292,6 @@ header h1 .logo-mark {
 .mod-controls .mod-btn-disabled:hover {
   text-decoration: none;
 }
-/* Warn variant: the action is a state-flip (e.g., `unban` shown when the
- * author is currently banned). Permanent solid underline distinguishes
- * it from neutral verbs (which underline dotted only on hover), so a mod
- * scanning a row sees at a glance which post is in a non-default state. */
-.mod-controls .mod-btn-warn {
-  color: var(--accent-warm);
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
 /* Separator between mod-control children. Assumes element-only children
  * (currently <details class="mod-confirm"> + <span class="mod-btn"> for
  * the disabled fallback). A raw text node sibling would skip the
