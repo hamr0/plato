@@ -132,3 +132,22 @@ test('GET /healthz: schema shape — all expected keys present', async (t) => {
     'version',
   ]);
 });
+
+test('HEAD /healthz: 200, no body, same headers as GET (uptime monitors / curl -I)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/healthz', { method: 'HEAD' });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
+  // Node strips the body on HEAD automatically; verify nothing leaked.
+  const body = await res.text();
+  assert.equal(body, '');
+});
+
+test('HEAD /static/<file>: 200, image/* content-type (link-preview validators / curl -I)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/static/og.png', { method: 'HEAD' });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  const body = await res.text();
+  assert.equal(body, '');
+});

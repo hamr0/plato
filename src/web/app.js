@@ -5527,7 +5527,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
 
       if (await applyStaticRoute(req, res)) return;
 
-      if (path === '/healthz' && method === 'GET') return handleHealthz(res, { db, exportsDir });
+      if (path === '/healthz' && (method === 'GET' || method === 'HEAD')) return handleHealthz(res, { db, exportsDir });
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/humans.txt' && method === 'GET') return renderHumans(res);

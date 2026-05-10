@@ -6,7 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.11.0 fixes land here before the next bump)
+(no entries yet — next: any post-0.11.1 fixes land here before the next bump)
+
+## [0.11.1] - 2026-05-10 — `/healthz` and `/static/*` answer HEAD as well as GET; deploy-guide gets a "dubious ownership" entry
+
+A first-contact-with-monitoring hotfix found while validating the 0.11.0 deploy on terribic.com. Two real-world callers hit the gap.
+
+### Fixed — `/healthz` returned 404 to `HEAD` requests (uptime monitors, `curl -I`, healthcheck dashboards)
+
+The route guard at `app.js:5530` was `method === 'GET'`, so any `HEAD` request fell through to the catch-all 404. Most uptime monitors (UptimeRobot, Better Stack, internal Prometheus blackbox-exporter at default config) use HEAD by default to avoid pulling response bodies. They were getting 404s on a perfectly healthy instance. Same shape as `/static/*` (handler at `static.js:18` had `req.method !== 'GET'`), which had bitten us during local validation when `curl -sI http://localhost:8080/static/og.png` returned 404 — link-preview validators that probe `og.png` with HEAD before fetching the image were getting the same 404. Both routes now accept GET and HEAD; Node's HTTP server auto-strips the response body on HEAD so headers stay identical between methods. Two new tests pin the contract: `HEAD /healthz` returns 200 with the same `Content-Type` as GET and an empty body; `HEAD /static/og.png` returns 200 with `image/png` and an empty body.
+
+### Documented — deploy-guide troubleshooting: "fatal: detected dubious ownership in repository"
+
+This release's terribic.com deploy ran git as `root` while `/opt/plato` is owned by `plato:plato`, tripping git's CVE-2022-24765 ownership check. The deploy-guide upgrade recipe already uses `sudo -u plato -H bash -c '...'` for git/npm/migrate steps — keeping all writes under one uid avoids the cascade where root-git-pulls and plato-user-npm-runs step on each other's working tree (the symptom of which is `error: Your local changes to package-lock.json would be overwritten by merge`). Added a Troubleshooting entry pointing back to the canonical recipe and noting the `git config --global --add safe.directory /opt/plato` exit hatch for single-user boxes only. Also added a `/healthz returns 404` troubleshooting entry so the failure mode self-documents for older instances.
 
 ## [0.11.0] - 2026-05-10 — multilingual posts, og:image link-preview banner, modlog audit-string fix, post-title immutability lock
 

@@ -1040,6 +1040,10 @@ Common causes:
 - **`opendkim: ... no signing table match`**: SigningTable doesn't include the From address. Edit `/etc/opendkim/SigningTable`, restart opendkim.
 - **No `DKIM-Signature` header at all**: `non_smtpd_milters` isn't set in `main.cf`, so locally-submitted mail (knowless's path) bypasses opendkim. Re-run the postconf line in 5.4.
 
+### `/healthz` returns 404 (or curl -I returns 404 but curl works fine)
+
+Pre-0.11.1 the `/healthz` route only matched `GET`, so any monitor or `curl -I` doing a `HEAD` request fell through to the catch-all 404. Same gotcha applied to `/static/*` (link-preview validators that probe `og.png` with HEAD before fetching). Fixed in 0.11.1; both routes now answer GET and HEAD. If you see this on a deployed instance, you're on a release < 0.11.1 — pull main and restart.
+
 ### `/healthz` returns 502
 
 nginx can't reach the backend. In order:
@@ -1134,6 +1138,22 @@ Three things to look for in `/var/log/plato.log`:
 ### "Why is everyone signed out / new identities everywhere"
 
 You changed `KNOWLESS_SECRET`. Restore the previous value from a backup `.env`. Identity is HMAC-derived from this secret — there is no recovery path other than restoring the prior value.
+
+### `git pull` fails with "fatal: detected dubious ownership in repository at '/opt/plato'"
+
+You ran `git pull` as `root` while `/opt/plato` is owned by `plato:plato`. Git's CVE-2022-24765 ownership check is firing — by design.
+
+**The fix is the upgrade recipe in [Updating plato](#updating-plato), not a config workaround.** Always run the git + npm + migrate steps as `sudo -u plato -H bash -c '...'` so writes stay under one uid. Mixing root-git-pulls with plato-user-npm-runs is what creates the lockfile-drift symptom (`error: Your local changes to package-lock.json would be overwritten by merge`) — root and plato keep stepping on each other's working tree.
+
+If you've already drifted: discard the local lockfile (`sudo -u plato -H bash -c 'cd /opt/plato && git checkout -- package-lock.json'`), then run the canonical recipe.
+
+If you genuinely need to operate as root for some reason (single-user box, throwaway instance), the one-line bypass is:
+
+```bash
+git config --global --add safe.directory /opt/plato   # /root/.gitconfig
+```
+
+This disables the ownership check for `/opt/plato` only. Don't use it on shared / production boxes — it's an exit hatch, not the right pattern. The recipe in the upgrade section is.
 
 ### SELinux blocks something I added
 
