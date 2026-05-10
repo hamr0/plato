@@ -105,7 +105,11 @@ md.use({
       if (!href) return `<a${titleAttr}>${inner}</a>`;
       const anchor = `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`;
       const host = outboundHost(href);
-      return host ? `${anchor}<span class="ext-host">${escapeHtml(host)}</span>` : anchor;
+      // <wbr> between anchor and host gives the browser a break opportunity
+      // so a long anchor + glued ext-host doesn't push the row past viewport
+      // width on narrow screens. Without it, the unit `[anchor]↗ host.com`
+      // is unbreakable (white-space: nowrap on .ext-host) and overflows.
+      return host ? `${anchor}<wbr><span class="ext-host">${escapeHtml(host)}</span>` : anchor;
     },
   },
 });

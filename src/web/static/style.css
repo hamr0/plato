@@ -1936,6 +1936,22 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
   input[type="text"], input[type="email"], input[type="number"],
   input[type="url"], textarea, select { max-width: 100%; }
 
+  /* Sub manage page: the flair-editor row (label input + color box + 8
+   * preset swatches) and the threshold rows (fixed-basis label span +
+   * fixed-basis number input) were sized for desktop and overflowed
+   * past a 390px viewport because their flex children couldn't shrink
+   * below intrinsic widths. Stack the flair row vertically and let
+   * threshold span/input wrap, so every child has the full row to itself. */
+  .flair-editor .flair-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .flair-editor .flair-row-label { flex-basis: auto; }
+  .flair-editor .flair-row-color { width: 100%; }
+  .sub-thresholds .threshold-row { flex-wrap: wrap; }
+  .sub-thresholds .threshold-row > span { flex: 1 1 100%; }
+  .sub-thresholds .threshold-row > input[type="number"] { flex: 0 0 5rem; }
+
   /* Login popover: anchor to viewport edge so it doesn't push off
    * screen on the narrowest phones. */
   /* Login dropdown: switch to viewport-anchored positioning on narrow

@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — mobile horizontal overflow on post body + sub-manage page
+
+Two narrow-viewport overflow sources surfaced from a user session reviewing terribic on phone:
+
+1. **Post body**: the `<a>` outbound link glued directly to its `<span class="ext-host">↗ host.com</span>` host hint — no break opportunity between them, and `.ext-host { white-space: nowrap }` prevents the host from wrapping internally. Combined unit `[anchor]↗ host.com` was unbreakable; long anchors + ext-host pushed the row past the right edge of a 390px viewport. Fix: insert `<wbr>` between anchor and ext-host in the markdown renderer's link extension. The host can now drop to its own line; the host name itself stays unbreakable (still `nowrap` on the span).
+2. **Sub manage page** (and /sub/create): `.flair-editor .flair-row` and `.sub-thresholds .threshold-row` used fixed-basis flex children (`flex: 1 1 12rem` on the flair label, `flex: 0 0 11rem` on the threshold-row span) that couldn't shrink below intrinsic content width. On 390px viewport the row total exceeded available space and the row chose to overflow rather than wrap. Fix at ≤640px: flair row stacks vertically (label / color / palette each on its own row); threshold row wraps via `flex-wrap: wrap` with the span claiming `flex: 1 1 100%`.
+
+style.css `v=50 → v=51`. Tests 829/829.
+
 ### Documented — no viewer-facing profile / per-user portal (PRD lock)
 
 PRD §User Display historically described a profile page (display name + account age + active subs + recent 30-day posts/comments + bio + 90-day mod verdicts) and a hover-popup verdicts surface. Both were aspirational — neither was implemented; pseudonyms render as plain `<span class="name">`, never as a link. After live mobile-review sessions on terribic, the decision-on-reflection is that neither should be built: even carefully-designed aggregation surfaces (no karma totals, 30-day recency, mod verdicts only) train parasocial scrutiny patterns ("let me see this person's history before I judge their post") that the byline already obviates. The byline carries account age + sub tenure + per-post score, which is the entire context worth showing for an individual post; anything beyond is aggregation, which is the stalky surface forums historically didn't have. Mods retain `/modlog?user=<handle>` as the operational cross-sub-context affordance — public-audited, explicit. Promoted to a permanent design lock under §Permanently out → *Viewer-facing profile / per-user portal*; sister PRD `prd-forum.md` updated to match; §User Display rewritten to describe the byline as the entire surface. No code change — implementation already aligned with the new lock.
