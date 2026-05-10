@@ -258,15 +258,23 @@ header h1 .logo-mark {
   font-size: 0.78rem;
 }
 .mod-controls .mod-form { display: inline; margin: 0; }
+/* Mod controls render as warm-accent text verbs (collapse · remove · ban)
+ * across all viewports. The previous outlined-pill chrome visually rhymed
+ * with the solid-filled flair chip on the meta row below, so a fast scan
+ * read mod tools and flair tags as the same kind of thing. Warm-accent is
+ * plato's reserved "mod highlight" color (palette comment line 35) — using
+ * it for the verb is the same temperature-shift trick `read more →` uses
+ * to signal a different action register from neutral text. Middot between
+ * verbs matches every other action strip in plato. */
 .mod-controls .mod-btn {
   background: transparent;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  padding: 0.15rem 0.5rem;
+  color: var(--accent-warm);
+  border: none;
+  padding: 0;
   font-size: 0.78rem;
   font-weight: normal;
   line-height: 1.2;
-  border-radius: 3px;
+  border-radius: 0;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -274,20 +282,23 @@ header h1 .logo-mark {
 }
 .mod-controls .mod-btn:hover {
   color: var(--accent-warm);
-  border-color: var(--accent-warm);
-  filter: none;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
 }
 .mod-controls .mod-btn-disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 .mod-controls .mod-btn-disabled:hover {
-  color: var(--text-dim);
-  border-color: var(--border);
+  text-decoration: none;
 }
 .mod-controls .mod-btn-warn {
   color: var(--accent-warm);
-  border-color: var(--accent-warm);
+}
+.mod-controls > * + *::before {
+  content: "·";
+  color: var(--text-dim);
+  margin-right: 0.4rem;
 }
 
 /* Sub-create thresholds: align labels + inputs in two clean rows. */
@@ -1887,32 +1898,6 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .subscribed-mark { display: inline; margin-left: 0.3rem; }
-
-  /* Mod controls (collapse / remove / ban) drop their pill chrome and
-   * render as text verbs at narrow widths. Reason: at desktop the
-   * outlined pills are visually distinct from the solid-filled flair
-   * chips, but at mobile sizes they rhyme — both rectangles of
-   * similar dimensions — and a fast scan reads them as the same kind
-   * of thing. As text verbs separated by `·` they join plato's
-   * action-strip vocabulary (← home · public //modlog · …) instead. */
-  .mod-controls .mod-btn {
-    background: transparent;
-    border: none;
-    padding: 0;
-    color: var(--text-dim);
-    border-radius: 0;
-  }
-  .mod-controls .mod-btn:hover {
-    color: var(--accent-warm);
-    border-color: transparent;
-  }
-  .mod-controls .mod-btn-warn { border-color: transparent; }
-  .mod-controls .mod-form + .mod-form::before {
-    content: "·";
-    color: var(--text-dim);
-    margin-right: 0.4rem;
-    align-self: center;
-  }
 
   /* Forms: inputs stretch to viewport rather than overflowing. */
   input[type="text"], input[type="email"], input[type="number"],
