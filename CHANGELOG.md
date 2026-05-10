@@ -20,14 +20,16 @@ The 0.12.0 render condition was `subscribedSet.has(s.name) && !modSet.has(s.name
 
 The 0.12.0 mod-controls redesign updated `.mod-btn` to warm-accent text verbs but left `.action-link` (the broader sibling used by author `edit`, sub-admin verbs on `/sub/<n>/edit`, and the modlog `revoke` button) at its pre-redesign outlined-pill chrome. Result on a post-feed row where the viewer is both author and mod: `[edit]  collapse · remove · ban` — one strip, two visual registers. Unified `.action-link` with `.mod-btn`: drop the border/padding/radius, switch color from `--text-dim` to `--accent-warm`, dotted-underline hover. Scope note: `/sub/manage` action-links are wrapped in `.inline-confirm` which provides its own blue-pill chrome — those rules win on specificity, so that surface intentionally stays as blue pills (a deliberate separate visual family for sub-admin actions, not part of this change). Modlog audit `revoke` button has no wrapper, so it inherits the new warm-verb treatment — consistent with the rest of the modlog row's mod actions.
 
+Follow-up: after the .action-link unification, the strip read as `edit  collapse · remove · ban` — middots inside the mod-controls grouping, gap-only spacing between edit and collapse. The subgroup it created ("author tools / mod tools, separated by extra space") didn't read as intentional; it read as an accidental indent. Added `.post-actions > * + *::before { content: "·" }` so the strip is uniformly middot-separated end-to-end: `edit · collapse · remove · ban`. The ::before lands as the first flex item of .post-actions' second direct child (.mod-controls), inheriting flex-gap to either side from the two flex parents — no margin needed, spacing matches the existing middots in .mod-controls.
+
 ### Documented — deploy-guide gets a one-shot upgrade bundle option and a `?v=N` cache-token verify step
 
 Two gaps surfaced from the 0.12.0 deploy session against terribic. (1) The stepwise upgrade form has 4 separate `sudo -u plato -H` invocations; routine bumps are cleaner as a single `&&`-chained bundle that short-circuits on failure. Added as an option after the stepwise form (the stepwise stays the canonical recipe for cautious deploys). (2) The verify block used `${DOMAIN}` shell-template form, which works during initial deploy when the var was set in earlier sections but silently resolves to `https://.healthz` for a routine bump months later in a fresh shell. Hardcoded `terribic.com` in the example (operators on other instances substitute, same convention as elsewhere in the guide). Also added a `?v=N` cache-token check — a 200 on the new style.css token after deploy proves the running server is serving the new CSS, not stale bytes from a CDN or local cache. Useful for CSS-bumping releases like 0.12.0 where "version says new but layout looks old" is the failure mode that worried users would report.
 
 ### Files touched
 
-- `src/web/app.js` — drop `!modSet.has(s.name)` from `[in]` render condition, style.css cache `v=48 → v=49`
-- `src/web/static/style.css` — `.action-link` switched from outlined pill to warm-accent text verb, matching `.mod-btn`
+- `src/web/app.js` — drop `!modSet.has(s.name)` from `[in]` render condition, style.css cache `v=48 → v=50`
+- `src/web/static/style.css` — `.action-link` switched from outlined pill to warm-accent text verb (matching `.mod-btn`); `.post-actions > * + *::before` middot rule for end-to-end uniform separator
 - `docs/02-features/deploy-guide.md` — one-shot bundle option + hardcoded verify URL + `?v=N` cache-token paragraph
 
 ## [0.12.0] - 2026-05-10 — mobile mod-surface pass: actions wrap below title, modlog card-stack, `[in]` chip, warm-accent verbs
