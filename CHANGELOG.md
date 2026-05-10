@@ -6,7 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.10.4 fixes land here before the next bump)
+### Added — `og:image` so WhatsApp/Slack/Twitter render a banner card, not the chain-icon fallback
+
+Every page now emits `<meta property="og:image">` pointing to a static 1200×630 PNG of plato's three-dot mark on `--bg`, served from `/static/og.png`. Previously plato emitted `og:title`/`og:description`/`og:url` but no image, so link-preview clients that prefer banner cards (WhatsApp, Slack) fell back to the compact chain-icon shape. The image is part of plato's identity (same dots as the favicon) and ships with the repo — no per-fork config knob; every instance carries it. `twitter:card` upgraded from `summary` to `summary_large_image` to match. WhatsApp caches previews ~7 days globally per URL, so existing terribic.com previews will refresh after the cache window or via the FB sharing debugger.
 
 ## [0.10.4] - 2026-05-10 — UX-honesty wave: opaque rate-limit messaging, CRLF body cap, audit-trail enrichment, regex tightening
 

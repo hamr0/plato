@@ -143,7 +143,11 @@ function layout(title, body, seo = {}) {
 <meta property="og:description" content="${description}">
 <meta property="og:url" content="${canonical}">
 <meta property="og:site_name" content="${branding.forumName}">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="${siteMeta.baseUrl}/static/og.png?v=1">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="plato">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css?v=41">

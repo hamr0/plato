@@ -157,7 +157,11 @@ test('GET /: head includes description, canonical, OG, twitter card, theme-color
   assert.match(body, /<meta property="og:title" content="tests">/);
   assert.match(body, new RegExp(`<meta property="og:url" content="${ctx.baseUrl}/">`));
   assert.match(body, /<meta property="og:site_name" content="tests">/);
-  assert.match(body, /<meta name="twitter:card" content="summary">/);
+  assert.match(body, new RegExp(`<meta property="og:image" content="${ctx.baseUrl}/static/og.png\\?v=1">`));
+  assert.match(body, /<meta property="og:image:width" content="1200">/);
+  assert.match(body, /<meta property="og:image:height" content="630">/);
+  assert.match(body, /<meta property="og:image:alt" content="plato">/);
+  assert.match(body, /<meta name="twitter:card" content="summary_large_image">/);
 });
 
 test('GET /about: page-specific description + canonical', async (t) => {
