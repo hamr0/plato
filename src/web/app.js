@@ -492,7 +492,7 @@ function siteFooter() {
   return html`<footer class="site-footer">
     <a href="/" class="logo-home">${logoMark({ size: 22 })}</a>
     <span class="hosted-by muted">a plato instance hosted by ${handle}</span>
-    <span class="footer-links muted">· ${feedbackLink}<a href="/about">about</a> · <a href="/modlog">modlog</a>${versionTag}</span>
+    <span class="footer-links muted">· ${feedbackLink}<a href="/about">about</a> · <a href="/about#data-handling">privacy</a> · <a href="/modlog">modlog</a>${versionTag}</span>
     <span class="quote muted">— "${PLATO_QUOTE}"</span>
   </footer>`;
 }
@@ -1418,8 +1418,8 @@ function renderAbout(req, res, { db, auth }) {
         <p class="muted">these rules also appear in the footer of every magic-link email this instance sends.</p>
       </section>`
     : html``;
-  const dataHandling = html`<section class="about-section">
-    <h3>what data this instance keeps</h3>
+  const dataHandling = html`<section class="about-section" id="data-handling">
+    <h3>privacy</h3>
     <p>plato is built around storing as little about you as possible. specifically:</p>
     <ul>
       <li><strong>your email address is never stored.</strong> when you sign in, the forum derives a one-way hash of your email (<a href="https://github.com/hamr0/knowless">knowless</a> identity) and discards the original. the hash is per-instance, so the same email yields different identities across forks.</li>
@@ -1478,9 +1478,9 @@ function renderAbout(req, res, { db, auth }) {
     <article class="about">
       <p>this is a <strong>plato</strong> instance, hosted by ${handle}.${feedback}</p>
       ${rules}
+      ${dataHandling}
       ${howItWorks}
       ${interop}
-      ${dataHandling}
       ${signing}
       ${fork}
     </article>

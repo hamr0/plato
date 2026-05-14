@@ -56,16 +56,17 @@ test('GET /about: renders boilerplate + default rules with no operator config', 
   assert.equal(res.status, 200);
   const body = await res.text();
   // Always-on boilerplate sections
-  assert.match(body, /what data this instance keeps/i);
+  assert.match(body, /<h3>privacy<\/h3>/i);
+  assert.match(body, /id="data-handling"/);
   assert.match(body, /your email address is never stored/i);
   assert.match(body, /if you don't trust this operator/i);
   // Default rules ship out of the box — fresh instance still has tone.
   assert.match(body, /<h3>rules<\/h3>/i);
   assert.match(body, />be civil/);
   assert.match(body, />mods are accountable/);
-  // M5/B12: "how this place works" orientation block appears above the
-  // data-handling section, with paragraphs for the load-bearing concepts
-  // (read-only subs in particular — surfaces the operator-out posture).
+  // M5/B12: "how this place works" orientation block with paragraphs for
+  // the load-bearing concepts (read-only subs in particular — surfaces
+  // the operator-out posture).
   assert.match(body, /how this place works/i);
   assert.match(body, /read-only/i);
 });

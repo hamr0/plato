@@ -6,7 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.3 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.4 fixes land here before the next bump)
+
+## [0.12.4] - 2026-05-14 — `/about` data-handling section now reads as `privacy`, sits second on the page, linked from footer
+
+Before this release: a privacy-conscious visitor landing on the forum had nowhere obviously labelled. The data-minimization story lived on `/about`, four sections in, under the heading `what data this instance keeps` — accurate but unsearchable. Visitors reflex-typing `/privacy` got a 404. Anyone Ctrl-F'ing the page for "privacy" hit nothing.
+
+After: the same prose, same terminal-honest tone, retitled and promoted so it's findable without minting a duplicate route.
+
+### Changed — `/about` section reorder, heading rename, deep-link anchor, footer link
+
+Three small edits, one composite outcome:
+
+- **Heading renamed** to `privacy` (was `what data this instance keeps`). The block's intro paragraph still leads with *"plato is built around storing as little about you as possible"* — the rename doesn't change the contract, it lets readers searching for the word find the page.
+- **Section promoted** to position #2 on `/about`, directly under `rules`. The new order — rules → privacy → how this place works → interop → signing → fork — pairs the two ground-rules blocks before the operational orientation; privacy-conscious visitors no longer have to scroll past three sections to reach it.
+- **Anchor + footer link.** The `<section>` carries `id="data-handling"` (id preserved as the stable internal slug; the *heading* changed but the anchor stays semantic). Footer gains a `privacy` link between `about` and `modlog` pointing at `/about#data-handling`. The reading is now `feedback · about · privacy · modlog`.
+
+The text inside the section is unchanged — same single source of truth as `/about` itself, no duplicated copy to drift. No new route, no new template, no operator-tunable surface added.
+
+### Why not a standalone `/privacy` route?
+
+Considered and rejected. The data-handling block is project-baked, listed in operator-guide as *"deliberately uniform across forks"* — operators can't edit it because the public-honesty contract isn't operator-tunable. Adding a second route either duplicates the prose (drift hazard) or 301s to `/about` (which feels like bait-and-switch when a visitor types `/privacy` expecting a privacy page). A deep-linked anchor on the page that already holds the canonical text is the lowest-surface fix: one heading, one id, one footer link, zero new prose.
+
+Also considered: adding a self-promoted "verify with our browser extension" affordance to the data-handling block. Rejected — the section is uniform across forks; baking a recommendation for a specific tool there would force every fork to ship the same cross-promotion. Verification by the visitor's own browser network tab is already self-evident; naming a specific tool narrows that, doesn't widen it.
+
+### Implementation
+
+- **`src/web/app.js`** `renderAbout` — `dataHandling` section gains `id="data-handling"` and `<h3>privacy</h3>` (was `<h3>what data this instance keeps</h3>`). Article body reorders to render `${dataHandling}` between `${rules}` and `${howItWorks}` (was between `${interop}` and `${signing}`).
+- **`src/web/app.js`** site footer — adds `<a href="/about#data-handling">privacy</a>` between the existing `about` and `modlog` links.
+
+### Tests
+
+`test/integration/about.test.js` "GET /about: renders boilerplate + default rules with no operator config" updated to assert the new heading shape (`<h3>privacy</h3>`) and the deep-link affordance (`id="data-handling"`) in the rendered HTML. The existing assertion that `your email address is never stored` still appears anchors the prose. Comment about the page order is rewritten — "how this place works" no longer sits above the data section. All 838 tests green.
+
+### Documented — operator-guide, plato.context, PRD references
+
+- **`docs/02-features/operator-guide.md`**: `/about` page description in §"What you can change easily" expanded to note the new section order, the `privacy` heading, the `#data-handling` anchor, and the footer link. Footer-link descriptions in `branding.feedbackEmail` table row + standalone paragraph updated from `feedback · about · modlog` to `feedback · about · privacy · modlog`.
+- **`docs/02-features/plato.context.md`**: version-trail banner bumped to v0.12.4; 0.12.4 line appended summarizing the rename + reorder + footer link with the explicit non-goal callout (no new route, no operator override surface).
 
 ## [0.12.3] - 2026-05-10 — flair edits cascade: rename moves posts, remove nulls them
 

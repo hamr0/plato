@@ -112,7 +112,7 @@ The light blocks live under `:root.theme-light` plus a `@media (prefers-color-sc
 | `branding.forumName` | yes (default `"plato"`) | top wordmark, footer wordmark, every page `<title>`, the magic-link "check your email" header, `og:site_name` meta, `/about` opening sentence, the default `metaDescription` template |
 | `branding.tagline` | optional | home-page subtitle, the default `metaDescription` template |
 | `branding.hostedBy` | optional | global footer line `a <forumName> instance hosted by <hostedBy>` (hidden when unset), `/about` opening sentence (falls back to `@<forumName>` when unset) |
-| `branding.feedbackEmail` | optional | global footer link (`feedback · about · modlog`), `/about` "questions or feedback" link — both `mailto:`, address hidden behind link text |
+| `branding.feedbackEmail` | optional | global footer link (`feedback · about · privacy · modlog`), `/about` "questions or feedback" link — both `mailto:`, address hidden behind link text |
 | `branding.rules` | optional, ≤4 lines (defaults ship if omitted) | `/about` rules section, footer of every magic-link email (single source of truth — knowless mail-footer cap, no URL schemes, no bare domains) |
 | `branding.feedbackEmail` | optional | `/about` "feedback" link target, magic-link footer attribution line (`a plato instance hosted by @<hostedBy> . <feedbackEmail>` — both halves graceful when one is unset) |
 | `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables under `:root` (dark theme) — vote arrows, score color, "you voted here" memory shade |
@@ -171,7 +171,7 @@ If `email` is missing, cron jobs print to stderr (cron's default mailer or `jour
 
 **Weekly stats digest.** `bin/stats.js` (daily snapshot → `data/stats.log`) + `bin/stats-weekly.js` (Mon 06:00 UTC digest → operator email). Counters: users (`knowless.db.handles` row count — anyone who's ever requested a magic link), subs, posts, comments (the latter two excluding `removed_at`). Digest is a fixed-width 4-week table with WoW deltas; `--dry-run` prints to stdout for local testing. See [`cron-jobs.md`](cron-jobs.md).
 
-**Feedback email (`branding.feedbackEmail`).** Optional. Surfaces in **two** places: the global footer (`feedback · about · modlog` when set; just `about · modlog` when unset), and the opening sentence of `/about` (a "questions or feedback." link appended after the hosted-by line; absent when unset). Both are `mailto:` links — the address sits behind the link text rather than being printed in plain. Boot-time validation: ASCII, valid email shape, ≤120 chars, no quotes/CRLF.
+**Feedback email (`branding.feedbackEmail`).** Optional. Surfaces in **two** places: the global footer (`feedback · about · privacy · modlog` when set; just `about · privacy · modlog` when unset), and the opening sentence of `/about` (a "questions or feedback." link appended after the hosted-by line; absent when unset). Both are `mailto:` links — the address sits behind the link text rather than being printed in plain. Boot-time validation: ASCII, valid email shape, ≤120 chars, no quotes/CRLF.
 
 ```jsonc
 { "branding": { "feedbackEmail": "you@example.com" } }
@@ -207,7 +207,7 @@ Operators who want a different tone override `branding.rules` with their own arr
 
 Bad shape (too many entries, non-ASCII, contains a URL, joined length over 240) throws at boot.
 
-**`/about` page.** Auto-generated. Renders the operator-supplied prelude (forum name + hosted-by + optional feedback line + optional rules) followed by project-baked sections that aren't operator-edited: a data-handling paragraph (what plato stores and doesn't), and a fork-escape paragraph. The baked sections are uniform across forks by design — the public-honesty contract isn't operator-tunable. Replaces "privacy policy" / "terms of service" boilerplate with text that's actually true of plato.
+**`/about` page.** Auto-generated. Renders the operator-supplied prelude (forum name + hosted-by + optional feedback line + optional rules) followed by project-baked sections that aren't operator-edited, in this order: a `privacy` block (what plato stores and doesn't — heading reads literally as `privacy` so visitors searching the page find it; section carries `id="data-handling"` as the deep-link anchor), a `how this place works` orientation, an `interop & portability` block, an `archive signing` block, and a `fork-escape` paragraph. The baked sections are uniform across forks by design — the public-honesty contract isn't operator-tunable. Replaces "privacy policy" / "terms of service" boilerplate with text that's actually true of plato. There is no separate `/privacy` route by design: a deep-link from the footer (`feedback · about · privacy · modlog`, with `privacy → /about#data-handling`) avoids minting a second template and the drift hazard that comes with duplicating the prose.
 
 **Search engine snippet (`branding.metaDescription`).** Optional. The default lands a privacy-posture-forward sentence in Google snippets and link unfurls (Slack, Signal, Discord, Mastodon, iMessage): *"a {forumName} instance: Reddit-shaped forum, magic-link auth, no tracking, no analytics, public modlog — {tagline}."* Override if you want bespoke copy. ASCII, ≤200 chars, throws at boot on bad shape.
 
