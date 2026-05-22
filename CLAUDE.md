@@ -55,3 +55,5 @@ When adding a new spam knob:
 - Run `npm test` and read failures, don't suppress them.
 - If a task touches the unified `/modlog` surface, re-read `docs/01-product/m5-mod-surface-spec.md` first.
 - If you're about to add a new column or table, run by the user — schema changes are sticky.
+
+For full development and testing standards, see `/home/hamr/Documents/PycharmProjects/gitdone/.claude/memory/AGENT_RULES.md`.
