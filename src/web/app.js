@@ -5549,6 +5549,19 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
     rules: branding.rules,
   });
   return async function handler(req, res) {
+    // Baseline hardening headers on every response. Set via setHeader so
+    // they survive each route's own writeHead. Scoped deliberately: HTML is
+    // already escaped and authenticated POSTs are SameSite=Lax-protected, so
+    // these are defense-in-depth — nosniff (MIME confusion), DENY/frame-
+    // ancestors (clickjacking belt-and-suspenders), and same-origin referrer
+    // (don't leak the originating post URL to outbound links). No script/
+    // style CSP: inline <script>/<style>/style= are load-bearing here and a
+    // strict policy would need per-block nonces. HSTS lives at the nginx TLS
+    // edge, not here (node serves cleartext to the loopback proxy).
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+    res.setHeader('Referrer-Policy', 'same-origin');
     try {
       const url = new URL(req.url, baseUrl);
       const path = url.pathname;

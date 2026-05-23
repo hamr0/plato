@@ -29,6 +29,7 @@ import {
 } from '../src/archive/import-queue.js';
 import { recordNotification } from '../src/content/notification.js';
 import { parseAndVerifyArchive, importSubArchive } from '../src/archive/import.js';
+import { assertPublicUrl } from '../src/archive/ssrf.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -40,6 +41,7 @@ const POSTS_DIR = process.env.POSTS_DIR ?? resolve(ROOT, 'posts');
 // so a server lying about Content-Length still hits the wall.
 const MAX_ARCHIVE_BYTES = parseInt(process.env.IMPORT_MAX_BYTES ?? `${500 * 1024 * 1024}`, 10);
 const FETCH_TIMEOUT_MS = parseInt(process.env.IMPORT_FETCH_TIMEOUT_MS ?? '120000', 10);
+const MAX_REDIRECTS = 5;
 
 const dryRun = process.argv.includes('--dry-run');
 const startHour = clampHour(process.env.IMPORT_OFFPEAK_START, 1);
@@ -172,7 +174,19 @@ async function fetchArchive(url) {
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   let res;
   try {
-    res = await fetch(url, { redirect: 'follow', signal: ctrl.signal });
+    // SSRF guard: validate the host resolves to a public address, then
+    // follow redirects manually so a public URL can't 302 into an
+    // internal one — each hop is re-validated before we connect.
+    let current = (await assertPublicUrl(url)).href;
+    for (let hop = 0; ; hop++) {
+      res = await fetch(current, { redirect: 'manual', signal: ctrl.signal });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+      if (!location) break;
+      if (hop >= MAX_REDIRECTS) throw new Error(`too many redirects (>${MAX_REDIRECTS})`);
+      const next = (await assertPublicUrl(new URL(location, current).href)).href;
+      try { await res.body?.cancel(); } catch {}
+      current = next;
+    }
   } catch (err) {
     clearTimeout(t);
     throw new Error(`fetch failed: ${err.message}`);

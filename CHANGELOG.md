@@ -6,7 +6,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.4 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.5 fixes land here before the next bump)
+
+## [0.12.5] - 2026-05-23 — SSRF guard on the sub-import fetch + baseline response-hardening headers
+
+Before this release: the sub-import worker (`bin/run-import-queue.js`) fetched whatever URL a logged-in user pasted at `/sub/create?mode=import` with `redirect: 'follow'` and no host validation. The URL-fetch trust model ("if you trust the URL enough to paste it, you trust the bytes") was sound for the *bytes* — they're SHA-256- and Ed25519-verified before anything imports — but it never bounded *where the server connects*. A pasted `http://127.0.0.1:<port>/`, `http://169.254.169.254/…` (cloud metadata), or any RFC1918 address would be fetched from inside the box, and the fetch-failure reason flowed back to the user as an `import_failed` memlog notification — turning the importer into a blind-SSRF oracle for mapping internal services. A public URL could also `302` into an internal one and `redirect: 'follow'` would chase it.
+
+After: the worker resolves the host and refuses to connect to any private / loopback / link-local / reserved address, re-checking on every redirect hop. The bytes-trust model is unchanged; only the connection target is now bounded to public space. Same release adds a small set of always-on response headers.
+
+This is the security review from the 0.12.4→0.12.5 window. Two findings from that review were re-verified and **dropped as non-issues**: (1) per-IP login / new-handle caps are *not* globalized behind nginx — knowless defaults `trustedProxies` to the loopback set (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`), so it honors `X-Forwarded-For` from the local proxy out of the box; plato passing the key would be redundant. (2) The `0.0.0.0` listener bind is not externally reachable on the documented deploy — `deploy-guide.md` Step 2 sets `ufw default deny incoming` allowing only 22/80/443. Neither needed a code change.
+
+### Security — sub-import fetch validates the resolved host is public (SSRF)
+
+New `src/archive/ssrf.js`:
+
+- **`isBlockedAddress(ip)`** — true for any literal in a loopback / private / CGNAT / link-local / unique-local / multicast / reserved range (IPv4 and IPv6, including IPv4-mapped IPv6 like `::ffff:127.0.0.1`). `169.254.169.254` falls inside the link-local block, so cloud-metadata endpoints are covered. Fails closed: a non-IP string returns `true` (blocked).
+- **`assertPublicUrl(rawUrl, { lookup })`** — parses the URL, requires `http(s)`, resolves the hostname via `dns.lookup({ all: true })`, and throws if **any** resolved address is blocked (closes the multi-A-record rebinding trick where one record is public and another internal). `lookup` is injectable so the unit tests never touch real DNS. Returns the parsed `URL` on success.
+
+`bin/run-import-queue.js` `fetchArchive` now calls `assertPublicUrl` on the initial URL and follows redirects **manually** (`redirect: 'manual'`, cap 5 hops), re-validating each `Location` before connecting — a public URL can no longer 302 into an internal one. The streamed size cap (500 MB default) and 120s timeout are unchanged. Residual (documented in the module header): an active DNS-rebinding attacker who flips a record between the validation lookup and the socket connect — out of scope at hobby scale, and the archive must still pass Ed25519 verification to import anything, so the rebind only buys the now-host-blocked oracle.
+
+### Added — baseline response-hardening headers on every route
+
+`src/web/app.js` sets four headers once at handler entry (via `setHeader`, so each route's own `writeHead` preserves them):
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY` + `Content-Security-Policy: frame-ancestors 'none'` (clickjacking belt-and-suspenders; authenticated POSTs are already SameSite=Lax-protected, so this is defense-in-depth)
+- `Referrer-Policy: same-origin` (don't leak the originating post URL to outbound links; `same-origin` keeps the referrer for in-site requests so knowless's Origin/Referer logout check is unaffected)
+
+No script/style CSP: inline `<script>` (anti-flash theme bootstrap, subs-table sort), inline `<style>`, and `style=` attributes are load-bearing here, and a strict policy would need a per-block nonce on every one. HSTS stays at the nginx TLS edge — node serves cleartext to the loopback proxy, so HSTS belongs upstream, not here.
+
+### Implementation
+
+- **`src/archive/ssrf.js`** (new) — `isBlockedAddress` + `assertPublicUrl`, built on `node:net` `BlockList` + `node:dns/promises`.
+- **`bin/run-import-queue.js`** — `fetchArchive` validates the initial URL + re-validates each redirect hop; new `MAX_REDIRECTS = 5`.
+- **`src/web/app.js`** — four `setHeader` calls at the top of the request handler.
+
+### Tests
+
+`test/unit/ssrf.test.js` (new, 9 cases): blocked ranges (loopback / private / CGNAT / link-local / metadata / multicast / reserved, v4 + v6 + v4-mapped), public-allow, garbage-fails-closed, non-http(s) rejection, IP-literal metadata/loopback targets, the any-private-record rebinding guard, and resolution-failure surfacing. Full suite green (847 tests).
+
+### Documented — PRD lock + plato.context
+
+- **`docs/01-product/prd-open-web-revival.md`** §M7/B5 import posture — added the **SSRF guard (locked)** bullet: the fetch is bounded to public addresses, re-validated per redirect; the URL-fetch trust model trusts the bytes (signed) but never the connection target.
+- **`docs/02-features/plato.context.md`** — version-trail banner bumped to v0.12.5; the M7/B5 sub-import worker note now records the host-validation + manual-redirect-revalidation step; new "baseline hardening headers" bullet under § Patterns, not features.
 
 ## [0.12.4] - 2026-05-14 — `/about` data-handling section now reads as `privacy`, sits second on the page, linked from footer
 
