@@ -40,5 +40,8 @@ MAILTO=${ADMIN_EMAIL}
 # Every 15 min: archive import queue
 */15 * * * *        root cd ${INSTALL_DIR} && sudo -u plato node bin/run-import-queue.js >> /var/log/plato-import.log 2>&1
 
-# Every 5 min: /healthz watcher — silent on 200, alerts on non-2xx
-*/5 * * * *         root cd ${INSTALL_DIR} && BACKUP_DIR=${BACKUP_DIR} PLATO_LOG=/var/log/plato.log bin/health-watch.sh
+# Every 5 min: /healthz watcher — silent on 200, alerts on non-2xx.
+# PLATO_URL must point at plato's actual listen port; health-watch.sh
+# defaults to :8080, so on any deploy with a different PORT (e.g. a
+# co-tenant box) it must be passed here or every check 000s and alerts.
+*/5 * * * *         root cd ${INSTALL_DIR} && PLATO_URL=${PLATO_URL} BACKUP_DIR=${BACKUP_DIR} PLATO_LOG=/var/log/plato.log bin/health-watch.sh
