@@ -12,6 +12,7 @@ Both operator-mail cron scripts labelled themselves with `os.hostname()`, so on 
 
 - **`bin/stats-weekly.js`** (weekly digest) — `host:` body line uses `branding.forumName` from `config.json`; `From:` uses the domain from `KNOWLESS_BASE_URL`. `deploy/plato.cron` passes `--env-file=.env` so the var is available. Both fall back to the hostname when unset.
 - **`bin/health-watch.sh`** (down/health alerts) — when `DOMAIN` is set (now passed by the cron), the alert is `From: noreply@$DOMAIN`, the subject reads `…alert on <domain>`, and the body gains a `forum:` line; the local `health.log` and the GitHub-issue diagnostic keep the box `host:` (the useful debug detail). Falls back to the system default when `DOMAIN` is unset.
+- **`deploy/plato.cron`** (job-failure mail) — sets `MAILFROM=noreply@${DOMAIN}` so cron's own failure notifications come from the forum domain rather than `root@<hostname>` (honored by cronie; harmlessly ignored by crons without `MAILFROM` support).
 
 The upshot on a shared box: plato's weekly + alert mail come from `terribic.com` (DKIM-signed), the neighbour's from its own domain. Deploy-tooling / ops-script only — the running server is untouched, so no version bump. (On an existing box the cron lines need `--env-file=.env` (weekly) and `DOMAIN=` (health-watch) added; the scripts are picked up at the next run.)
 

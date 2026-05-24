@@ -9,6 +9,9 @@
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 MAILTO=${ADMIN_EMAIL}
+# Cron job-failure mail comes from the forum's own domain, not root@<hostname>
+# (honored by cronie; ignored harmlessly by crons that don't support MAILFROM).
+MAILFROM=noreply@${DOMAIN}
 
 # Hourly: URLhaus malicious-URL feed
 0 * * * *           root cd ${INSTALL_DIR} && sudo -u plato node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
