@@ -15,6 +15,10 @@ Both operator-mail cron scripts labelled themselves with `os.hostname()`, so on 
 
 The upshot on a shared box: plato's weekly + alert mail come from `terribic.com` (DKIM-signed), the neighbour's from its own domain. Deploy-tooling / ops-script only — the running server is untouched, so no version bump. (On an existing box the cron lines need `--env-file=.env` (weekly) and `DOMAIN=` (health-watch) added; the scripts are picked up at the next run.)
 
+### Documented
+
+- **`docs/04-process/migration-terribic-to-gitdone.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
+
 ## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
 
 A code-review follow-up to 0.12.7. That release started passing `branding.forumName` to knowless as the mail display name (`fromName`), but knowless validates `fromName` at boot — ASCII only, ≤60 chars, no `"`/`<`/`>`/CR-LF — and **throws** on violation. `branding.forumName` is operator free text with no such constraints (and plato explicitly supports multilingual content), so a fork with a non-ASCII or over-long forum name — or one containing those characters — would have **crashed at startup** after upgrading. A cosmetic branding value should never be able to take the whole forum down.
