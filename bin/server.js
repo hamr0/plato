@@ -70,6 +70,10 @@ const mailEvents = {
 const KNOWLESS_DB_PATH = process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db');
 const auth = createAuth(process.env, {
   dbPath: KNOWLESS_DB_PATH,
+  // knowless ≥1.1.9 wants the sender split: KNOWLESS_FROM is the bare address,
+  // the friendly display name is the forum's own name. Single source of truth —
+  // no separate mail-name knob to drift from branding.
+  fromName: operatorConfig.branding?.forumName,
   ...mailEvents,
 });
 // Parallel read-only store handle pointing at the same SQLite file knowless

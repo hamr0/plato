@@ -577,7 +577,7 @@ echo "secret length: ${#SECRET}"   # expect: 64
 sudo tee /opt/plato/.env > /dev/null <<ENV
 KNOWLESS_SECRET=$SECRET
 KNOWLESS_BASE_URL=https://$DOMAIN
-KNOWLESS_FROM=$FORUM_NAME <auth@$DOMAIN>
+KNOWLESS_FROM=auth@$DOMAIN
 KNOWLESS_SMTP_HOST=localhost
 KNOWLESS_SMTP_PORT=25
 PORT=$PLATO_PORT
@@ -588,7 +588,7 @@ sudo chown plato:plato /opt/plato/.env
 sudo chmod 600 /opt/plato/.env
 ```
 
-`KNOWLESS_FROM=$FORUM_NAME <auth@$DOMAIN>` produces e.g. `terribic <auth@terribic.com>` — the standard `Name <address>` format that mail libraries and recipients understand. Recipients see the friendly "terribic" instead of just the email address; SPF/DKIM/DMARC alignment still works (the `<address>` part is what matters for auth).
+`KNOWLESS_FROM` must be the **bare** address, e.g. `auth@terribic.com` — knowless ≥1.1.9 rejects the display form (`Name <address>`) at boot. The friendly sender name recipients see comes from `branding.forumName` in `config.json` (Step 8); plato passes it to knowless as the display name automatically, so the From: header still reads e.g. `terribic <auth@terribic.com>` without you setting it twice. SPF/DKIM/DMARC alignment keys off the bare address, which must match the domain you sign as.
 
 > **Homeserver / self-signed test note.** This guide assumes a public VPS with port 25 outbound and DNS at a registrar. On a residential homeserver (port 25 blocked by ISP, no public domain pointing at it), the postfix path won't deliver mail. Use plato in dev mode with `KNOWLESS_DEV_LOG_LINKS=true` (see `.env.dev`) — magic links print to stderr, you click them out of the log, you validate the auth flow without real mail. See the [Self-signed mode](#self-signed-mode-homeserver--lan-testing) appendix.
 
@@ -1397,6 +1397,67 @@ sudo /opt/plato/deploy/teardown.sh --yes-data
 sudo cp /etc/nginx/nginx.conf.preplato /etc/nginx/nginx.conf
 sudo systemctl reload nginx
 ```
+
+## Appendix: Co-tenant deploy (sharing a box with another app)
+
+The main guide assumes a dedicated VPS. plato also runs fine next to another app on one cheap box (the canonical instance was consolidated this way — moved onto a box already running another site on nginx + inbound postfix). The trap: two of the main steps are **destructive to the neighbour** if run verbatim —
+
+- **Step 5 (postfix `main.cf`)** sets `inet_interfaces=loopback-only` and rewrites `mydestination` / `virtual_transport`. On a box where the neighbour receives inbound mail, this **severs the neighbour's mail**.
+- **`bootstrap.sh`** (default mode) writes `/etc/nginx/conf.d/plato.conf`. If you've already hand-written a vhost for plato (or have your own nginx layout), that's a duplicate `server_name`.
+
+So on a shared box, run bootstrap with the co-tenant flags and do mail **additively**. Everything else (the `plato` user, `/opt/plato`, systemd unit, cron, logrotate, runtime dirs) is identical to the main guide.
+
+### C1 — Bootstrap, co-tenant mode
+
+```bash
+sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT \
+  /opt/plato/deploy/bootstrap.sh --co-tenant
+```
+
+`--co-tenant` = `--skip-nginx --skip-mail`. It skips writing the nginx vhost and skips probing the mail stack, but still installs the systemd unit, cron, logrotate, and creates the runtime dirs. (Use the flags individually if you only share one layer — e.g. `--skip-nginx` alone on a box with its own nginx but no other mail.) `.env` keeps the standard production shape, including the **bare** `KNOWLESS_FROM=auth@$DOMAIN` (the friendly sender name comes from `branding.forumName` in `config.json`).
+
+### C2 — nginx: add your server block (don't replace the neighbour's)
+
+nginx routes by `server_name`, so plato's block coexists with the neighbour as long as neither claims `default_server`. Render the template and drop it in as its own file:
+
+```bash
+DOMAIN=$DOMAIN PLATO_PORT=$PLATO_PORT \
+  envsubst '${DOMAIN} ${PLATO_PORT}' \
+  < /opt/plato/deploy/plato.nginx.template \
+  | sudo tee /etc/nginx/conf.d/plato-$DOMAIN.conf > /dev/null
+sudo nginx -t && sudo systemctl reload nginx
+# Issue plato's cert additively — the neighbour's cert/vhost are untouched:
+sudo certbot --nginx -d $DOMAIN -m $ADMIN_EMAIL --agree-tos -n
+```
+
+### C3 — Mail: add a DKIM signing key for your domain, additively
+
+The neighbour already runs postfix + opendkim. **Do not touch `main.cf`** (no `inet_interfaces` / `mydestination` / `virtual_transport` changes) and **do not touch `opendkim.conf`** (its `KeyTable` / `SigningTable` / `Socket` are already set). You only **append** plato's domain to the existing tables:
+
+```bash
+# 1. Generate plato's key (per-domain dir, same as §5.2)
+sudo mkdir -p /etc/opendkim/keys/$DOMAIN
+cd /etc/opendkim/keys/$DOMAIN
+sudo opendkim-genkey -b 2048 -d $DOMAIN -s default
+sudo chown -R opendkim:opendkim /etc/opendkim/keys
+sudo chmod 600 /etc/opendkim/keys/$DOMAIN/default.private
+
+# 2. APPEND (>>, not >) lines for plato's domain — leaves the neighbour's intact
+echo "default._domainkey.$DOMAIN $DOMAIN:default:/etc/opendkim/keys/$DOMAIN/default.private" \
+  | sudo tee -a /etc/opendkim/KeyTable > /dev/null
+echo "*@$DOMAIN default._domainkey.$DOMAIN" \
+  | sudo tee -a /etc/opendkim/SigningTable > /dev/null
+
+# 3. Verify the key, then restart opendkim (postfix milter wiring is unchanged)
+sudo opendkim-testkey -d $DOMAIN -s default -vvv   # "key OK"
+sudo systemctl restart opendkim
+```
+
+Then publish `$DOMAIN`'s own SPF / DKIM (`default._domainkey.$DOMAIN` from `default.txt`) / DMARC records at the registrar, exactly as §5 / §14 describe — those are per-domain and don't affect the neighbour. Inbound for `$DOMAIN` reaches the box via its A record; no MX change is needed unless you also want inbound aliases (Step 14), which on a shared box must likewise be additive (`virtual_alias_domains = $virtual_alias_maps $DOMAIN`, never adding `$DOMAIN` to `mydestination`).
+
+### C4 — What stays single-tenant
+
+`bin/health-watch.sh` and the cron `MAILTO` send **operator** mail (to `operator.email`) as local system mail (`user@hostname`), not as `auth@$DOMAIN` — they're admin alerts, not domain-aligned auth mail, and don't interact with the DKIM signing above. The magic-link mail is the only thing signed under `$DOMAIN`.
 
 ## Where to read next
 

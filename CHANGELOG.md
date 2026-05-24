@@ -4,7 +4,29 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
-## [Unreleased]
+## [0.12.7] - 2026-05-24 — knowless 1.1.9 bare-`from` compatibility, node:sqlite operator recipes, co-tenant bootstrap mode
+
+knowless 1.1.9 closed a latent sender-config bug: `from` is documented as the bare RFC 5321 address (display name → `fromName`), but earlier versions never enforced it, so a display-format `from` (`terribic <auth@terribic.com>`) slipped through and corrupted the Message-ID domain and the SMTP envelope — it only delivered because nodemailer's parser is lenient. 1.1.9 now **rejects a non-bare `from` at boot**. plato's deploy guide had been recommending exactly that display format, so a deploy on knowless ≥1.1.9 would have crashed at startup. This release makes plato 1.1.9-native and clears the last two operator docs that still assumed a system `sqlite3` CLI.
+
+### Changed — `KNOWLESS_FROM` is the bare address; the display name comes from `branding.forumName`
+
+plato passed `KNOWLESS_FROM` straight through to knowless as `from`, and the deploy guide built it as `$FORUM_NAME <auth@$DOMAIN>` to get a friendly sender name. Under knowless ≥1.1.9 that throws at boot. plato now keeps `KNOWLESS_FROM` **bare** (`auth@$DOMAIN`) and derives the display name (`fromName`) from `branding.forumName` in `config.json` — the operator already sets the forum name there, so there's no second mail-name knob to drift, and the From: header still renders `terribic <auth@terribic.com>`. The knowless dependency is bumped to `^1.1.9`. Existing bare-address configs (including the default `.env.example`) are unaffected; only the display-format deploy recipe changed.
+
+### Fixed — operator console recipes no longer need the system `sqlite3` CLI
+
+The "run a co-mod election" and "inspect a sub's flag queue" recipes in `plato.context.md` shelled to the system `sqlite3` CLI — the same dependency 0.12.6 dropped, and one that can't open plato's `STRICT` schema on RHEL-family hosts (their CLI predates SQLite 3.37). Both recipes now use a `node:sqlite` one-liner — plato's own bundled engine — so they work on any distro with nothing extra installed. `build-plan.md`'s B3 milestone note (which still described the old `sqlite3 .backup`) now carries a supersession pointer to 0.12.6 rather than being rewritten — milestone logs record what shipped when.
+
+### Added — co-tenant deploy mode for `bootstrap.sh`
+
+`deploy/bootstrap.sh` was all-or-nothing: it always wrote its own `/etc/nginx/conf.d/plato.conf`, and its closing instructions pointed operators at the deploy-guide §5 mail step, which sets `inet_interfaces=loopback-only` and rewrites `mydestination`/`virtual_transport` — destructive on a box already serving another app's nginx vhost and inbound mail (exactly the situation when the reference instance was consolidated onto a shared box). Three flags make it additive: `--skip-nginx` (you bring your own vhost + cert), `--skip-mail` (you run mail additively — bootstrap stops probing postfix/opendkim and prints the additive-DKIM recipe instead of the §5 pointer), and `--co-tenant` (both). The always-safe shared steps — `plato` user, `/opt/plato`, systemd unit, cron, logrotate, runtime dirs — run regardless, and the closing summary adapts to the flags. A new deploy-guide appendix ("Co-tenant deploy") documents the full additive path: append a `KeyTable`/`SigningTable` line for your domain (never touch `opendkim.conf` or `main.cf`), add your nginx server block as its own file, and issue the cert additively.
+
+### Implementation
+- **`bin/server.js`** — passes `fromName: operatorConfig.branding?.forumName` into `createAuth`.
+- **`src/auth/index.js`** — documents the bare-`from` contract; `fromName` flows through to knowless.
+- **`package.json`** — `knowless` `^1.1.5` → `^1.1.9`.
+- **`deploy/bootstrap.sh`** — `--skip-nginx` / `--skip-mail` / `--co-tenant` flags; conditional nginx render, mail probe, and closing summary; `--help`.
+- **Docs** — `deploy-guide.md` (bare `KNOWLESS_FROM` + rationale; "Co-tenant deploy" appendix), `.env.example` (bare-address note), `plato.context.md` (node:sqlite recipes), `build-plan.md` (co-tenant entry → shipped; B3 supersession pointer).
+- **`test/integration/auth.test.js`** — asserts a bare `from` + `fromName` constructs, and a display-format `from` is rejected at boot.
 
 ### Fixed — backup cron now honors `BACKUP_DIR`
 

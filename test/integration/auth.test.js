@@ -41,6 +41,22 @@ test('createAuth: returns object with expected handler methods', () => {
   }
 });
 
+test('createAuth: accepts a bare KNOWLESS_FROM with a fromName display name', () => {
+  const auth = createAuth(fakeEnv(), { dbPath: ':memory:', fromName: 'terribic' });
+  try {
+    assert.equal(typeof auth.login, 'function');
+  } finally {
+    auth.close();
+  }
+});
+
+test('createAuth: rejects a display-format KNOWLESS_FROM at boot (knowless bare-address contract)', () => {
+  // knowless ≥1.1.9 fails fast when `from` carries a display name; plato
+  // must keep KNOWLESS_FROM bare and route the name through fromName.
+  const env = fakeEnv({ KNOWLESS_FROM: 'terribic <auth@test.local>' });
+  assert.throws(() => createAuth(env, { dbPath: ':memory:' }), /bare address/);
+});
+
 test('deriveHandle: deterministic per secret, 64-char hex', () => {
   const env = fakeEnv();
   const a = createAuth(env, { dbPath: ':memory:' });

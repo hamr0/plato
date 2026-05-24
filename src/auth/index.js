@@ -10,6 +10,9 @@ export function createAuth(env = process.env, overrides = {}) {
   const cfg = {
     secret: env.KNOWLESS_SECRET,
     baseUrl: env.KNOWLESS_BASE_URL,
+    // Must be a bare RFC 5321 address. knowless ≥1.1.9 rejects the
+    // display form (`Name <addr>`) at boot — the display name belongs in
+    // `fromName`, passed by the caller (bin/server.js, from branding.forumName).
     from: env.KNOWLESS_FROM,
     smtpHost: env.KNOWLESS_SMTP_HOST ?? 'localhost',
     smtpPort: Number(env.KNOWLESS_SMTP_PORT ?? 1025),
