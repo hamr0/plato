@@ -29,7 +29,9 @@ MAILTO=${ADMIN_EMAIL}
 15 5 * * *          root cd ${INSTALL_DIR} && sudo -u plato node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
 
 # Weekly Mon 06:00 UTC: stats digest email
-0 6 * * 1           root cd ${INSTALL_DIR} && sudo -u plato node bin/stats-weekly.js >> /var/log/plato-stats.log 2>&1
+# --env-file=.env so the digest can read KNOWLESS_BASE_URL for its From: domain
+# and label (else it falls back to the system hostname — wrong on a co-tenant box).
+0 6 * * 1           root cd ${INSTALL_DIR} && sudo -u plato node --env-file=.env bin/stats-weekly.js >> /var/log/plato-stats.log 2>&1
 
 # Quarterly: disposable-domains refresh
 0 6 1 1,4,7,10 *    root ${INSTALL_DIR}/scripts/cron-refresh-disposable.sh

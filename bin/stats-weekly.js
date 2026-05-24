@@ -32,6 +32,19 @@ function readConfig() {
   catch { return {}; }
 }
 
+// The forum's own domain, for the digest's From: header — taken from
+// KNOWLESS_BASE_URL (the cron passes --env-file). Falls back to the system
+// hostname so a deploy that doesn't load .env still produces a From, just an
+// unqualified one. Without this the From was `noreply@<system-hostname>`,
+// which on a co-tenant box is the box name, not the forum's domain.
+function forumDomain() {
+  const base = process.env.KNOWLESS_BASE_URL;
+  if (base) {
+    try { return new URL(base).hostname; } catch { /* malformed — fall back */ }
+  }
+  return hostname();
+}
+
 // ISO 8601 week-date (YYYY-Www). The "Thursday of the week" rule —
 // see https://en.wikipedia.org/wiki/ISO_week_date#Algorithms. The week
 // number's calendar year follows the Thursday, which is why a Dec 30
@@ -108,7 +121,7 @@ function renderBody(weeks) {
       : `${oldest.week} → ${newest.week}`;
   return [
     `plato weekly stats — ${span}`,
-    `host: ${hostname()}`,
+    `host: ${cfg.branding?.forumName ?? hostname()}`,
     `snapshots in log: ${weeks.length}`,
     '',
     renderTable(weeks),
@@ -123,7 +136,7 @@ function send(notify, subject, body) {
     proc.on('error', rejectP);
     proc.on('exit', code => code === 0 ? resolveP() : rejectP(new Error(`sendmail exit ${code}`)));
     proc.stdin.end([
-      `From: noreply@${hostname()}`,
+      `From: noreply@${forumDomain()}`,
       `To: ${notify}`,
       `Subject: ${subject}`,
       'Content-Type: text/plain; charset=utf-8',

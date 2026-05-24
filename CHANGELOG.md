@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
+## [Unreleased]
+
+### Fixed — weekly stats digest identifies the forum, not the box
+
+`bin/stats-weekly.js` labelled the digest with `os.hostname()` in two places: the `host:` body line and the `From: noreply@<host>` header. On a co-tenant box the system hostname is the *box* name (e.g. `gitdone`), not the forum — so the operator's digest read `host: gitdone` and came `From: noreply@gitdone` (not even a valid FQDN, and unsigned because it matches no opendkim `SigningTable` entry). Now the body uses `branding.forumName` from `config.json` (falls back to hostname) and the From uses the forum's own domain derived from `KNOWLESS_BASE_URL` (falls back to hostname). `deploy/plato.cron` passes `--env-file=.env` to the weekly job so `KNOWLESS_BASE_URL` is available. Deploy-tooling / ops-script only — the running server is untouched, so no version bump. (On an existing box, the cron file needs the `--env-file` added; `stats-weekly.js` is picked up at the next run.)
+
 ## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
 
 A code-review follow-up to 0.12.7. That release started passing `branding.forumName` to knowless as the mail display name (`fromName`), but knowless validates `fromName` at boot — ASCII only, ≤60 chars, no `"`/`<`/`>`/CR-LF — and **throws** on violation. `branding.forumName` is operator free text with no such constraints (and plato explicitly supports multilingual content), so a fork with a non-ASCII or over-long forum name — or one containing those characters — would have **crashed at startup** after upgrading. A cosmetic branding value should never be able to take the whole forum down.
