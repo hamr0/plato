@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Fixed — `config.json` is no longer tracked (privacy + clobber)
+
+`config.json` was committed to the repo, so a) the public mirror carried the reference instance's branding and operator email addresses, and b) the live box's copy was one `git pull` away from being silently deleted (when it matched the tracked version) or from aborting the deploy (when an operator had edited it). It's also box-authored by design — deploy-guide Step 8 writes a fresh one — so the tracked copy was pure contradiction (and stale: it was missing the required `branding.baseUrl`).
+
+`config.json` is now **gitignored**; the repo ships **`config.example.json`** as the shape reference. Every reader already tolerates its absence (`bin/server.js` `existsSync` guard, `bin/run-export-queue.js`/`bin/stats-weekly.js` try-catch, `bin/backup.sh` skips silently, `bin/preflight.sh` warns and falls back to defaults), so nothing breaks on a fresh clone. Deploy-tooling/docs only — the running server is untouched, no version bump.
+
+**One-time step on an existing box** (the tracked file must be replaced by an ignored one without losing the live config):
+
+```bash
+cd /opt/plato
+sudo -u plato -H cp config.json /tmp/config.json.bak   # save the live config
+sudo -u plato -H git pull --ff-only                    # removes the now-untracked file
+sudo -u plato -H cp /tmp/config.json.bak config.json   # restore it (now gitignored)
+```
+
+After this, `config.json` is local to the box forever — future pulls leave it alone.
+
 ### Fixed — operator emails identify the forum, not the box
 
 Both operator-mail cron scripts labelled themselves with `os.hostname()`, so on a co-tenant box they identified as the *box* (e.g. `gitdone`) rather than the forum, and sent `From: …@gitdone` — not a valid FQDN, and unsigned because it matches no opendkim `SigningTable` entry. Now each sends from, and identifies as, the forum's own domain:

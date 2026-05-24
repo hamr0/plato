@@ -594,6 +594,8 @@ sudo chmod 600 /opt/plato/.env
 
 ## Step 8 — Write `config.json`
 
+`config.json` is **instance-local and gitignored** — it never ships in the repo (the repo carries `config.example.json` as the shape reference). This keeps your branding/operator email out of any public mirror and means a `git pull` can never clobber it. You author it on the box (below) and edit it in place.
+
 `config.json` is the **forum-shape config** — what this instance *is*, as distinct from `.env` which holds secrets and process-level knobs. The split:
 
 | File | Mode | Contents | Why separate |
