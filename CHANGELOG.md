@@ -17,7 +17,7 @@ The upshot on a shared box: plato's weekly + alert mail come from `terribic.com`
 
 ### Documented
 
-- **`docs/04-process/migration-terribic-to-gitdone.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
+- **`docs/04-process/cotenant-migration-setup.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
 
 ## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
 
