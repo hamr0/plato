@@ -12,6 +12,9 @@
 #
 # Env:
 #   PLATO_URL            default http://localhost:8080
+#   DOMAIN               forum domain; when set, the alert is sent From
+#                        noreply@$DOMAIN and identifies as $DOMAIN (not the
+#                        box hostname). Unset → falls back to system default.
 #   BACKUP_DIR           default ./backups (where health.log lives)
 #   HEALTH_ALERT_EMAIL   if set, alert recipient. If unset, falls back to
 #                        config.json:operator.email (the same address every
@@ -68,6 +71,14 @@ fi
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 HOST=$(hostname)
 
+# Outward identity for the alert email: the forum's own domain (passed by cron
+# as DOMAIN) so the alert is *From* the forum, not the box — matters on a
+# co-tenant host where $(hostname) is the box, not the site. health.log and the
+# GitHub-issue diagnostic keep $HOST (the box) — that's the useful debug detail.
+FORUM="${DOMAIN:-$HOST}"
+FROM_ADDR=""
+[ -n "${DOMAIN:-}" ] && FROM_ADDR="noreply@$DOMAIN"
+
 # Try to extract failure detail from the /healthz JSON if we got one.
 REASON="http_status=$HTTP_STATUS"
 if [ -s "$BODY_FILE" ] && command -v node >/dev/null 2>&1; then
@@ -112,6 +123,7 @@ fi
 EMAIL_FILE=$(mktemp -t plato-health-email-XXXXXX)
 {
   echo "plato healthz check failed at $STAMP"
+  echo "forum:   $FORUM"
   echo "host:    $HOST"
   echo "url:     $PLATO_URL/healthz"
   echo "status:  $HTTP_STATUS"
@@ -156,12 +168,17 @@ EMAIL_FILE=$(mktemp -t plato-health-email-XXXXXX)
   echo '```'
 } > "$EMAIL_FILE"
 
-SUBJECT="[plato] healthz alert on $HOST: status=$HTTP_STATUS"
+SUBJECT="[plato] healthz alert on $FORUM: status=$HTTP_STATUS"
 
 if command -v mail >/dev/null 2>&1; then
-  mail -s "$SUBJECT" "$ALERT_EMAIL" < "$EMAIL_FILE"
+  if [ -n "$FROM_ADDR" ]; then
+    mail -s "$SUBJECT" -r "$FROM_ADDR" "$ALERT_EMAIL" < "$EMAIL_FILE"
+  else
+    mail -s "$SUBJECT" "$ALERT_EMAIL" < "$EMAIL_FILE"
+  fi
 elif command -v sendmail >/dev/null 2>&1; then
   {
+    [ -n "$FROM_ADDR" ] && echo "From: $FROM_ADDR"
     echo "To: $ALERT_EMAIL"
     echo "Subject: $SUBJECT"
     echo "Content-Type: text/plain; charset=utf-8"

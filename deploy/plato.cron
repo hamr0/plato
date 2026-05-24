@@ -46,4 +46,4 @@ MAILTO=${ADMIN_EMAIL}
 # PLATO_URL must point at plato's actual listen port; health-watch.sh
 # defaults to :8080, so on any deploy with a different PORT (e.g. a
 # co-tenant box) it must be passed here or every check 000s and alerts.
-*/5 * * * *         root cd ${INSTALL_DIR} && PLATO_URL=${PLATO_URL} BACKUP_DIR=${BACKUP_DIR} PLATO_LOG=/var/log/plato.log bin/health-watch.sh
+*/5 * * * *         root cd ${INSTALL_DIR} && DOMAIN=${DOMAIN} PLATO_URL=${PLATO_URL} BACKUP_DIR=${BACKUP_DIR} PLATO_LOG=/var/log/plato.log bin/health-watch.sh

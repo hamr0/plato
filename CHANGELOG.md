@@ -6,9 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-### Fixed — weekly stats digest identifies the forum, not the box
+### Fixed — operator emails identify the forum, not the box
 
-`bin/stats-weekly.js` labelled the digest with `os.hostname()` in two places: the `host:` body line and the `From: noreply@<host>` header. On a co-tenant box the system hostname is the *box* name (e.g. `gitdone`), not the forum — so the operator's digest read `host: gitdone` and came `From: noreply@gitdone` (not even a valid FQDN, and unsigned because it matches no opendkim `SigningTable` entry). Now the body uses `branding.forumName` from `config.json` (falls back to hostname) and the From uses the forum's own domain derived from `KNOWLESS_BASE_URL` (falls back to hostname). `deploy/plato.cron` passes `--env-file=.env` to the weekly job so `KNOWLESS_BASE_URL` is available. Deploy-tooling / ops-script only — the running server is untouched, so no version bump. (On an existing box, the cron file needs the `--env-file` added; `stats-weekly.js` is picked up at the next run.)
+Both operator-mail cron scripts labelled themselves with `os.hostname()`, so on a co-tenant box they identified as the *box* (e.g. `gitdone`) rather than the forum, and sent `From: …@gitdone` — not a valid FQDN, and unsigned because it matches no opendkim `SigningTable` entry. Now each sends from, and identifies as, the forum's own domain:
+
+- **`bin/stats-weekly.js`** (weekly digest) — `host:` body line uses `branding.forumName` from `config.json`; `From:` uses the domain from `KNOWLESS_BASE_URL`. `deploy/plato.cron` passes `--env-file=.env` so the var is available. Both fall back to the hostname when unset.
+- **`bin/health-watch.sh`** (down/health alerts) — when `DOMAIN` is set (now passed by the cron), the alert is `From: noreply@$DOMAIN`, the subject reads `…alert on <domain>`, and the body gains a `forum:` line; the local `health.log` and the GitHub-issue diagnostic keep the box `host:` (the useful debug detail). Falls back to the system default when `DOMAIN` is unset.
+
+The upshot on a shared box: plato's weekly + alert mail come from `terribic.com` (DKIM-signed), the neighbour's from its own domain. Deploy-tooling / ops-script only — the running server is untouched, so no version bump. (On an existing box the cron lines need `--env-file=.env` (weekly) and `DOMAIN=` (health-watch) added; the scripts are picked up at the next run.)
 
 ## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
 
