@@ -1,0 +1,13 @@
+{
+  "branding": {
+    "forumName": "your-forum-name",
+    "tagline": "",
+    "hostedBy": "@you",
+    "feedbackEmail": "you@example.com",
+    "baseUrl": "https://forum.example.com"
+  },
+  "operator": {
+    "email": "you@example.com",
+    "service": "plato"
+  }
+}
