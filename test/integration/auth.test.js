@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { createAuth } from '../../src/auth/index.js';
+import { createAuth, safeFromName } from '../../src/auth/index.js';
 
 function fakeEnv(overrides = {}) {
   return {
@@ -55,6 +55,32 @@ test('createAuth: rejects a display-format KNOWLESS_FROM at boot (knowless bare-
   // must keep KNOWLESS_FROM bare and route the name through fromName.
   const env = fakeEnv({ KNOWLESS_FROM: 'terribic <auth@test.local>' });
   assert.throws(() => createAuth(env, { dbPath: ':memory:' }), /bare address/);
+});
+
+test('createAuth: an unsafe forumName as fromName does not crash boot (falls back to bare)', () => {
+  // A non-ASCII branding.forumName would otherwise trip knowless's fromName
+  // validator and take the whole forum down — safeFromName must absorb it.
+  const auth = createAuth(fakeEnv(), { dbPath: ':memory:', fromName: '日本語フォーラム' });
+  try {
+    assert.equal(typeof auth.login, 'function');
+  } finally {
+    auth.close();
+  }
+});
+
+test('safeFromName: passes a clean ASCII name, drops anything knowless would reject', () => {
+  assert.equal(safeFromName('terribic'), 'terribic');
+  assert.equal(safeFromName('  terribic  '), 'terribic');     // trimmed
+  assert.equal(safeFromName('café'), undefined);              // non-ASCII
+  assert.equal(safeFromName('日本語'), undefined);              // non-ASCII
+  assert.equal(safeFromName('a'.repeat(61)), undefined);      // >60 chars
+  assert.equal(safeFromName('Bob "Best"'), undefined);        // double-quote
+  assert.equal(safeFromName('a<b>c'), undefined);             // angle brackets
+  assert.equal(safeFromName('line\nbreak'), undefined);       // CR/LF
+  assert.equal(safeFromName(''), undefined);                  // empty
+  assert.equal(safeFromName('   '), undefined);               // whitespace-only
+  assert.equal(safeFromName(undefined), undefined);
+  assert.equal(safeFromName(42), undefined);                  // non-string
 });
 
 test('deriveHandle: deterministic per secret, 64-char hex', () => {

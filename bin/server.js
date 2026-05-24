@@ -72,7 +72,8 @@ const auth = createAuth(process.env, {
   dbPath: KNOWLESS_DB_PATH,
   // knowless ≥1.1.9 wants the sender split: KNOWLESS_FROM is the bare address,
   // the friendly display name is the forum's own name. Single source of truth —
-  // no separate mail-name knob to drift from branding.
+  // no separate mail-name knob to drift from branding. createAuth sanitizes it
+  // to knowless's fromName contract (falls back to bare address if unsafe).
   fromName: operatorConfig.branding?.forumName,
   ...mailEvents,
 });

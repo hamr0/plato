@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
+## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
+
+A code-review follow-up to 0.12.7. That release started passing `branding.forumName` to knowless as the mail display name (`fromName`), but knowless validates `fromName` at boot — ASCII only, ≤60 chars, no `"`/`<`/`>`/CR-LF — and **throws** on violation. `branding.forumName` is operator free text with no such constraints (and plato explicitly supports multilingual content), so a fork with a non-ASCII or over-long forum name — or one containing those characters — would have **crashed at startup** after upgrading. A cosmetic branding value should never be able to take the whole forum down.
+
+### Fixed — an unsafe `branding.forumName` no longer crashes boot
+
+`createAuth` now runs `fromName` through a new `safeFromName()` helper that enforces knowless's contract and **reduces an unsafe value to `undefined`** — so mail simply sends from the bare address (no display name) instead of refusing to boot. Graceful degradation, consistent with plato's "every path still works" posture. This also adds a second layer of mail-header-injection defense (CR/LF and `<>"` are stripped before the value ever reaches the mailer, on top of knowless's own rejection). Safe ASCII names (the common case, e.g. `terribic`) are unchanged.
+
+### Implementation
+- **`src/auth/index.js`** — exported `safeFromName()` (trim; reject non-string, empty, >60 chars, non-printable-ASCII, `"`/`<`/`>`); `createAuth` destructures `fromName` from overrides and sanitizes it into the knowless config.
+- **`bin/server.js`** — comment note that `createAuth` sanitizes the forwarded `forumName`.
+- **`test/integration/auth.test.js`** — `safeFromName` unit table (clean name passes; non-ASCII / long / quoted / bracketed / CR-LF / empty / non-string all drop to `undefined`) + a `createAuth` boot test with a non-ASCII `fromName`.
+
 ## [0.12.7] - 2026-05-24 — knowless 1.1.9 bare-`from` compatibility, node:sqlite operator recipes, co-tenant bootstrap mode
 
 knowless 1.1.9 closed a latent sender-config bug: `from` is documented as the bare RFC 5321 address (display name → `fromName`), but earlier versions never enforced it, so a display-format `from` (`terribic <auth@terribic.com>`) slipped through and corrupted the Message-ID domain and the SMTP envelope — it only delivered because nodemailer's parser is lenient. 1.1.9 now **rejects a non-bare `from` at boot**. plato's deploy guide had been recommending exactly that display format, so a deploy on knowless ≥1.1.9 would have crashed at startup. This release makes plato 1.1.9-native and clears the last two operator docs that still assumed a system `sqlite3` CLI.
