@@ -53,7 +53,7 @@ The modern web has trained us to accept that what you see isn't what you get —
   No algorithm decides what you see — there isn't one to game.
 
 - **Runs on a $20/year VPS.** One Node process, one SQLite file, one HTTP port. No build step, no frontend framework, no clustering.
-  Tested on RackNerd (~$20/year KVM, port 25 + PTR via support ticket); Hetzner / OVH / Linode / Vultr also work. Backup = `sqlite3 .backup` + `tar`; healthcheck = `curl /healthz`. Apache 2.0, fork without asking.
+  Tested on RackNerd (~$20/year KVM, port 25 + PTR via support ticket); Hetzner / OVH / Linode / Vultr also work. Backup = bundled `node:sqlite` snapshot + `tar` (no system `sqlite3` needed); healthcheck = `curl /healthz`. Apache 2.0, fork without asking.
 
 ---
 
@@ -96,7 +96,7 @@ Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.disc
 - **Mail**: dev → [Mailpit](https://github.com/axllent/mailpit) on port 1025; prod → see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 - **Spam knobs**: tighten via `config.json` (rate limits, link cap, regex patterns, URLhaus). Floors are PRD-locked — operators tighten, never loosen.
 - **Per-sub settings**: owner sets auto-uncollapse thresholds at `/sub/create`. Spam knobs are forum-wide on purpose.
-- **Cron jobs**: hourly URLhaus refresh, daily full-state backup (7-day retention), daily stats snapshot, weekly stats digest by email, quarterly disposable-domains refresh — all autoconfig from `config.json` `operator.{email,service}`. See [cron-jobs.md](docs/02-features/cron-jobs.md).
+- **Cron jobs**: hourly URLhaus refresh, daily full-state backup (both DBs via bundled `node:sqlite`, newest 7 kept), daily stats snapshot, weekly stats digest by email, quarterly disposable-domains refresh — all autoconfig from `config.json` `operator.{email,service}`. See [cron-jobs.md](docs/02-features/cron-jobs.md).
 - **Privacy-led discoverability**: declarative head tags (description, canonical, OpenGraph, Twitter card), `/robots.txt`, `/sitemap.xml`. No analytics, no tracking pixels, no third-party JS, no cookie banner. The audit checklist for keeping it that way is in [privacy-seo.md](docs/04-process/privacy-seo.md).
 
 ---

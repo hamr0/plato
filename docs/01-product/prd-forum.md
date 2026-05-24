@@ -570,7 +570,7 @@ Postfix on localhost for magic-link delivery. `transport_maps` configured per kn
 ### POC success criteria
 
 - All five validation points above pass.
-- DB schema has no plaintext email column. (`sqlite3 forum.db .schema | grep -i email` returns empty.)
+- DB schema has no plaintext email column. (`sqlite3 forum.db .schema | grep -i email` returns empty — `sqlite3` is an optional inspection tool here, not a plato dependency; the app and backups use bundled `node:sqlite`.)
 - Total code: under ~500 lines forum-app (excluding html templates). If it's bigger, scope crept.
 - Time-to-build: 1-2 weekends. If longer, the architecture is wrong, not the implementation.
 
@@ -582,7 +582,7 @@ When the POC works end-to-end and all five points are green: stop. Do not iterat
 
 ## Locked Decisions (POC scope)
 
-1. **Backend: Node.js.** Single-language stack with knowless. `node:sqlite`, `node:http`, `node:fs` cover the POC; `marked` (one dep) for markdown rendering. No framework — vanilla `node:http` per AGENT_RULES "vanilla over frameworks."
+1. **Backend: Node.js.** Single-language stack with knowless. `node:sqlite`, `node:http`, `node:fs` cover the POC; `marked` (one dep) for markdown rendering. No framework — vanilla `node:http` per AGENT_RULES "vanilla over frameworks." `node:sqlite` also drives backups (`VACUUM INTO`), so plato carries **no** system `sqlite3` CLI dependency — same engine for app, migrations, and snapshots.
 2. **Disposable-domain check: included in POC.** ~30 lines, proves the forum-side identity-policy seam at the cheapest moment.
 3. **Pseudonym word list: `unique-names-generator`.** Zero curation cost for POC. Phase 2 curates our own list for brand voice.
 4. **Identicon library: `dicebear` (`bottts` or `shapes` style).** Matches "funny avatars" PRD intent. Server-rendered, deterministic from handle.

@@ -51,12 +51,8 @@ if command -v node >/dev/null 2>&1; then
 else
   fail "node not on PATH"
 fi
-
-if command -v sqlite3 >/dev/null 2>&1; then
-  ok "sqlite3 $(sqlite3 --version | awk '{print $1}')"
-else
-  warn "sqlite3 not on PATH (plato uses node:sqlite, but the CLI is needed for backup.sh)"
-fi
+# No sqlite3 CLI check: plato uses Node's bundled node:sqlite for both the
+# app and backups (bin/backup.sh), so the system CLI is not a dependency.
 
 echo
 echo "mail:"

@@ -192,9 +192,11 @@ echo "postfix postfix/mailname string $DOMAIN"               | debconf-set-selec
 
 apt -y install \
   nginx certbot python3-certbot-nginx \
-  sqlite3 git jq tar ufw \
+  git jq tar ufw \
   postfix opendkim opendkim-tools \
   vim curl ca-certificates gnupg
+# (no sqlite3 package: plato reads/writes its DBs and takes backups via
+#  Node's bundled node:sqlite — one fewer system dependency.)
 
 # Node 22 from NodeSource (Ubuntu's apt repo lags by 1–2 majors)
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -239,8 +241,7 @@ node --version    # need ≥ 22.5
 **Sanity (any distro):**
 
 ```bash
-node --version            # v22.5+ required (--env-file flag)
-sqlite3 --version         # any 3.x
+node --version            # v22.5+ required (--env-file flag; bundled node:sqlite)
 which sendmail            # → /usr/sbin/sendmail
 ls -l /usr/sbin/sendmail  # should resolve to postfix's sendmail
 postconf mail_version     # postfix version
@@ -1017,11 +1018,11 @@ If you skipped a major version, read `CHANGELOG.md` between the two tags first �
 
 ### Backups, in plain English
 
-`bin/backup.sh` writes one `plato-backup-<date>.tar.gz` per night to `/var/lib/plato-backups/`, keeping the newest 7 (default `BACKUP_KEEP=7`). It uses SQLite's online `.backup` API so you don't have to stop the server. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `exports/`, `config.json`, `spam-patterns.txt`, `data/urlhaus.txt`, `disposable-domains.txt`.
+`bin/backup.sh` writes one `plato-backup-<timestamp>.tar.gz` per night to `/var/lib/plato-backups/`, keeping the newest 7 (default `BACKUP_KEEP=7`). It snapshots both databases with plato's bundled `node:sqlite` (`VACUUM INTO`) — online, so you don't stop the server, and with no dependency on a system `sqlite3` CLI. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `config.json`, `spam-patterns.txt`. (Regenerable caches — `exports/`, `data/urlhaus.txt`, `disposable-domains.txt` — are intentionally left out.)
 
 To rotate copies off the host, edit the commented `rsync` stanza at the bottom of `bin/backup.sh` to point at your laptop or an offsite machine. We don't bake key management into plato.
 
-To restore: stop the server, untar, copy `forum.db` + `posts/` over the live ones, restart. **The `KNOWLESS_SECRET` in your restored `.env` must match the value at the time of backup** — otherwise every user's identity hash shifts and they look like new accounts.
+To restore: stop the server, untar, copy `forum.db` + `knowless.db` + `posts/` over the live ones, restart. **The `KNOWLESS_SECRET` in your restored `.env` must match the value at the time of backup** — otherwise every user's identity hash shifts and they look like new accounts.
 
 ---
 

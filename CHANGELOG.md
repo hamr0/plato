@@ -6,7 +6,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.5 fixes land here before the next bump)
+(no entries yet — next: any post-0.12.6 fixes land here before the next bump)
+
+## [0.12.6] - 2026-05-24 — one canonical backup script: both DBs, bundled node:sqlite, no system sqlite3
+
+plato's nightly backup had two latent holes, both surfaced while consolidating the reference instance onto a RHEL-family host (AlmaLinux 8). `bin/backup.sh` shelled out to the system `sqlite3` CLI — but plato's schema is `STRICT` (needs SQLite ≥ 3.37) and RHEL-family distros ship an older CLI, so the nightly backup **silently failed on every RHEL deploy** (it only ever worked on the Ubuntu 24.04 box the deploy guide was validated against, sqlite 3.45). And the wired script only captured `forum.db`, never `knowless.db` — so even where it ran, a restore brought back posts but **zero accounts**. The repo also carried two backup scripts that disagreed: `bin/backup.sh` (wired into `deploy/plato.cron`, `forum.db` only) and `scripts/cron-backup-db.sh` (described by every doc, wired into nothing).
+
+This release consolidates to one canonical `bin/backup.sh` that snapshots **both** databases with plato's own bundled `node:sqlite` (`VACUUM INTO`) — the same engine the app already runs on, so it works on any distro and drops the `sqlite3` system dependency entirely. The duplicate script is deleted, and the docs now describe what actually runs.
+
+### Fixed — backups work on every distro and now include the identity database
+
+`bin/backup.sh` shelled out to the system `sqlite3` CLI for its database snapshot. plato's schema is `STRICT` (needs SQLite ≥ 3.37), but RHEL-family distros ship an older CLI (AlmaLinux 8 = 3.26, AlmaLinux 9 / RHEL 9 = 3.34.1), so the nightly backup **silently failed on every RHEL-family deploy** — it only worked on the Ubuntu 24.04 box the deploy guide was validated against (sqlite 3.45). Separately, the wired `bin/backup.sh` only snapshotted `forum.db`, so `knowless.db` — the identity store (every registered user, their pseudonym handles, sessions) — was **never in the backup**: a restore would bring back all posts but zero accounts.
+
+Both fixed. The snapshot now uses plato's bundled `node:sqlite` (`VACUUM INTO`, via the new `bin/db-snapshot.mjs`) — the same engine the app runs on, so it works on any distro regardless of the system CLI — and `bin/backup.sh` snapshots **both** `forum.db` and `knowless.db`. A regression test (`test/integration/backup.test.js`) builds STRICT-schema databases, runs the script, and asserts both restore with matching row counts and clean integrity.
+
+### Changed — one canonical backup script; dropped the system `sqlite3` dependency
+
+There were two backup scripts that disagreed: `bin/backup.sh` (wired into `deploy/plato.cron`, `forum.db` only) and `scripts/cron-backup-db.sh` (described by every doc, wired into nothing, both DBs + atomic write). Consolidated onto **`bin/backup.sh`** as the single canonical backup and **deleted `scripts/cron-backup-db.sh`**. The survivor keeps the better-of-both behavior: both databases, atomic `.tmp`→`mv` write (rotation can't pick a half-written archive), and staging inside `$BACKUP_DIR` rather than `/tmp` (a growing `knowless.db` can't exhaust a small VPS's tmpfs). Regenerable caches (`exports/`, `data/urlhaus.txt`, `disposable-domains.txt`) are no longer archived; failure is a non-zero exit surfaced by the cron `MAILTO` (the bespoke `sendmail` path is gone).
+
+With nothing shelling to `sqlite3` anymore, the deploy guide no longer installs the `sqlite3` package and `bin/preflight.sh` drops its `sqlite3` check — one fewer system dependency, true to the single-binary design.
+
+### Implementation
+- **`bin/db-snapshot.mjs`** (new) — ~12-line `node:sqlite` `VACUUM INTO <src> <dest>` helper. WAL-safe; emits a single checkpointed file (no `-wal`/`-shm`).
+- **`bin/backup.sh`** — rewritten: both DBs via the helper, atomic write, off-`/tmp` staging; count-based retention unchanged (`BACKUP_KEEP`, default 7).
+- **`scripts/cron-backup-db.sh`** — deleted.
+- **`bin/preflight.sh`** — sqlite3 check removed.
+- **Docs** — `cron-jobs.md`, `operator-guide.md`, `plato.context.md`, `deploy-guide.md` now reference `bin/backup.sh` and drop the `sqlite3` install step.
+- **`test/integration/backup.test.js`** (new) — STRICT-schema round-trip + fresh-install (no `knowless.db`) cases.
 
 ## [0.12.5] - 2026-05-23 — SSRF guard on the sub-import fetch + baseline response-hardening headers
 

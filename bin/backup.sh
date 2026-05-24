@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # Local snapshot of a plato instance. Designed to run from cron.
 #
-# What it captures:
-#   - forum.db        via `sqlite3 .backup` (online, lock-safe — does NOT
-#                     require the server to be stopped; SQLite's online
-#                     backup API copies pages while writers continue)
+# Captures the state that cannot be regenerated:
+#   - forum.db        the forum: posts, comments, votes, subs, drafts, modlog
+#   - knowless.db     the auth/identity store: registered users, sessions
 #   - posts/          markdown source-of-truth for posts
-#   - exports/        in-flight + recent archive downloads (tokens TTL'd)
 #   - config.json     operator config
 #   - spam-patterns.txt
-#   - data/urlhaus.txt
-#   - disposable-domains.txt
+#
+# Both databases are snapshotted with plato's bundled node:sqlite
+# (bin/db-snapshot.mjs — VACUUM INTO): online and lock-safe (no server stop),
+# and with no dependency on a system `sqlite3` CLI, which on RHEL-family
+# distros is too old to open the STRICT schema. Regenerable caches
+# (exports/, data/urlhaus.txt, disposable-domains.txt) are intentionally
+# left out — they rebuild themselves.
 #
 # Output: $BACKUP_DIR/plato-backup-YYYY-MM-DD-HHMMSS.tar.gz
 # Rotation: keeps the newest $BACKUP_KEEP archives, deletes the rest.
@@ -19,7 +22,7 @@
 #   1. install plato (npm ci) and run `npm run migrate`
 #   2. stop the server
 #   3. tar -xzf plato-backup-*.tar.gz -C /opt/plato/restore
-#   4. cp restore/forum.db /opt/plato/forum.db
+#   4. cp restore/forum.db restore/knowless.db /opt/plato/
 #   5. cp -r restore/posts /opt/plato/
 #   6. (optional) cp restore/config.json restore/spam-patterns.txt …
 #   7. ensure KNOWLESS_SECRET matches the original deploy (otherwise all
@@ -36,49 +39,43 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
 DB_PATH="${DB_PATH:-$ROOT/forum.db}"
+KNOWLESS_DB_PATH="${KNOWLESS_DB_PATH:-$ROOT/knowless.db}"
 POSTS_DIR="${POSTS_DIR:-$ROOT/posts}"
-EXPORTS_DIR="${EXPORTS_DIR:-$ROOT/exports}"
 CONFIG_PATH="${PLATO_CONFIG:-$ROOT/config.json}"
 SPAM_PATTERNS_PATH="${PLATO_SPAM_PATTERNS:-$ROOT/spam-patterns.txt}"
-URLHAUS_CACHE_PATH="${PLATO_URLHAUS_CACHE:-$ROOT/data/urlhaus.txt}"
-DISPOSABLE_PATH="$ROOT/disposable-domains.txt"
 
 BACKUP_DIR="${BACKUP_DIR:-$ROOT/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-7}"
 
-if ! command -v sqlite3 >/dev/null 2>&1; then
-  echo "backup.sh: sqlite3 CLI not found on PATH (apt install sqlite3)" >&2
-  exit 1
-fi
-
 if [ ! -f "$DB_PATH" ]; then
-  echo "backup.sh: DB not found at $DB_PATH" >&2
+  echo "backup.sh: forum DB not found at $DB_PATH" >&2
   exit 1
 fi
 
 mkdir -p "$BACKUP_DIR"
 
 STAMP=$(date +%Y-%m-%d-%H%M%S)
-WORK=$(mktemp -d -t plato-backup-XXXXXX)
+# Stage inside BACKUP_DIR, not /tmp: on a small VPS /tmp is often tmpfs and
+# a growing knowless.db could exhaust RAM mid-snapshot.
+WORK=$(mktemp -d -p "$BACKUP_DIR" .tmp-snapshot-XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
 
-# 1. atomic SQLite snapshot. Uses the online-backup API, so concurrent
-#    writers don't corrupt the copy and the server doesn't need to stop.
-sqlite3 "$DB_PATH" ".backup '$WORK/forum.db'"
+# 1. online, lock-safe snapshots of both databases via bundled node:sqlite.
+#    knowless.db may be absent on a fresh install — skip it if so.
+NODE_NO_WARNINGS=1 node "$ROOT/bin/db-snapshot.mjs" "$DB_PATH" "$WORK/forum.db"
+[ -f "$KNOWLESS_DB_PATH" ] && NODE_NO_WARNINGS=1 node "$ROOT/bin/db-snapshot.mjs" "$KNOWLESS_DB_PATH" "$WORK/knowless.db"
 
-# 2. stage the auxiliary files that exist. Missing files are skipped
-#    silently (fresh installs may not have config.json yet, urlhaus may
-#    not have refreshed, exports/ may be empty).
-[ -d "$POSTS_DIR" ]            && cp -r "$POSTS_DIR"            "$WORK/posts"
-[ -d "$EXPORTS_DIR" ]          && cp -r "$EXPORTS_DIR"          "$WORK/exports"
-[ -f "$CONFIG_PATH" ]          && cp    "$CONFIG_PATH"          "$WORK/config.json"
-[ -f "$SPAM_PATTERNS_PATH" ]   && cp    "$SPAM_PATTERNS_PATH"   "$WORK/spam-patterns.txt"
-[ -f "$URLHAUS_CACHE_PATH" ]   && { mkdir -p "$WORK/data"; cp "$URLHAUS_CACHE_PATH" "$WORK/data/urlhaus.txt"; }
-[ -f "$DISPOSABLE_PATH" ]      && cp    "$DISPOSABLE_PATH"      "$WORK/disposable-domains.txt"
+# 2. stage the source-of-truth + operator files that exist. Missing files
+#    are skipped silently (a fresh install may not have config.json yet).
+[ -d "$POSTS_DIR" ]          && cp -r "$POSTS_DIR"          "$WORK/posts"
+[ -f "$CONFIG_PATH" ]        && cp    "$CONFIG_PATH"        "$WORK/config.json"
+[ -f "$SPAM_PATTERNS_PATH" ] && cp    "$SPAM_PATTERNS_PATH" "$WORK/spam-patterns.txt"
 
-# 3. tar.gz the whole staging dir into the backup archive.
+# 3. tar to a .tmp sibling, then rename atomically — a failed tar never
+#    appears under the canonical name, so rotation can't pick a corrupt file.
 ARCHIVE="$BACKUP_DIR/plato-backup-$STAMP.tar.gz"
-tar -czf "$ARCHIVE" -C "$WORK" .
+tar -czf "$ARCHIVE.tmp" -C "$WORK" .
+mv "$ARCHIVE.tmp" "$ARCHIVE"
 
 echo "backup.sh: wrote $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 
