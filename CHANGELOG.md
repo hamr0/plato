@@ -6,7 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-(no entries yet — next: any post-0.12.6 fixes land here before the next bump)
+### Fixed — backup cron now honors `BACKUP_DIR`
+
+`deploy/plato.cron`'s backup line set `BACKUP_DIR=… sudo -u plato bin/backup.sh`, but `sudo` strips the environment by default, so `bin/backup.sh` never saw `BACKUP_DIR` and silently fell back to its `./backups` default instead of the operator's configured (and documented `/var/lib/plato-backups`) location. Fixed by setting the variable *inside* the sudo target — `sudo -u plato env BACKUP_DIR=… bin/backup.sh` — which survives regardless of sudoers env policy. Deploy-tooling only; no app/version change. (The other cron jobs that need env vars run as root without `sudo`, so they were never affected.)
 
 ## [0.12.6] - 2026-05-24 — one canonical backup script: both DBs, bundled node:sqlite, no system sqlite3
 

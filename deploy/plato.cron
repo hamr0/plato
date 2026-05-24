@@ -13,8 +13,11 @@ MAILTO=${ADMIN_EMAIL}
 # Hourly: URLhaus malicious-URL feed
 0 * * * *           root cd ${INSTALL_DIR} && sudo -u plato node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
 
-# Daily 03:30 UTC: backup tarball, 7-day retention (BACKUP_KEEP env override)
-30 3 * * *          root cd ${INSTALL_DIR} && BACKUP_DIR=${BACKUP_DIR} sudo -u plato bin/backup.sh >> /var/log/plato-backup.log 2>&1
+# Daily 03:30 UTC: backup tarball, 7 newest kept (BACKUP_KEEP env override).
+# BACKUP_DIR is set via `env` INSIDE the sudo target — a plain `VAR=… sudo`
+# prefix is stripped by sudo, so backup.sh would otherwise fall back to its
+# default ./backups instead of $BACKUP_DIR.
+30 3 * * *          root cd ${INSTALL_DIR} && sudo -u plato env BACKUP_DIR=${BACKUP_DIR} bin/backup.sh >> /var/log/plato-backup.log 2>&1
 
 # Daily 04:15 UTC: TLS cert expiry check. Silent ≥14 days, daily email <14 days, URGENT subject <3 days.
 15 4 * * *          root cd ${INSTALL_DIR} && DOMAIN=${DOMAIN} BACKUP_DIR=${BACKUP_DIR} bin/check-cert.sh >> /var/log/plato-cert.log 2>&1
