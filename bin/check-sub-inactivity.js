@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-// Daily inactivity sweep — see PRD §Sub Lifecycle.
+// Daily maintenance sweep — see PRD §Sub Lifecycle.
+//
+// Two independent daily housekeeping passes share this slot:
+//   1. Sub inactivity sweep (below).
+//   2. Expired-draft prune — drops drafts older than DRAFT_RETENTION_MS
+//      (24h). Drafts only exist to carry a post across the 15-min magic-
+//      link round-trip; past that they're dead weight (see pruneOldDrafts).
 //
 // Walks every active sub and auto-disables any whose mods (owner + co-
 // mods) have been silent for >30 days, measured as the latest of: any
@@ -22,6 +28,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db/index.js';
 import { runInactivitySweep, lastModActivity, SUB_INACTIVITY_THRESHOLD_MS } from '../src/content/mod.js';
+import { pruneOldDrafts, DRAFT_RETENTION_MS } from '../src/content/post.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -49,6 +56,9 @@ try {
         console.log(`  - //${w.name} (last mod activity: ${new Date(w.last).toISOString()})`);
       }
     }
+    const stale = db.prepare('SELECT COUNT(*) AS n FROM drafts WHERE created_at < ?')
+      .get(now - DRAFT_RETENTION_MS).n;
+    console.log(`draft prune (dry-run): would drop ${stale} expired draft(s)`);
   } else {
     const disabled = runInactivitySweep(db, { now });
     if (disabled.length === 0) {
@@ -57,6 +67,8 @@ try {
       console.log(`[${new Date(now).toISOString()}] inactivity sweep: ${disabled.length} sub(s) → read-only:`);
       for (const name of disabled) console.log(`  - //${name}`);
     }
+    const pruned = pruneOldDrafts(db, now);
+    console.log(`[${new Date(now).toISOString()}] draft prune: ${pruned} expired draft(s) dropped`);
   }
 } finally {
   db.close();

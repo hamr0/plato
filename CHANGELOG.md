@@ -37,6 +37,16 @@ The upshot on a shared box: plato's weekly + alert mail come from `terribic.com`
 
 - **`docs/04-process/cotenant-migration-setup.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
 
+## [0.12.10] - 2026-05-25 — daily prune of expired drafts
+
+### Added — drafts no longer accumulate forever
+
+The `drafts` table is the holding pen for the magic-link publish round-trip, not a user-facing feature — a draft only needs to live for the 15-minute link TTL. But nothing ever deleted them: orphaned drafts (never clicked, blocked at the finalize gate, or clicked after expiry) and finalized rows (kept only for re-click idempotency, which can't fire once the link dies) both accumulated forever. A migration audit surfaced a pile of stale rows sitting in the table.
+
+New `pruneOldDrafts(db, now, retentionMs)` in `src/content/post.js` (`DRAFT_RETENTION_MS = 24h`, ~100× the TTL so it can never race an in-flight publish) deletes every draft past the window — orphaned or finalized; the published posts the finalized ones became are untouched. The `DELETE` is index-backed (`idx_drafts_created_at`) and nothing has a foreign key into `drafts`, so it can't orphan anything.
+
+Wired into the existing daily `bin/check-sub-inactivity.js` sweep (05:15 UTC) rather than a new cron line — same cadence, same privilege, same log; the script's header is generalized to "daily maintenance sweep." `--dry-run` reports the count without deleting. The plato **server runtime is unchanged** — only a cron script and a content helper — so the deploy is a `git pull` with no restart; the prune takes effect at the next sweep (`docs/02-features/cron-jobs.md` updated).
+
 ## [0.12.9] - 2026-05-25 — post bodies wrap long no-space tokens instead of scrolling sideways
 
 ### Fixed — unbreakable tokens in user prose no longer force horizontal scroll

@@ -167,6 +167,19 @@ export function finalizeDraft(db, { draftId, handle, postsDir }) {
   return { postId, subName: draft.sub_name, alreadyFinalized: false };
 }
 
+// Drafts are the holding pen for the magic-link publish round-trip, not a
+// user-facing feature — the link TTL is 15 min, so any draft older than
+// that is unrecoverable. Orphaned ones (never clicked / blocked at the
+// finalize gate / link expired) and finalized ones alike: the latter's
+// re-click idempotency guard is moot once the link dies. 24h is ~100x the
+// TTL, so this can never race an in-flight publish. Swept daily by
+// bin/check-sub-inactivity.js so the table doesn't grow without bound.
+export const DRAFT_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+export function pruneOldDrafts(db, now = Date.now(), retentionMs = DRAFT_RETENTION_MS) {
+  return db.prepare('DELETE FROM drafts WHERE created_at < ?').run(now - retentionMs).changes;
+}
+
 export function getPost(db, postId, postsDir) {
   const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId);
   if (!post) return null;

@@ -27,7 +27,7 @@ Mail uses `/usr/sbin/sendmail -t` — same binary that magic-link mail flows thr
 | Daily @ 04:35 UTC | `bin/stats.js` | Appends one JSON line to `data/stats.log` with `{snapshot_at, users, subs, posts, comments}`. Append-only — never rewrites. `--dry-run` prints to stdout. |
 | Weekly Mon @ 06:00 UTC | `bin/stats-weekly.js` | Reads `data/stats.log`, groups by ISO week, keeps the latest snapshot per week, takes the most recent 4 weeks, renders a fixed-width table with WoW deltas, mails to `operator.email`. `--dry-run` prints to stdout. |
 | Quarterly, Jan/Apr/Jul/Oct 1st @ 06:00 UTC | `scripts/cron-refresh-disposable.sh` | Refreshes `disposable-domains.txt` from upstream (~5400 domains, MIT), restarts the service if the snapshot changed, mails the operator. |
-| Daily @ 05:15 UTC | `bin/check-sub-inactivity.js` | Walks every active sub; auto-disables any whose mods (owner + co-mods) have been silent for >30 days. Synthesizes a public modlog row (`action=auto_disable_inactivity`, `mod_handle=SYSTEM_HANDLE`). Subs with zero mods are skipped. `--dry-run` lists what would be disabled without writing. |
+| Daily @ 05:15 UTC | `bin/check-sub-inactivity.js` | Two daily housekeeping passes. (1) Walks every active sub; auto-disables any whose mods (owner + co-mods) have been silent for >30 days. Synthesizes a public modlog row (`action=auto_disable_inactivity`, `mod_handle=SYSTEM_HANDLE`). Subs with zero mods are skipped. (2) Prunes drafts older than 24h (`pruneOldDrafts`) — drafts only carry a post across the 15-min magic-link round-trip, so older rows (orphaned or finalized) are dead weight; the published posts they became are untouched. `--dry-run` lists what would be disabled / pruned without writing. |
 
 ### Counter definitions
 

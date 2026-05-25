@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { openDb } from '../../src/db/index.js';
 import {
   submitDraft, finalizeDraft, getPost, listRecentPosts, TITLE_MAX, BODY_MAX,
+  pruneOldDrafts, DRAFT_RETENTION_MS,
 } from '../../src/content/post.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 
@@ -56,6 +57,35 @@ test('submitDraft: custom subName overrides default', () => {
   const { draftId } = submitDraft(db, { title: 't', body: 'b', subName: 'cooking' });
   const row = db.prepare('SELECT sub_name FROM drafts WHERE id = ?').get(draftId);
   assert.equal(row.sub_name, 'cooking');
+});
+
+test('pruneOldDrafts: drops all drafts past retention (orphaned + finalized), keeps fresh', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  const now = Date.now();
+
+  const { draftId: orphan } = submitDraft(db, { title: 'orphan', body: 'b', subName: 'test' });
+  const { draftId: done } = submitDraft(db, { title: 'done', body: 'b', subName: 'test' });
+  finalizeDraft(db, { draftId: done, handle: HANDLE, postsDir });
+  const { draftId: fresh } = submitDraft(db, { title: 'fresh', body: 'b', subName: 'test' });
+
+  db.prepare('UPDATE drafts SET created_at = ? WHERE id IN (?, ?)')
+    .run(now - DRAFT_RETENTION_MS - 1000, orphan, done);
+
+  const dropped = pruneOldDrafts(db, now);
+  assert.equal(dropped, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 1);
+  assert.ok(db.prepare('SELECT id FROM drafts WHERE id = ?').get(fresh));
+  // Pruning a finalized draft must not touch its published post.
+  assert.ok(listRecentPosts(db).some((p) => p.title === 'done'));
+});
+
+test('pruneOldDrafts: no-op when nothing is past retention', () => {
+  const db = freshDb();
+  submitDraft(db, { title: 't', body: 'b', subName: 'test' });
+  assert.equal(pruneOldDrafts(db, Date.now()), 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 1);
 });
 
 test('finalizeDraft: creates post, writes file, marks draft finalized', (t) => {
