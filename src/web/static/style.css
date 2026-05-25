@@ -805,6 +805,13 @@ button:hover { filter: brightness(1.1); }
    each paragraph rendered in its own direction. UI chrome stays LTR. */
 article > *, .comment-body > *, .preview > *, .sub-sticky-note > * { unicode-bidi: plaintext; }
 
+/* Long unbreakable tokens in user prose (a no-space spam string, a bare
+ * URL, a hash) would otherwise push the body past its grid track and
+ * scroll the whole row sideways — same hazard the title rule above
+ * tames. `anywhere` also lets the body shrink below its intrinsic width
+ * inside the `auto minmax(0,1fr)` post grid. */
+article, .comment-body, .preview, .sub-sticky-note { overflow-wrap: anywhere; }
+
 .preview {
   margin-top: 0.5rem;
   color: var(--text);

@@ -37,6 +37,22 @@ The upshot on a shared box: plato's weekly + alert mail come from `terribic.com`
 
 - **`docs/04-process/cotenant-migration-setup.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
 
+## [0.12.9] - 2026-05-25 — post bodies wrap long no-space tokens instead of scrolling sideways
+
+### Fixed — unbreakable tokens in user prose no longer force horizontal scroll
+
+A post (or comment) whose body was one long token with no spaces — e.g. a `testfgfgfdg…fff` spam string, a bare URL, or a hash — was treated as a single unbreakable "word." It overran the `auto minmax(0,1fr)` post grid track and scrolled the whole feed row sideways. The **title** already had the guard (`.post-title-line h1 { overflow-wrap: anywhere }`); the **prose containers never did**.
+
+This directly violated the PRD's posts contract: *"content never forces horizontal scroll, even when … a single long unbroken token with no spaces."* The fix restores that contract.
+
+One CSS rule in `src/web/static/style.css`, on the user-content prose containers (`.preview`, `article`, `.comment-body`, `.sub-sticky-note`):
+
+```css
+article, .comment-body, .preview, .sub-sticky-note { overflow-wrap: anywhere; }
+```
+
+`overflow-wrap: anywhere` (matching the title) breaks a word only when it would otherwise overflow, and lets the body shrink below its intrinsic width inside the grid. Normal prose is untouched; covers the feed preview, the full post view, comments, and sub sticky-notes. PRD posts-contract wording tightened to name plain prose (not just code/quotes) and the single-long-token case.
+
 ## [0.12.8] - 2026-05-24 — harden the `branding.forumName` → mail `fromName` path
 
 A code-review follow-up to 0.12.7. That release started passing `branding.forumName` to knowless as the mail display name (`fromName`), but knowless validates `fromName` at boot — ASCII only, ≤60 chars, no `"`/`<`/`>`/CR-LF — and **throws** on violation. `branding.forumName` is operator free text with no such constraints (and plato explicitly supports multilingual content), so a fork with a non-ASCII or over-long forum name — or one containing those characters — would have **crashed at startup** after upgrading. A cosmetic branding value should never be able to take the whole forum down.
