@@ -36,6 +36,7 @@ The upshot on a shared box: plato's weekly + alert mail come from `terribic.com`
 ### Documented
 
 - **`docs/04-process/cotenant-migration-setup.md`** (new) — end-to-end runbook for migrating a live plato instance onto a box already serving another app (the prep → cutover → verify arc, plus gotchas), complementing the deploy-guide's "Co-tenant deploy" appendix. Sanitized: methodology only, no instance-specific addresses or secret-store detail.
+- **PRD §Permanently out — "Non-ASCII `branding.rules` / operator-localized rules."** Parked the decision that `branding.rules` stays an ASCII wording/tone override, not a localization knob. Rationale: the ASCII limit inherits from knowless's 7-bit ASCII mail transport (`validateBodyFooter`), a security invariant in the magic-link email — plain ASCII makes the link line un-spoofable, while Unicode re-opens confusable/homoglyph, bidi/RTL-override, and zero-width phishing vectors. Lifting it un-gates only one footer paragraph (the rest of the mail and the whole UI stay English — see *Translating UI chrome*), so a non-English instance is a fork concern, not a config knob. Docs-only; no behavior change, no version bump.
 
 ## [0.12.10] - 2026-05-25 — daily prune of expired drafts
 
