@@ -242,6 +242,15 @@ Plato's auth flow (via knowless) treats unknown emails, rate-limited new-handle 
 
 The contract extends to the link-click stage. Sham, expired, and used-token clicks redirect to **home** (`/`), not to `/login`. A logged-out user landing on the home page after a sham click looks identical to a user arriving at the site for the first time — there is no observable signal that a login attempt occurred or was rejected. Adopters wrapping knowless must set `failureRedirect: '/'` (or any non-login destination); knowless's library default of `cfg.loginPath` is a partial leak.
 
+### Per-IP caps depend on the real client IP (nginx + `determineSourceIp`)
+
+The per-IP login / new-handle caps (and every per-IP throttle) are only meaningful if plato buckets on the *real* client IP. Behind nginx that takes two cooperating pieces, and getting one without the other is worse than neither:
+
+- **nginx must overwrite `X-Forwarded-For`, not append it.** Both deploy templates set `proxy_set_header X-Forwarded-For $remote_addr`. The appending form (`$proxy_add_x_forwarded_for`) preserves any client-supplied prefix, and since the leftmost XFF element is treated as the origin client, a forged `X-Forwarded-For: 9.9.9.9` would mint a fresh rate-limit bucket per request. Overwriting pins it to the real TLS peer. (Valid because plato's nginx terminates TLS directly; revisit if fronted by a CDN/LB, where the real client is no longer the immediate peer.)
+- **plato must resolve the IP through `determineSourceIp`, not `req.socket.remoteAddress`.** knowless only resolves the client IP automatically on its *built-in* login route. plato uses `auth.startLogin` (Mode A use-first/claim-later) at both call sites, which buckets on whatever `sourceIp` the caller passes — so the call sites pass `determineSourceIp(req, auth.config.trustedProxies)`. plato sets no `trustedProxies`, so knowless's default loopback set (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) applies: nginx on loopback is trusted, any other peer's XFF is ignored.
+
+This pairing was mis-assessed once — a security review dropped "the per-IP cap is globalized" as a non-issue on the theory that knowless honors XFF out of the box (true only for the built-in route). It was globalized in fact; fixed in v0.12.11. The combination is now load-bearing, not incidental.
+
 ### Dev/prod env split
 
 Plato uses a two-file env layout so production-shaped config and dev-only knobs don't share a file:

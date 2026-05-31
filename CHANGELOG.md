@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.11] - 2026-05-31 — login rate limit buckets on the real client IP
+
+### Security — per-IP login cap buckets on the real client IP (v0.12.11)
+
+The per-IP login / new-handle rate limits were globalized behind nginx: every magic-link request landed in a single `127.0.0.1` bucket, so the caps that exist to throttle email harvesting / mass-mint abuse effectively didn't apply per-client. Two compounding bugs:
+
+- **nginx appended `X-Forwarded-For`** (`$proxy_add_x_forwarded_for`) in both deploy templates, preserving any client-supplied prefix. Since the leftmost XFF element is treated as the origin client, a request carrying `X-Forwarded-For: 9.9.9.9` would (once plato read XFF) mint a fresh bucket per forged value.
+- **plato passed the wrong `sourceIp`** to `auth.startLogin` — `req.socket?.remoteAddress`, which behind a local nginx is always loopback. knowless only resolves the real client IP automatically on its *built-in* login route; the `startLogin` path buckets on whatever `sourceIp` the caller passes.
+
+Fix (both parts ship together — the code change alone would make it worse by trusting a spoofable header):
+
+- **nginx** (`deploy/plato.nginx.template`, `deploy/plato.nginx-selfsigned.template`): `proxy_set_header X-Forwarded-For $remote_addr` — overwrite with the real TLS peer instead of appending. Valid because plato's nginx terminates TLS directly; revisit if fronted by a CDN/LB.
+- **code** (`src/web/app.js`, both `startLogin` call sites — draft-submit and `/login`): `sourceIp: determineSourceIp(req, auth.config.trustedProxies)`. `determineSourceIp` is re-exported from `src/auth/index.js` (knowless ≥1.3.0 export; dep bumped from `^1.1.9`). plato sets no `trustedProxies`, so knowless's default loopback set applies — nginx on `127.0.0.1` is trusted, so its (now-overwritten) XFF is honored; any other peer's XFF is ignored.
+
+This corrects the 0.12.4→0.12.5 security-review record below, which had dropped the globalized-cap finding as a non-issue. **Deploy note: regenerate/patch the live nginx vhost too** — the templates only take effect on next render; the running `/etc/nginx/conf.d/plato.conf` must get the same `X-Forwarded-For $remote_addr` edit (then `nginx -t && systemctl reload nginx`).
+
 ### Fixed — `config.json` is no longer tracked (privacy + clobber)
 
 `config.json` was committed to the repo, so a) the public mirror carried the reference instance's branding and operator email addresses, and b) the live box's copy was one `git pull` away from being silently deleted (when it matched the tracked version) or from aborting the deploy (when an operator had edited it). It's also box-authored by design — deploy-guide Step 8 writes a fresh one — so the tracked copy was pure contradiction (and stale: it was missing the required `branding.baseUrl`).
@@ -141,7 +157,9 @@ Before this release: the sub-import worker (`bin/run-import-queue.js`) fetched w
 
 After: the worker resolves the host and refuses to connect to any private / loopback / link-local / reserved address, re-checking on every redirect hop. The bytes-trust model is unchanged; only the connection target is now bounded to public space. Same release adds a small set of always-on response headers.
 
-This is the security review from the 0.12.4→0.12.5 window. Two findings from that review were re-verified and **dropped as non-issues**: (1) per-IP login / new-handle caps are *not* globalized behind nginx — knowless defaults `trustedProxies` to the loopback set (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`), so it honors `X-Forwarded-For` from the local proxy out of the box; plato passing the key would be redundant. (2) The `0.0.0.0` listener bind is not externally reachable on the documented deploy — `deploy-guide.md` Step 2 sets `ufw default deny incoming` allowing only 22/80/443. Neither needed a code change.
+This is the security review from the 0.12.4→0.12.5 window. Two findings from that review were re-verified at the time: (1) per-IP login / new-handle caps behind nginx, and (2) the `0.0.0.0` listener bind. The bind finding stands — it is not externally reachable on the documented deploy (`deploy-guide.md` Step 2 sets `ufw default deny incoming` allowing only 22/80/443).
+
+**Correction (v0.12.11):** finding (1) was wrong and is no longer "dropped." The claim that knowless "honors `X-Forwarded-For` from the local proxy out of the box" is only true for knowless's *built-in* login route, which calls `determineSourceIp` internally. plato does not use that route — it calls `auth.startLogin` and passes `sourceIp` explicitly, and that value was `req.socket?.remoteAddress`, which behind nginx is always `127.0.0.1`. So every login/new-handle request bucketed under one IP: **the cap was globalized.** Worse, the nginx templates *appended* `X-Forwarded-For` (`$proxy_add_x_forwarded_for`), so a client-supplied prefix survived and — had plato read XFF's leftmost element — would have minted a fresh bucket per request. v0.12.11 fixes both: nginx overwrites XFF with `$remote_addr`, and the `startLogin` call sites pass `determineSourceIp(req, auth.config.trustedProxies)`.
 
 ### Security — sub-import fetch validates the resolved host is public (SSRF)
 
