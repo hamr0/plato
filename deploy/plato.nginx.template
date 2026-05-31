@@ -17,7 +17,12 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Overwrite (not append) XFF: $proxy_add_x_forwarded_for preserves a
+        # client-supplied prefix, and knowless trusts the leftmost element —
+        # so a forged X-Forwarded-For would mint a fresh rate-limit bucket per
+        # request. $remote_addr is the real TLS peer. Valid because nginx
+        # terminates TLS directly here; revisit if fronted by a CDN/LB.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
 

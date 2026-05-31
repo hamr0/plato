@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { html, render, raw, escapeHTML } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
+import { determineSourceIp } from '../auth/index.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
 import { avatarSvg } from '../identity/avatar.js';
 import {
@@ -2414,7 +2415,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   await auth.startLogin({
     email,
     nextUrl: `${baseUrl}/draft/${draftId}/finalize`,
-    sourceIp: req.socket?.remoteAddress,
+    sourceIp: determineSourceIp(req, auth.config.trustedProxies),
     bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
 
@@ -5430,7 +5431,7 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
   await auth.startLogin({
     email,
     nextUrl: `${baseUrl}${landing}`,
-    sourceIp: req.socket?.remoteAddress,
+    sourceIp: determineSourceIp(req, auth.config.trustedProxies),
     bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
   send(

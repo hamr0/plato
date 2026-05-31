@@ -1,5 +1,11 @@
 import { knowless } from 'knowless';
 
+// Re-export so the rest of plato resolves the real client IP through the
+// auth module's knowless boundary rather than importing knowless directly.
+// Used at the startLogin call sites to bucket rate limits on the true peer
+// (overwriting any client-supplied X-Forwarded-For) — see CHANGELOG v0.12.11.
+export { determineSourceIp } from 'knowless';
+
 const REQUIRED_ENV = ['KNOWLESS_SECRET', 'KNOWLESS_BASE_URL', 'KNOWLESS_FROM'];
 
 // knowless validates the mail display name (fromName) at boot: ASCII, ≤60
