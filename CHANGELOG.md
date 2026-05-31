@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.11] - 2026-05-31 — login rate limit buckets on the real client IP
+
 ### Security — per-IP login cap buckets on the real client IP (v0.12.11)
 
 The per-IP login / new-handle rate limits were globalized behind nginx: every magic-link request landed in a single `127.0.0.1` bucket, so the caps that exist to throttle email harvesting / mass-mint abuse effectively didn't apply per-client. Two compounding bugs:
