@@ -8,6 +8,8 @@
   },
   "operator": {
     "email": "you@example.com",
-    "service": "plato"
+    "service": "plato",
+    "backupKeepLast": 7,
+    "diskMaxPercent": 90
   }
 }

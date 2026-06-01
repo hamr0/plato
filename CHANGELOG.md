@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.15] - 2026-06-01 — two operator-tunable monitoring knobs
+
+### Added — `operator.backupKeepLast` + `operator.diskMaxPercent`
+
+pulselog's baked defaults (7 daily backups, a 90%-disk alert) suit hobby-scale and are **unchanged**; this release just promotes the two an operator realistically tunes into the `config.json` `operator` block so they survive regeneration. Before, the only way to change retention or the disk threshold was to hand-edit the *generated* `pulselog.config.json` — which `npm run gen-pulselog` overwrites wholesale the next time `config.json` changes, silently reverting the edit. Now they're first-class config:
+
+- **`operator.backupKeepLast`** — nightly archives to retain. Default 7, range 1–365. The small-disk lever.
+- **`operator.diskMaxPercent`** — disk-usage % that trips the 5-min health alert. Default 90, range 50–99.
+
+Both are **validated at config-gen time** (`bin/gen-pulselog-config.js`): a non-integer, out-of-range, or wrong-typed value prints a clear error and exits non-zero, failing the deploy loudly instead of writing a broken monitor. `keepLast: 0` is explicitly rejected — pulselog requires ≥1, and 0 would wipe every backup.
+
+The remaining pulselog thresholds (`maxAgeHours`, digest `weeks`/`flagAtLeast`, `retry`) stay hardcoded in the generator — nobody tunes them, and promoting them would be operator-surface for its own sake. flightlog stays always-on with one lever (the `PLATO_FLIGHTLOG_FILE` sink path) and no off-switch, by design.
+
+- `config.example.json` + deploy-guide field walkthrough + cron-jobs operator-block reference + plato.context integration row all carry the two knobs with defaults and ranges. Disk-pressure guidance now points at `operator.backupKeepLast` (set in `config.json`, not the generated file).
+- `test/integration/pulselog-config.test.js` +3: defaults preserved when unset, overrides honored, bad values fail loud with no config written. Suite 865 → 868.
+
+### Fixed
+- cron-jobs.md claimed `branding.baseUrl` fed a pulselog "TLS-cert check" — there is no such check (cert expiry is the daily `bin/check-cert.sh`; renewal is `certbot.timer`). Corrected to the real config flow.
+
 ## [0.12.14] - 2026-06-01 — pulselog watcher replaces the bespoke ops scripts
 
 ### Added — `pulselog` (external watcher), on by default

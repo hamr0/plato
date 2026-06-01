@@ -69,6 +69,31 @@ test('no operator.email → log-only (no mail keys anywhere)', () => {
   assert.equal(out.backup.email, undefined);
 });
 
+test('backupKeepLast + diskMaxPercent default to the safe values when unset', () => {
+  const { out } = gen({ operator: { email: 'ops@x.com' } });
+  assert.equal(out.backup.keepLast, 7);
+  assert.equal(out.checks.find((c) => c.name === 'disk').maxPercent, 90);
+});
+
+test('operator can override backupKeepLast + diskMaxPercent', () => {
+  const { out } = gen({ operator: { email: 'ops@x.com', backupKeepLast: 3, diskMaxPercent: 80 } });
+  assert.equal(out.backup.keepLast, 3);
+  assert.equal(out.checks.find((c) => c.name === 'disk').maxPercent, 80);
+});
+
+test('a bad threshold fails the deploy loudly — no config written, non-zero exit', () => {
+  for (const operator of [
+    { backupKeepLast: 0 },          // pulselog requires >= 1; 0 would wipe every backup
+    { backupKeepLast: 7.5 },        // non-integer
+    { diskMaxPercent: 100 },        // 100 never trips — out of [50..99]
+    { diskMaxPercent: 'lots' },     // wrong type
+  ]) {
+    const { res, out } = gen({ operator });
+    assert.equal(out, null, `no config written for ${JSON.stringify(operator)}`);
+    assert.notEqual(res.status, 0, `non-zero exit for ${JSON.stringify(operator)}`);
+  }
+});
+
 test('operator.monitoring:false is the off switch — writes nothing, exits 0', () => {
   const { res, out } = gen({ operator: { monitoring: false, email: 'ops@x.com' } });
   assert.equal(out, null, 'no config written when monitoring is off');
