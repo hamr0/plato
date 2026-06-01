@@ -1117,6 +1117,13 @@ If `db_writable: false` — usually the SQLite file is on a read-only mount, or 
 
 If `exports_dir_writable: false` — same fix scoped to `/opt/plato/exports`.
 
+### `database is locked` in a cron worker log
+
+Since 0.12.16 `openDb` sets `PRAGMA busy_timeout = 5000`, so a momentary write-lock collision (the export/import workers share the off-peak window, and the live server writes too) waits up to 5 s instead of erroring. If you still see `SQLITE_BUSY` / `database is locked`:
+
+- Confirm only **one** of each worker runs: `cat /etc/cron.d/*` **and** `sudo crontab -l`, looking for stray or duplicate lines. cron.d executes *every* file in the directory regardless of name — a backup left *inside* `/etc/cron.d/` (e.g. `plato.bak`) runs too. Move backups out of the directory.
+- Otherwise a writer held the lock for >5 s — look for a long-running migration or an external process holding `forum.db` open.
+
 ### certbot --nginx fails
 
 Most common: DNS hasn't propagated yet, or you set the A record after running certbot. Fix:

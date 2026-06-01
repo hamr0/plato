@@ -187,7 +187,7 @@ If you want any of the locked items different on your instance, you're forking. 
 
 ## Database
 
-Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables + FK enforcement. All migrations idempotent and tracked in `schema_migrations` (id PRIMARY KEY).
+Single SQLite file at `DB_PATH` (default `./forum.db`). WAL mode + STRICT tables + FK enforcement + a 5 s `busy_timeout` (a contended `BEGIN IMMEDIATE` waits rather than throwing `SQLITE_BUSY`). All migrations idempotent and tracked in `schema_migrations` (id PRIMARY KEY).
 
 | Table | Purpose |
 |---|---|
@@ -473,7 +473,7 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 
 ## Production usage
 
-- One Node process. No clustering needed at hobby scale; SQLite WAL handles concurrent readers fine.
+- One Node process. No clustering needed at hobby scale; SQLite WAL keeps readers off the single writer, and a 5 s `busy_timeout` lets the few writers that exist (the live server plus the export/import cron workers, which share the off-peak window) wait out a momentary lock instead of erroring.
 - Tested on **RackNerd KVM VPS** (~$20/year, 1 GB / 1 vCPU is plenty). Port 25 + PTR are unblocked via a one-paragraph support ticket — paste-ready text in [operator-guide § Hosting](operator-guide.md#hosting--budget-vps-recommendation). Hetzner / OVH / Linode / Vultr also work; avoid DigitalOcean (port-25 unblock is harder to get).
 - Reverse proxy (Caddy/nginx) for TLS. M8 adds opinionated Caddy config.
 - Backups: run `node_modules/.bin/pulselog --backup --config pulselog.config.json` — it snapshots both `forum.db` and `knowless.db` via bundled `node:sqlite` (`VACUUM INTO`, WAL-safe hot copy, no system `sqlite3`) and tars `posts/` + config. Don't `cp` a live WAL DB; the `VACUUM INTO` snapshot is the safe path.

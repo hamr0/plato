@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
   Surfaced while tracing a one-off `database is locked` crash in the import worker (a stray duplicate cron — since removed — was a fourth concurrent writer). The crash itself predated the worker flightlog wiring, so it was never an observability gap; flightlog + pulselog were clean throughout. This is the root-cause durability fix: contention is now absorbed regardless of how many writers collide.
 
 - `test/integration/db-pragmas.test.js` (+1): asserts `openDb` applies `foreign_keys`, WAL, and `busy_timeout = 5000`. Suite 868 → 869.
+- Docs: plato.context (DB-config + concurrency notes), PRD (export/import worker concurrency clause), and a deploy-guide troubleshooting entry for `database is locked` — including the cron.d footgun (a backup left *inside* `/etc/cron.d/` runs too).
 
 ## [0.12.15] - 2026-06-01 — two operator-tunable monitoring knobs
 
