@@ -16,7 +16,9 @@ Everything operator-specific lives in `config.json`'s `operator` block; the foru
   "operator": {
     "email": "you@example.com",   // alerts + digest go here; unset → pulselog logs only, no mail
     "service": "plato",            // systemd unit name (health `service` check; restart-on-change)
-    "monitoring": true             // OFF SWITCH: false → no pulselog config generated, skip its timers
+    "monitoring": true,            // OFF SWITCH: false → no pulselog config generated, skip its timers
+    "backupKeepLast": 7,           // backup archives to retain (default 7; 1–365). Small disk → lower
+    "diskMaxPercent": 90           // disk-usage % that trips the health alert (default 90; 50–99)
   }
 }
 ```
@@ -27,7 +29,7 @@ pulselog reads its **own** `pulselog.config.json`, which plato **generates from 
 npm run gen-pulselog        # node --env-file=.env bin/gen-pulselog-config.js  →  writes pulselog.config.json
 ```
 
-Re-run it whenever `config.json` changes. `pulselog.config.json` is gitignored (box-authored, like `config.json`). What flows in: `operator.email` → all three modes' alerts; `branding.baseUrl` (or `KNOWLESS_BASE_URL`) → the TLS-cert check's host (auto-disabled if neither is set); plato's DB/posts paths → the backup sources.
+Re-run it whenever `config.json` changes. `pulselog.config.json` is gitignored (box-authored, like `config.json`). What flows in: `operator.email` → all three modes' mail (unset → log-only, no send); `operator.service` → the health `service`-unit check and the digest's app label; plato's DB / `posts/` / `config.json` / `spam-patterns.txt` paths → the backup sources. (TLS-cert expiry is **not** a pulselog check — renewal is `certbot.timer` and the daily `bin/check-cert.sh` is the alarm if it stalls; see the jobs table below.)
 
 Mail uses the system `mail`/`sendmail` — the same binary magic-link mail flows through (postfix on a postfix box), so cron alerts inherit the same SPF/DKIM/DMARC posture. See [`deploy-guide.md`](deploy-guide.md) §5.
 
@@ -175,4 +177,4 @@ The pulselog/flightlog JSONLs under `data/logs/` are **not** these files — the
 
 ## Disk pressure
 
-Backups are the only disk-growth risk. ~200KB/archive for a small instance × 7 = ~1.4MB; ~50MB/archive busy × 7 = ~350MB. Tighten retention in `pulselog.config.json` (`backup.keepLast`, or add `backup.keepDays`) and re-run `npm run gen-pulselog` is **not** needed — edit the generated file directly, or lower the generator's default and regenerate. The stats/backup history JSONLs grow ~one line/week — negligible.
+Backups are the only disk-growth risk. ~200KB/archive for a small instance × 7 = ~1.4MB; ~50MB/archive busy × 7 = ~350MB. Tighten retention via **`operator.backupKeepLast`** in `config.json` (default 7, range 1–365), then re-run `npm run gen-pulselog`. Set it there rather than hand-editing the generated `pulselog.config.json` — the generated file is overwritten wholesale on the next `gen-pulselog`, so a direct edit silently reverts the next time `config.json` changes. The stats/backup history JSONLs grow ~one line/week — negligible.

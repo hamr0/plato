@@ -41,6 +41,22 @@ const email = operator.email || '';        // omit alerts/digest/backup mail if 
 const service = operator.service || 'plato';
 const forumName = branding.forumName || service;
 
+// Two operator-tunable thresholds. pulselog's baked defaults (7 daily backups,
+// 90% disk) suit hobby-scale, so these stay unset for almost everyone — they
+// exist for the small-disk / deep-history operator. Validated as a deploy
+// boundary: a bad value fails the deploy loudly rather than writing a broken
+// monitor (e.g. keepLast:0 would wipe every backup — pulselog requires >= 1).
+function intOption(raw, fallback, label, min, max) {
+  if (raw === undefined || raw === null) return fallback;
+  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < min || raw > max) {
+    console.error(`[gen-pulselog] ${label} must be an integer in [${min}..${max}] — got ${JSON.stringify(raw)}`);
+    process.exit(1);
+  }
+  return raw;
+}
+const keepLast = intOption(operator.backupKeepLast, 7, 'operator.backupKeepLast', 1, 365);
+const diskMaxPercent = intOption(operator.diskMaxPercent, 90, 'operator.diskMaxPercent', 50, 99);
+
 // NB: no TLS-cert check here on purpose. pulselog health runs every 5 min and
 // re-emails every run while a check fails — fine for acute checks (app down,
 // disk full), but a cert at <warnDays would email every 5 min for ~2 weeks.
@@ -70,7 +86,7 @@ const pulselogConfig = {
   retry: { retries: 2, retryDelayMs: 2000 },
   checks: [
     { type: 'http', name: 'app', enabled: true, url: `http://127.0.0.1:${PORT}/healthz`, expectStatus: 200 },
-    { type: 'disk', name: 'disk', enabled: true, path: DATA, maxPercent: 90 },
+    { type: 'disk', name: 'disk', enabled: true, path: DATA, maxPercent: diskMaxPercent },
     { type: 'file-age', name: 'backup', enabled: true, path: BACKUP_DIR, maxAgeHours: 48, pattern: '.tar.gz', recursive: false },
     { type: 'service', name: 'service', enabled: true, unit: `${service}.service` },
   ],
@@ -101,7 +117,7 @@ const pulselogConfig = {
       { path: CONFIG_PATH, optional: true },
       { path: SPAM_PATTERNS, optional: true },
     ],
-    keepLast: 7,
+    keepLast,
     minBytes: 1024,
     history: resolve(LOGS, 'backup.jsonl'),
   },

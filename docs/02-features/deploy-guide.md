@@ -619,7 +619,9 @@ sudo -u plato -H tee /opt/plato/config.json > /dev/null <<EOF
   },
   "operator": {
     "email": "${ADMIN_EMAIL}",
-    "service": "plato"
+    "service": "plato",
+    "backupKeepLast": 7,
+    "diskMaxPercent": 90
   }
 }
 EOF
@@ -634,6 +636,8 @@ EOF
 - `branding.baseUrl` — **required** for archive exports to embed working backlinks. Set to your `https://$DOMAIN`.
 - `operator.email` — recipient for every cron alert (backup failures, weekly stats digest, cert expiry, /healthz failures). Usually `$ADMIN_EMAIL`.
 - `operator.service` — systemd unit name to `systemctl restart` when a snapshot changes (disposable-domains refresh, etc.). Defaults to `plato`.
+- `operator.backupKeepLast` — nightly backup archives to retain. Default 7 (a week of dailies), range 1–365. Lower it on a small disk.
+- `operator.diskMaxPercent` — disk-usage percentage at which the 5-min health check emails an alert. Default 90, range 50–99. Both are read by `gen-pulselog` — set them here, not in the generated `pulselog.config.json` (that file is rewritten on every `gen-pulselog`).
 
 **Optional sections you can add later** (all have working defaults if absent):
 
@@ -990,7 +994,7 @@ sudo -u plato -H bash -c 'cd /opt/plato && npm run gen-pulselog'
 # the pulselog {health,--digest,--backup} block from deploy/plato.cron.
 ```
 
-**flightlog needs nothing set** — it `mkdir -p`s `data/logs/` and write-probes the sink at boot; the records land in `data/logs/errors.jsonl` (gitignored), no config, no env var (override only via `PLATO_FLIGHTLOG_FILE`). Routine bumps *after* you're on ≥0.12.14 don't need `gen-pulselog` again unless you edited `config.json`.
+**flightlog needs nothing set** — it `mkdir -p`s `data/logs/` and write-probes the sink at boot; the records land in `data/logs/errors.jsonl` (gitignored), no config. The one tunable is the sink path (`PLATO_FLIGHTLOG_FILE`); the trail self-caps at ~10 MB (5 MB default rotation + one previous file) and there's no off switch by design — unlike pulselog's `operator.monitoring: false`, flightlog is always on. Routine bumps *after* you're on ≥0.12.14 don't need `gen-pulselog` again unless you edited `config.json`.
 
 The footer of every page also shows `v<version>` next to the modlog link — eyeball check after refreshing the browser.
 
@@ -1033,7 +1037,7 @@ If you skipped a major version, read `CHANGELOG.md` between the two tags first �
 
 ### Backups, in plain English
 
-pulselog's `--backup` mode writes one `plato-backup-<timestamp>.tar.gz` per night to `data/backups/`, keeping the newest 7 (`backup.keepLast` in the generated config). It dumps both databases with plato's bundled `node:sqlite` (`VACUUM INTO`) — online, so you don't stop the server, and with no dependency on a system `sqlite3` CLI. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `config.json`, `spam-patterns.txt`. (Regenerable caches — `exports/`, `data/urlhaus.txt`, `disposable-domains.txt` — are intentionally left out.) A run that produces a too-small or failed archive exits 1 loud and never rotates away a good prior archive.
+pulselog's `--backup` mode writes one `plato-backup-<timestamp>.tar.gz` per night to `data/backups/`, keeping the newest 7 (tune via `operator.backupKeepLast` in `config.json`, then `gen-pulselog`). It dumps both databases with plato's bundled `node:sqlite` (`VACUUM INTO`) — online, so you don't stop the server, and with no dependency on a system `sqlite3` CLI. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `config.json`, `spam-patterns.txt`. (Regenerable caches — `exports/`, `data/urlhaus.txt`, `disposable-domains.txt` — are intentionally left out.) A run that produces a too-small or failed archive exits 1 loud and never rotates away a good prior archive.
 
 To rotate copies off the host, **pull** (don't push) the newest archive from an offsite machine — pulselog ships `examples/pull-restricted.sh` (a read-only, single-command SSH key). A box that holds no off-host write key can't have its backups deleted by a compromise. We don't bake key management into plato.
 
