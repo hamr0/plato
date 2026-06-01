@@ -39,9 +39,9 @@ If you want to know *why* a choice was made, see the cross-references; they all 
                    │                              ▼
                    │                          user inbox
                    │
-                   └──► GET /healthz  (consumed by bin/health-watch.sh cron)
+                   └──► GET /healthz  (probed by pulselog health cron)
 
-   /etc/cron.d/plato (root) ──► bin/{backup,health-watch,check-cert,refresh-urlhaus,stats,...}
+   /etc/cron.d/plato (root) ──► pulselog {health,--digest,--backup} + bin/{check-cert,refresh-urlhaus,...}
                                         │  on alert
                                         └──► /usr/sbin/sendmail (= postfix) ──► same path ──► operator inbox
 ```
@@ -77,7 +77,7 @@ cat >> /root/.bashrc <<'EOF'
 export DOMAIN=forum.example.com
 export ADMIN_EMAIL=you@example.com   # used by certbot + as cron alert recipient
 export PLATO_PORT=8080               # plato's listener; pick another (e.g. 8090) if 8080 is taken
-export FORUM_NAME=your-forum-name    # display name in mail "From:" header (e.g. "terribic <auth@terribic.com>")
+export FORUM_NAME=your-forum-name    # display name in mail "From:" header (e.g. "your-forum-name <auth@forum.example.com>")
 EOF
 
 source /root/.bashrc
@@ -588,7 +588,7 @@ sudo chown plato:plato /opt/plato/.env
 sudo chmod 600 /opt/plato/.env
 ```
 
-`KNOWLESS_FROM` must be the **bare** address, e.g. `auth@terribic.com` — knowless ≥1.1.9 rejects the display form (`Name <address>`) at boot. The friendly sender name recipients see comes from `branding.forumName` in `config.json` (Step 8); plato passes it to knowless as the display name automatically, so the From: header still reads e.g. `terribic <auth@terribic.com>` without you setting it twice. SPF/DKIM/DMARC alignment keys off the bare address, which must match the domain you sign as.
+`KNOWLESS_FROM` must be the **bare** address, e.g. `auth@forum.example.com` — knowless ≥1.1.9 rejects the display form (`Name <address>`) at boot. The friendly sender name recipients see comes from `branding.forumName` in `config.json` (Step 8); plato passes it to knowless as the display name automatically, so the From: header still reads e.g. `your-forum-name <auth@forum.example.com>` without you setting it twice. SPF/DKIM/DMARC alignment keys off the bare address, which must match the domain you sign as.
 
 > **Homeserver / self-signed test note.** This guide assumes a public VPS with port 25 outbound and DNS at a registrar. On a residential homeserver (port 25 blocked by ISP, no public domain pointing at it), the postfix path won't deliver mail. Use plato in dev mode with `KNOWLESS_DEV_LOG_LINKS=true` (see `.env.dev`) — magic links print to stderr, you click them out of the log, you validate the auth flow without real mail. See the [Self-signed mode](#self-signed-mode-homeserver--lan-testing) appendix.
 
@@ -797,7 +797,7 @@ ls -l /etc/logrotate.d/plato
 logrotate -d /etc/logrotate.d/plato      # dry-run, no errors expected
 ```
 
-The cron block runs ~9 jobs covering URLhaus refresh, daily backups (7-day retention), TLS cert-expiry check, daily counter snapshot, weekly stats digest, quarterly disposable-domains refresh, sub-inactivity sweep, archive export/import queues, and the every-5-min `/healthz` watcher. Per-job detail lives in [`cron-jobs.md`](cron-jobs.md). Tweak cadences by editing `deploy/plato.cron` and re-running bootstrap.
+The cron block runs the pulselog watcher (every-5-min health, nightly backup with 7-day retention, weekly stats digest) plus plato's own jobs: URLhaus refresh, TLS cert-expiry check, quarterly disposable-domains refresh, sub-inactivity sweep, and the archive export/import queues. pulselog's config is generated from `config.json` by `npm run gen-pulselog` (bootstrap reminds you). Per-job detail lives in [`cron-jobs.md`](cron-jobs.md). Tweak cadences by editing `deploy/plato.cron` and re-running bootstrap.
 
 ## Step 13 — Final smoke
 
@@ -933,7 +933,8 @@ Both are read-only — you can't change anything, only monitor. The value is ear
 | Check health | `curl -sS https://$DOMAIN/healthz \| jq .` |
 | Pre-start sanity check | `sudo -u plato bash -c 'cd /opt/plato && bin/preflight.sh'` |
 | Cert expiry probe | `cd /opt/plato && DOMAIN=$DOMAIN bin/check-cert.sh` |
-| Run a backup now | `sudo -u plato BACKUP_DIR=/var/lib/plato-backups /opt/plato/bin/backup.sh` |
+| Run a backup now | `cd /opt/plato && sudo -u plato node_modules/.bin/pulselog --backup --config pulselog.config.json` |
+| Regenerate pulselog config | `cd /opt/plato && sudo -u plato npm run gen-pulselog` (after editing `config.json`) |
 | Re-render system files | `sudo DOMAIN=$DOMAIN ADMIN_EMAIL=$ADMIN_EMAIL PLATO_PORT=$PLATO_PORT /opt/plato/deploy/bootstrap.sh` |
 | Update plato | see [Updating plato](#updating-plato) |
 | Read modlog | `https://$DOMAIN/modlog` (publicly visible) |
@@ -956,9 +957,9 @@ sudo -u plato -H bash -c 'cd /opt/plato && node --env-file=.env bin/migrate.js'
 sudo systemctl restart plato
 
 # 5. Verify the new version is live (three independent checks; substitute
-#    your actual domain for terribic.com):
+#    your actual domain for forum.example.com):
 sudo -u plato -H bash -c 'cd /opt/plato && git log -1 --oneline'      # commit on disk
-curl -sS https://terribic.com/healthz | jq '{ok, version, last_migration}'   # version served
+curl -sS https://forum.example.com/healthz | jq '{ok, version, last_migration}'   # version served
 sudo tail -10 /var/log/plato.log | grep "plato v"                     # version logged at startup
 # (journalctl -u plato shows lifecycle events; plato's own console.log
 #  is redirected to /var/log/plato.log by the systemd unit — that's
@@ -984,7 +985,7 @@ The footer of every page also shows `v<version>` next to the modlog link — eye
 **CSS-bumping releases** carry a `?v=N` cache token on the stylesheet link (`/static/style.css?v=N`). A 200 on that exact token after deploy proves the new CSS is being served — useful when a release moves visual chrome (mobile pass, theme changes, layout shifts) and you want to be sure browsers aren't showing the old stylesheet from a CDN or local cache:
 
 ```bash
-curl -sI https://terribic.com/static/style.css?v=$(grep 'style.css?v=' /opt/plato/src/web/app.js | head -1 | sed 's/.*style.css?v=\([0-9]*\).*/\1/')
+curl -sI https://forum.example.com/static/style.css?v=$(grep 'style.css?v=' /opt/plato/src/web/app.js | head -1 | sed 's/.*style.css?v=\([0-9]*\).*/\1/')
 # expect: HTTP/1.1 200 OK
 ```
 
@@ -1020,9 +1021,9 @@ If you skipped a major version, read `CHANGELOG.md` between the two tags first �
 
 ### Backups, in plain English
 
-`bin/backup.sh` writes one `plato-backup-<timestamp>.tar.gz` per night to `/var/lib/plato-backups/`, keeping the newest 7 (default `BACKUP_KEEP=7`). It snapshots both databases with plato's bundled `node:sqlite` (`VACUUM INTO`) — online, so you don't stop the server, and with no dependency on a system `sqlite3` CLI. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `config.json`, `spam-patterns.txt`. (Regenerable caches — `exports/`, `data/urlhaus.txt`, `disposable-domains.txt` — are intentionally left out.)
+pulselog's `--backup` mode writes one `plato-backup-<timestamp>.tar.gz` per night to `data/backups/`, keeping the newest 7 (`backup.keepLast` in the generated config). It dumps both databases with plato's bundled `node:sqlite` (`VACUUM INTO`) — online, so you don't stop the server, and with no dependency on a system `sqlite3` CLI. Inside the tarball: `forum.db`, `knowless.db`, `posts/`, `config.json`, `spam-patterns.txt`. (Regenerable caches — `exports/`, `data/urlhaus.txt`, `disposable-domains.txt` — are intentionally left out.) A run that produces a too-small or failed archive exits 1 loud and never rotates away a good prior archive.
 
-To rotate copies off the host, edit the commented `rsync` stanza at the bottom of `bin/backup.sh` to point at your laptop or an offsite machine. We don't bake key management into plato.
+To rotate copies off the host, **pull** (don't push) the newest archive from an offsite machine — pulselog ships `examples/pull-restricted.sh` (a read-only, single-command SSH key). A box that holds no off-host write key can't have its backups deleted by a compromise. We don't bake key management into plato.
 
 To restore: stop the server, untar, copy `forum.db` + `knowless.db` + `posts/` over the live ones, restart. **The `KNOWLESS_SECRET` in your restored `.env` must match the value at the time of backup** — otherwise every user's identity hash shifts and they look like new accounts.
 
@@ -1459,7 +1460,7 @@ Then publish `$DOMAIN`'s own SPF / DKIM (`default._domainkey.$DOMAIN` from `defa
 
 ### C4 — What stays single-tenant
 
-`bin/health-watch.sh` and the cron `MAILTO` send **operator** mail (to `operator.email`) as local system mail (`user@hostname`), not as `auth@$DOMAIN` — they're admin alerts, not domain-aligned auth mail, and don't interact with the DKIM signing above. The magic-link mail is the only thing signed under `$DOMAIN`.
+pulselog's alert/digest mail and the cron `MAILTO` send **operator** mail (to `operator.email`) as local system mail (`user@hostname`), not as `auth@$DOMAIN` — they're admin alerts, not domain-aligned auth mail, and don't interact with the DKIM signing above. The magic-link mail is the only thing signed under `$DOMAIN`.
 
 ## Where to read next
 

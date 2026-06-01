@@ -1,6 +1,6 @@
 {
   "name": "plato",
-  "version": "0.12.13",
+  "version": "0.12.14",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,7 @@
     "start": "node --env-file=.env bin/server.js",
     "dev": "node --env-file=.env --env-file=.env.dev bin/server.js",
     "migrate": "node --env-file=.env bin/migrate.js",
+    "gen-pulselog": "node --env-file=.env bin/gen-pulselog-config.js",
     "test": "node --test 'test/**/*.test.js'"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "flightlog": "^0.4.0",
     "knowless": "^1.3.0",
     "marked": "^18.0.2",
+    "pulselog": "^0.4.1",
     "unique-names-generator": "^4.7.1"
   }
 }

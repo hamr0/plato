@@ -59,7 +59,7 @@ const db = openDb(DB_PATH);
 const brandingRules = resolveBrandingRules(operatorConfig.branding?.rules);
 
 // knowless v0.2.1 mail-outcome hooks. plato logs each to stderr (captured
-// by systemd → /var/log/plato.log) so health-watch can grep success/failure
+// by systemd → /var/log/plato.log) so an operator can grep success/failure
 // rates. The legacy `[knowless] mail submit failed:` console.error fires
 // alongside onTransportFailure — both end up in the same logfile, with the
 // hook line being the structured one.

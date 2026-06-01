@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.14] - 2026-06-01 — pulselog watcher replaces the bespoke ops scripts
+
+### Added — `pulselog` (external watcher), on by default
+
+plato adopts [pulselog](https://github.com/hamr0/pulselog) (`^0.4.1`, zero prod deps) — the external sibling to flightlog (flightlog records errors from *inside* the process; pulselog probes from *outside* on a schedule). It replaces three hand-rolled scripts with one tested dependency, **on by default** with safe defaults that mirror what it replaces. Decision rationale: flightlog runs in-process with zero operator input, so it's a baked-in default; pulselog is out-of-process and its knobs are operator policy — but plato already collects `operator.email`, so default-on is viable, and **single source of truth** means generating pulselog's config from plato's.
+
+- **`bin/gen-pulselog-config.js`** (`npm run gen-pulselog`) — generates `pulselog.config.json` (gitignored, box-authored like `config.json`) from `config.json`: `operator.email` → all three modes' alerts (unset → log-only, no mail), `operator.service` → unit name, plato's paths → backup sources. Off switch: `operator.monitoring: false` writes nothing.
+- **health** (every 5 min) — probes localhost `/healthz`, disk, backup freshness, `plato.service`. Silent on green; one email on break with the last 20 flightlog error lines pasted in (`alert.logTail` → `errors.jsonl`). Exits 0 on a health failure (the email is the signal).
+- **digest** (weekly) — runs the new `bin/stats.js --metrics-json` for `{users,subs,posts,comments,votes}`, appends to `data/logs/stats.jsonl`, emails a WoW table + a 7-day flightlog rollup grouped by `proc`.
+- **backup** (nightly) — `node:sqlite` `VACUUM INTO` of both `forum.db` + `knowless.db` + `posts/` + `config.json` + `spam-patterns.txt` → `data/backups/plato-backup-<stamp>.tar.gz` (`0600`), newest 7. Exits 1 loud on failure.
+
+### Changed
+- `bin/stats.js` gains `--metrics-json` (flat `{name: int}` for pulselog's `metricsCommand`); its daily-snapshot role moves to pulselog's digest history.
+- `deploy/plato.cron`, `bootstrap.sh` (adds a `gen-pulselog` step), `plato.logrotate`, and the deploy-guide / operator-guide / cron-jobs / plato.context docs updated for the pulselog cron block and the default/adjustable/off surface.
+- Genericized the example domain in the deploy-guide and `plato.context` config sample (was a live instance hostname) to `forum.example.com` / `your-forum-name` — the guides read as domain-agnostic for any operator.
+
+### Removed
+- `bin/health-watch.sh`, `bin/stats-weekly.js`, `bin/backup.sh`, `bin/db-snapshot.mjs` (and `test/integration/backup.test.js`) — superseded by pulselog. The "both DBs get backed up" invariant the test guarded (the 0.12.6 fix) now lives in the generator's backup scope, locked by `test/integration/pulselog-config.test.js`.
+
+### Notes
+- **TLS-cert expiry stays on the daily `bin/check-cert.sh`, not pulselog health.** pulselog re-emails every failing run; at a 5-min cadence a cert at <14 days would email for ~2 weeks. Cert is slow-moving → daily, graduated. pulselog health carries only acute checks.
+- **`WriteResult.ok` still unused** (that was flightlog's, and plato's cron has no retrying supervisor — see 0.12.13).
+
 ## [0.12.13] - 2026-06-01 — flightlog 0.4.0 + cron/queue workers join the flight recorder
 
 ### Changed — bump `flightlog` `^0.3.1` → `^0.4.0`

@@ -13,28 +13,27 @@ MAILTO=${ADMIN_EMAIL}
 # (honored by cronie; ignored harmlessly by crons that don't support MAILFROM).
 MAILFROM=noreply@${DOMAIN}
 
+# Monitoring is pulselog (the external watcher). Its config is generated from
+# config.json by `npm run gen-pulselog` — run that once before installing these.
+# To disable monitoring entirely, set operator.monitoring=false and drop the
+# three pulselog lines below.
+
 # Hourly: URLhaus malicious-URL feed
 0 * * * *           root cd ${INSTALL_DIR} && sudo -u plato node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
 
-# Daily 03:30 UTC: backup tarball, 7 newest kept (BACKUP_KEEP env override).
-# BACKUP_DIR is set via `env` INSIDE the sudo target — a plain `VAR=… sudo`
-# prefix is stripped by sudo, so backup.sh would otherwise fall back to its
-# default ./backups instead of $BACKUP_DIR.
-30 3 * * *          root cd ${INSTALL_DIR} && sudo -u plato env BACKUP_DIR=${BACKUP_DIR} bin/backup.sh >> /var/log/plato-backup.log 2>&1
+# pulselog backup: daily 03:30 UTC (forum.db + knowless.db + posts/), 7 newest kept.
+30 3 * * *          root cd ${INSTALL_DIR} && sudo -u plato node_modules/.bin/pulselog --backup --config pulselog.config.json >> /var/log/plato-backup.log 2>&1
 
-# Daily 04:15 UTC: TLS cert expiry check. Silent ≥14 days, daily email <14 days, URGENT subject <3 days.
+# Daily 04:15 UTC: TLS cert expiry check (graduated severity). Slow-moving, so it
+# stays daily here rather than in pulselog's 5-min health run.
 15 4 * * *          root cd ${INSTALL_DIR} && DOMAIN=${DOMAIN} BACKUP_DIR=${BACKUP_DIR} bin/check-cert.sh >> /var/log/plato-cert.log 2>&1
-
-# Daily 04:35 UTC: counter snapshot
-35 4 * * *          root cd ${INSTALL_DIR} && sudo -u plato node bin/stats.js >> /var/log/plato-stats.log 2>&1
 
 # Daily 05:15 UTC: sub inactivity sweep
 15 5 * * *          root cd ${INSTALL_DIR} && sudo -u plato node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
 
-# Weekly Mon 06:00 UTC: stats digest email
-# --env-file=.env so the digest can read KNOWLESS_BASE_URL for its From: domain
-# and label (else it falls back to the system hostname — wrong on a co-tenant box).
-0 6 * * 1           root cd ${INSTALL_DIR} && sudo -u plato node --env-file=.env bin/stats-weekly.js >> /var/log/plato-stats.log 2>&1
+# pulselog digest: weekly Mon 06:00 UTC, stats (via bin/stats.js --metrics-json)
+# + flightlog error rollup, emailed to operator.email.
+0 6 * * 1           root cd ${INSTALL_DIR} && sudo -u plato node_modules/.bin/pulselog --digest --config pulselog.config.json >> /var/log/plato-stats.log 2>&1
 
 # Quarterly: disposable-domains refresh
 0 6 1 1,4,7,10 *    root ${INSTALL_DIR}/scripts/cron-refresh-disposable.sh
@@ -45,8 +44,7 @@ MAILFROM=noreply@${DOMAIN}
 # Every 15 min: archive import queue
 */15 * * * *        root cd ${INSTALL_DIR} && sudo -u plato node bin/run-import-queue.js >> /var/log/plato-import.log 2>&1
 
-# Every 5 min: /healthz watcher — silent on 200, alerts on non-2xx.
-# PLATO_URL must point at plato's actual listen port; health-watch.sh
-# defaults to :8080, so on any deploy with a different PORT (e.g. a
-# co-tenant box) it must be passed here or every check 000s and alerts.
-*/5 * * * *         root cd ${INSTALL_DIR} && DOMAIN=${DOMAIN} PLATO_URL=${PLATO_URL} BACKUP_DIR=${BACKUP_DIR} PLATO_LOG=/var/log/plato.log bin/health-watch.sh
+# pulselog health: every 5 min — probes localhost /healthz, disk, backup
+# freshness, plato.service. Silent on green, one email on break. Runs as plato
+# (config is plato-owned; systemctl is-active is a non-root read).
+*/5 * * * *         root cd ${INSTALL_DIR} && sudo -u plato node_modules/.bin/pulselog --config pulselog.config.json >> /var/log/plato-health.log 2>&1

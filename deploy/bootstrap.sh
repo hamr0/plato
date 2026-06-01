@@ -239,7 +239,8 @@ $mail_step
   3. $INSTALL_DIR/config.json — branding + operator block (branding.forumName is the mail sender name)
   4. cd $INSTALL_DIR && sudo -u $PLATO_USER npm ci --omit=dev
   5. cd $INSTALL_DIR && sudo -u $PLATO_USER node --env-file=.env bin/migrate.js
-  6. systemctl enable --now plato
+  6. cd $INSTALL_DIR && sudo -u $PLATO_USER npm run gen-pulselog   # writes pulselog.config.json from config.json (skip if operator.monitoring=false)
+  7. systemctl enable --now plato
 $nginx_steps
 
 Then smoke-test:

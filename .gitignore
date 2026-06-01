@@ -1,6 +1,7 @@
 node_modules/
 .env
 config.json
+pulselog.config.json
 *.db
 *.db-journal
 *.db-shm
