@@ -552,6 +552,7 @@ Visit `http://localhost:8080`. You'll see "no subs yet — create the first one 
 | `$BACKUP_DIR/health.log` | `bin/health-watch.sh` | one line per `/healthz` non-2xx | one line per failure event — silent on success | not pruned; trivially `tail -n 1000` if it ever needs it |
 | `$BACKUP_DIR/plato-backup-*.tar.gz` | `bin/backup.sh` | tarball per run | one per cron tick | rotated to newest `BACKUP_KEEP` (default 7) |
 | `data/stats.log` | `bin/stats.js` | append-only JSONL, one line per day | ~365 lines/year, ~30 KB/year | not pruned (read end-to-end by `bin/stats-weekly.js`) |
+| `data/logs/errors.jsonl` | [`flightlog`](https://github.com/hamr0/flightlog) via `src/flightlog.js` | one JSON line per uncaught exception, unhandled rejection, or failed request/job — from the server **and** every cron/queue worker (`kind` + stack + `{app,release,proc,where}`); `proc` names the source (`server`, `export-queue`, `import-queue`, `ots-upgrade`, `inactivity`, `stats-weekly`, `urlhaus`) | self-bounded ~2× 5 MB (rotates to `.1`) | self-rotating, zero config; `0600` perms |
 | `data/urlhaus.txt` | `bin/refresh-urlhaus.js` | abuse-host cache, full file overwrite | replaced hourly, never grown | n/a |
 | `/var/log/plato.log` (operator-redirected) | `bin/server.js` stdout/stderr | freeform | per-request log lines | **`logrotate` — operator wires this** |
 | `/var/log/plato-{export,import,ots-upgrade,inactivity,urlhaus,backup,stats}.log` | the matching cron job | per-tick output | per-cron log lines | **`logrotate` — operator wires this** |
@@ -562,6 +563,8 @@ For the operator-redirected logs, drop a single `logrotate.d` snippet (one entry
 - **Server won't start with "missing env".** The boot validator is loud and specific. Read the error.
 - **A column-add migration failed.** The runner aborts on the first failure and rolls back. Fix the SQL, re-run; previously-applied migrations are tracked in `schema_migrations` so they won't re-run.
 - **A post page 500s on render.** The most common cause is a missing markdown file in `posts/`. The DB row points at a path; if the file is gone, the read raises. `getPostPreview` is tolerant (returns empty), but the full post page expects the file. Restore from backup or delete the row.
+- **Finding the error behind a 500.** `/var/log/plato.log` carries the raw `console.error` stack inline with request traffic; the **flight recorder** (`data/logs/errors.jsonl`) is the same crashes distilled to one JSON line each, readable any time even on a healthy box. `jq -r 'select(.where=="request") | "\(.ts) \(.method) \(.path) — \(.message)"' data/logs/errors.jsonl` lists every 500'd request; drop the `select` to include uncaught/rejection crashes. Query strings are stripped from `.path`, so magic-link tokens never land in the log.
+- **A cron/queue worker failed.** The same sink carries worker failures, tagged by `proc`. `jq -r 'select(.proc!="server") | "\(.ts) \(.proc) — \(.message)"' data/logs/errors.jsonl` shows every export/import/ots/inactivity/stats/urlhaus failure across runs; narrow with `select(.proc=="import-queue")`. Workers run under `cron` (no exit-code retry), so this durable record — not the per-run cron logfile that `logrotate` eventually drops — is the place to look days later. Failed export/import jobs also re-queue in the DB and notify the requester via `/memlog`.
 
 ---
 

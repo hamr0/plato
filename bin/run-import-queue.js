@@ -30,6 +30,14 @@ import {
 import { recordNotification } from '../src/content/notification.js';
 import { parseAndVerifyArchive, importSubArchive } from '../src/archive/import.js';
 import { assertPublicUrl } from '../src/archive/ssrf.js';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived worker. exitOnRejection:true so a
+// stray rejection exits non-zero instead of a silent exit-0; bootCheck:false so
+// an unwritable error sink can't take down the actual import work. The global
+// net captures any throw before/after the try; captureSync in the job-failure
+// catch records the operational error (the catch bypasses the global handlers).
+const { captureSync } = initFlightlog({ proc: 'import-queue', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -163,6 +171,7 @@ try {
     });
   }
   console.error(`[import-queue] ${result} job=${job.id} attempt=${job.retry_count}: ${err.message}`);
+  captureSync(err, { where: 'import-queue', jobId: job.id, outcome: result, terminal: err.terminal === true });
   process.exit(1);
 }
 

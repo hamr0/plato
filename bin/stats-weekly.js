@@ -18,6 +18,13 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived weekly worker. No top-level catch, so
+// a throw (bad stats.log, sendmail spawn failure) propagates to the global net —
+// exitOnUncaught (default true) / exitOnRejection:true log it + exit non-zero.
+// bootCheck:false so an unwritable error sink can't take down the digest.
+initFlightlog({ proc: 'stats-weekly', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');

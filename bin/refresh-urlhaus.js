@@ -16,6 +16,14 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived worker. exitOnRejection:true so a
+// stray rejection exits non-zero instead of a silent exit-0; bootCheck:false so
+// an unwritable error sink can't take down the actual refresh. captureSync in
+// main()'s catch records the fetch/write failure (the catch exits before the
+// global rejection handler would fire).
+const { captureSync } = initFlightlog({ proc: 'urlhaus', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -51,5 +59,6 @@ async function main() {
 
 main().catch((err) => {
   console.error('urlhaus refresh: failed', err);
+  captureSync(err, { where: 'urlhaus.main' });
   process.exit(1);
 });
