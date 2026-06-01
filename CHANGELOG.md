@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.16] - 2026-06-02 — DB `busy_timeout` (no more `SQLITE_BUSY` on writer contention)
+
+### Fixed
+- **`openDb` now sets `PRAGMA busy_timeout = 5000`.** Previously it set only `foreign_keys` + WAL, so the first contended `BEGIN IMMEDIATE` threw `SQLITE_BUSY` ("database is locked") **immediately** instead of waiting. WAL keeps readers off the writer's back, but writers still serialize — and `forum.db` has several: the live server (votes/posts/comments) plus the export and import cron workers, which share the `*/15` off-peak window (01:00–06:00) and so fire `BEGIN IMMEDIATE` on the same ticks. A momentary collision is expected and should wait-and-retry, not crash a worker with a hard error + operator mail + a wasted retry tick. 5s is a generous ceiling a sub-millisecond write txn never approaches.
+
+  Surfaced while tracing a one-off `database is locked` crash in the import worker (a stray duplicate cron — since removed — was a fourth concurrent writer). The crash itself predated the worker flightlog wiring, so it was never an observability gap; flightlog + pulselog were clean throughout. This is the root-cause durability fix: contention is now absorbed regardless of how many writers collide.
+
+- `test/integration/db-pragmas.test.js` (+1): asserts `openDb` applies `foreign_keys`, WAL, and `busy_timeout = 5000`. Suite 868 → 869.
+
 ## [0.12.15] - 2026-06-01 — two operator-tunable monitoring knobs
 
 ### Added — `operator.backupKeepLast` + `operator.diskMaxPercent`
