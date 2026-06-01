@@ -90,9 +90,10 @@ Other forum software ([NodeBB](https://nodebb.org), [Discourse](https://www.disc
 
 ## For operators
 
-- **Stack**: Node.js ≥ 22.5, SQLite (single file), no build step, ~5 runtime deps.
+- **Stack**: Node.js ≥ 22.5, SQLite (single file), no build step, ~7 runtime deps (all zero-dependency themselves).
 - **Install**: `git clone && npm install && npm run migrate && npm start` — one HTTP port, default 8080.
-- **Backup**: `cp` the SQLite file + the `posts/` directory.
+- **Backup**: both SQLite DBs + `posts/`, tarballed nightly by pulselog via bundled `node:sqlite` (`VACUUM INTO`, WAL-safe — don't hot-`cp` a live DB), newest 7 kept.
+- **Observability**: structured errors (uncaught/unhandled/500s) append to `data/logs/errors.jsonl` via [flightlog](https://github.com/hamr0/flightlog) — an in-process recorder, `jq`/`tail` to read, no aggregator/UI. An external watcher, [pulselog](https://github.com/hamr0/pulselog), probes health every 5 min, emails a weekly digest, and runs the nightly backup — on by default, autoconfig from `config.json`, off via `operator.monitoring: false`.
 - **Mail**: dev → [Mailpit](https://github.com/axllent/mailpit) on port 1025; prod → see the [knowless OPS guide](https://github.com/hamr0/knowless/blob/main/OPS.md).
 - **Spam knobs**: tighten via `config.json` (rate limits, link cap, regex patterns, URLhaus). Floors are PRD-locked — operators tighten, never loosen.
 - **Per-sub settings**: owner sets auto-uncollapse thresholds at `/sub/create`. Spam knobs are forum-wide on purpose.

@@ -5,7 +5,7 @@
 >
 > Full version trail in [CHANGELOG.md](../../CHANGELOG.md). Earlier milestone-close points retroactively tagged 0.5.0 (M5) → 0.6.0 (M6) → 0.7.0 (M7) → 0.8.0 (M8). 0.9.0 = first canonical deploy.
 >
-> Stack: Node.js >= 22.5 | five runtime deps | one HTTP port | SQLite single-file | no build step.
+> Stack: Node.js >= 22.5 | seven runtime deps | one HTTP port | SQLite single-file | no build step.
 >
 > Human-readable companion: [Operator Guide](operator-guide.md)
 
@@ -49,6 +49,8 @@ The forum is one operator's instance. If a moderator goes bad or the operator ch
 | Refresh disposable-email blocklist | install `scripts/cron-refresh-disposable.sh` quarterly. See [`cron-jobs.md`](cron-jobs.md) |
 | Nightly full-state backup | pulselog `--backup` (on by default) — tarballs `forum.db` + `knowless.db` + `posts/` (+ `config.json`, `spam-patterns.txt`) via bundled `node:sqlite` (no system `sqlite3` needed), newest 7 kept. `npm run gen-pulselog` + the crontab in [`cron-jobs.md`](cron-jobs.md) |
 | Weekly stats digest by email | pulselog `--digest` (on by default) — runs `bin/stats.js --metrics-json`, delivers a 4-week WoW table + flightlog error rollup to `operator.email`. See [`cron-jobs.md`](cron-jobs.md) |
+| Read the in-process error trail | `data/logs/errors.jsonl` (gitignored; flightlog appends uncaught/unhandled/500s, `jq`/`tail` to read; override path with `PLATO_FLIGHTLOG_FILE`) |
+| Turn monitoring/backups off | `config.json` `operator.monitoring: false` → `npm run gen-pulselog` writes nothing (health/digest/backup all disabled) |
 | Set operator contact (cron emails, restart unit) | `config.json` `operator` block (`email`, `service`) |
 | Set the feedback contact link | `config.json` `branding.feedbackEmail`. Reflects in **two** places: the global footer (`feedback · about · modlog`) and the opening sentence of `/about` ("questions or feedback" mailto link). Address sits behind link text in both. ASCII, valid email shape, ≤120 chars. |
 | Set the site rules (rendered on `/about` + magic-link email signature) | `config.json` `branding.rules` (array, ≤4 strings, joined ≤240 chars, printable ASCII, no URI schemes / bare domains — phishing-vector defence on email footer) |
@@ -474,8 +476,8 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 - Tested on **RackNerd KVM VPS** (~$20/year, 1 GB / 1 vCPU is plenty). Port 25 + PTR are unblocked via a one-paragraph support ticket — paste-ready text in [operator-guide § Hosting](operator-guide.md#hosting--budget-vps-recommendation). Hetzner / OVH / Linode / Vultr also work; avoid DigitalOcean (port-25 unblock is harder to get).
 - Reverse proxy (Caddy/nginx) for TLS. M8 adds opinionated Caddy config.
 - Backups: run `node_modules/.bin/pulselog --backup --config pulselog.config.json` — it snapshots both `forum.db` and `knowless.db` via bundled `node:sqlite` (`VACUUM INTO`, WAL-safe hot copy, no system `sqlite3`) and tars `posts/` + config. Don't `cp` a live WAL DB; the `VACUUM INTO` snapshot is the safe path.
-- Logging: plato writes to stdout/stderr. The deploy-shipped systemd unit redirects both to `/var/log/plato.log` (so journalctl shows lifecycle only; app output is in plato.log). knowless's mail-outcome hooks land here as `[plato mail.submit]` / `[plato mail.fail]` / `[plato mail.suppressed]` — grep-friendly observability without a metrics endpoint.
-- Monitoring: hit `/` and check 200; failures are loud. No metrics endpoint yet.
+- Logging: plato writes to stdout/stderr. The deploy-shipped systemd unit redirects both to `/var/log/plato.log` (so journalctl shows lifecycle only; app output is in plato.log). knowless's mail-outcome hooks land here as `[plato mail.submit]` / `[plato mail.fail]` / `[plato mail.suppressed]` — grep-friendly. **Structured errors** (uncaught exceptions, unhandled rejections, request 500s — query string stripped so magic-link tokens never land) are appended to `data/logs/errors.jsonl` (gitignored) by [flightlog](https://github.com/hamr0/flightlog), an in-process recorder. `jq`/`tail` is the whole read surface; flightlog is deliberately not a logger/aggregator/UI. Override the sink with `PLATO_FLIGHTLOG_FILE`.
+- Monitoring: [pulselog](https://github.com/hamr0/pulselog) (external watcher, **on by default**) probes localhost `/healthz` + disk + backup-freshness + the `plato.service` every 5 min — silent on green, one email on break with the last 20 `errors.jsonl` lines pasted in — plus a weekly digest and the nightly backup. `npm run gen-pulselog` regenerates `pulselog.config.json` from `config.json`; `operator.monitoring: false` is the off switch. There's no in-process metrics endpoint — `/healthz` is the probe surface.
 - Secrets: `KNOWLESS_SECRET` is the entire identity of the forum. Losing it doesn't break anything (handles still work — they were derived once and stored). Leaking it lets someone forge handles, so treat like a session-signing key. The Ed25519 archive-signing privkey lives in the DB's `instance_keypair` table (M7/B4); leaking it lets someone forge archives that match this instance's pubkey, so back up `forum.db` securely and don't ship it to anyone you don't trust.
 
 ## Gotchas

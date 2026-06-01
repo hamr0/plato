@@ -19,7 +19,7 @@ plato adopts [pulselog](https://github.com/hamr0/pulselog) (`^0.4.1`, zero prod 
 
 ### Changed
 - `bin/stats.js` gains `--metrics-json` (flat `{name: int}` for pulselog's `metricsCommand`); its daily-snapshot role moves to pulselog's digest history.
-- `deploy/plato.cron`, `bootstrap.sh` (adds a `gen-pulselog` step), `plato.logrotate`, and the deploy-guide / operator-guide / cron-jobs / plato.context docs updated for the pulselog cron block and the default/adjustable/off surface.
+- `deploy/plato.cron`, `bootstrap.sh` (adds a `gen-pulselog` step), `plato.logrotate`, and the deploy-guide / operator-guide / cron-jobs / plato.context docs updated for the pulselog cron block and the default/adjustable/off surface. README + PRD (§Technical Stack) now carry the flightlog/pulselog observability story, and the runtime-dep count is corrected (5 → 7, both additions zero-dep) in README + plato.context.
 - Genericized the example domain in the deploy-guide and `plato.context` config sample (was a live instance hostname) to `forum.example.com` / `your-forum-name` — the guides read as domain-agnostic for any operator.
 
 ### Removed
