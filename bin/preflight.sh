@@ -51,8 +51,8 @@ if command -v node >/dev/null 2>&1; then
 else
   fail "node not on PATH"
 fi
-# No sqlite3 CLI check: plato uses Node's bundled node:sqlite for both the
-# app and backups (bin/backup.sh), so the system CLI is not a dependency.
+# No sqlite3 CLI check: plato uses Node's bundled node:sqlite for the app, and
+# pulselog's sqlite backup engine uses it too, so the system CLI is not a dependency.
 
 echo
 echo "mail:"

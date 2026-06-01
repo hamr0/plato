@@ -29,6 +29,14 @@ import { fileURLToPath } from 'node:url';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { upgradeFile } from '../src/archive/timestamp.js';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived daily worker. Per-file errors are
+// handled inline (log + continue); an unexpected throw in the orchestration
+// propagates to the global net — exitOnUncaught (default true) / exitOnRejection:true
+// log it + exit non-zero. bootCheck:false so an unwritable error sink can't take
+// down the upgrade work.
+initFlightlog({ proc: 'ots-upgrade', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');

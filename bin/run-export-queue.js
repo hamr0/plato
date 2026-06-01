@@ -33,6 +33,14 @@ import { buildSubArchiveBytes, archiveFilenameFor } from '../src/archive/sub-exp
 import { buildUserArchiveBytes, userArchiveFilenameFor } from '../src/archive/user-export.js';
 import { getOrCreateInstanceKeypair, signBytes } from '../src/archive/signing.js';
 import { stampFile } from '../src/archive/timestamp.js';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived worker. exitOnRejection:true so a
+// stray rejection exits non-zero instead of a silent exit-0; bootCheck:false so
+// an unwritable error sink can't take down the actual export work. The global
+// net captures any throw before/after the try; captureSync in the job-failure
+// catch records the operational error (the catch bypasses the global handlers).
+const { captureSync } = initFlightlog({ proc: 'export-queue', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -177,6 +185,7 @@ try {
     });
   }
   console.error(`[export-queue] ${result} job=${job.id} attempt=${job.retry_count}: ${err.message}`);
+  captureSync(err, { where: 'export-queue', jobId: job.id, jobKind: job.kind, outcome: result });
   process.exit(1);
 }
 

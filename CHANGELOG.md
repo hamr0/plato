@@ -6,6 +6,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.12.14] - 2026-06-01 — pulselog watcher replaces the bespoke ops scripts
+
+### Added — `pulselog` (external watcher), on by default
+
+plato adopts [pulselog](https://github.com/hamr0/pulselog) (`^0.4.1`, zero prod deps) — the external sibling to flightlog (flightlog records errors from *inside* the process; pulselog probes from *outside* on a schedule). It replaces three hand-rolled scripts with one tested dependency, **on by default** with safe defaults that mirror what it replaces. Decision rationale: flightlog runs in-process with zero operator input, so it's a baked-in default; pulselog is out-of-process and its knobs are operator policy — but plato already collects `operator.email`, so default-on is viable, and **single source of truth** means generating pulselog's config from plato's.
+
+- **`bin/gen-pulselog-config.js`** (`npm run gen-pulselog`) — generates `pulselog.config.json` (gitignored, box-authored like `config.json`) from `config.json`: `operator.email` → all three modes' alerts (unset → log-only, no mail), `operator.service` → unit name, plato's paths → backup sources. Off switch: `operator.monitoring: false` writes nothing.
+- **health** (every 5 min) — probes localhost `/healthz`, disk, backup freshness, `plato.service`. Silent on green; one email on break with the last 20 flightlog error lines pasted in (`alert.logTail` → `errors.jsonl`). Exits 0 on a health failure (the email is the signal).
+- **digest** (weekly) — runs the new `bin/stats.js --metrics-json` for `{users,subs,posts,comments,votes}`, appends to `data/logs/stats.jsonl`, emails a WoW table + a 7-day flightlog rollup grouped by `proc`.
+- **backup** (nightly) — `node:sqlite` `VACUUM INTO` of both `forum.db` + `knowless.db` + `posts/` + `config.json` + `spam-patterns.txt` → `data/backups/plato-backup-<stamp>.tar.gz` (`0600`), newest 7. Exits 1 loud on failure.
+
+### Changed
+- `bin/stats.js` gains `--metrics-json` (flat `{name: int}` for pulselog's `metricsCommand`); its daily-snapshot role moves to pulselog's digest history.
+- `deploy/plato.cron`, `bootstrap.sh` (adds a `gen-pulselog` step), `plato.logrotate`, and the deploy-guide / operator-guide / cron-jobs / plato.context docs updated for the pulselog cron block and the default/adjustable/off surface. README + PRD (§Technical Stack) now carry the flightlog/pulselog observability story, and the runtime-dep count is corrected (5 → 7, both additions zero-dep) in README + plato.context.
+- Genericized the example domain in the deploy-guide and `plato.context` config sample (was a live instance hostname) to `forum.example.com` / `your-forum-name` — the guides read as domain-agnostic for any operator.
+
+### Removed
+- `bin/health-watch.sh`, `bin/stats-weekly.js`, `bin/backup.sh`, `bin/db-snapshot.mjs` (and `test/integration/backup.test.js`) — superseded by pulselog. The "both DBs get backed up" invariant the test guarded (the 0.12.6 fix) now lives in the generator's backup scope, locked by `test/integration/pulselog-config.test.js`.
+
+### Notes
+- **TLS-cert expiry stays on the daily `bin/check-cert.sh`, not pulselog health.** pulselog re-emails every failing run; at a 5-min cadence a cert at <14 days would email for ~2 weeks. Cert is slow-moving → daily, graduated. pulselog health carries only acute checks.
+- **`WriteResult.ok` still unused** (that was flightlog's, and plato's cron has no retrying supervisor — see 0.12.13).
+
+## [0.12.13] - 2026-06-01 — flightlog 0.4.0 + cron/queue workers join the flight recorder
+
+### Changed — bump `flightlog` `^0.3.1` → `^0.4.0`
+
+flightlog 0.4.0 shipped on the back of plato's own integration feedback (its CHANGELOG §15 cites plato): `captureSync` now returns a `WriteResult` (`{ ok, errno? }`), a repo-only `examples/read.js` reference reader, and two adopter gotchas drawn straight from plato — *strip the query string when logging a request* and *tag multi-process sinks with `proc`*, plus an audit note that **context keys aren't clobber-protected** (a `kind`/`ts`/`name`/`message`/`stack` key overwrites the record's core field). plato's 0.12.12 server wiring already conformed to all three (query stripped, `proc:'server'`, allow-listed context), so the bump needed no server-side change.
+
+### Added — the six short-lived cron/queue workers now flight-record failures
+
+0.12.12 wired only the long-lived server. The cron/queue workers were the named follow-up, gated on `captureSync` being able to report a swallowed write — now delivered. Each worker calls `initFlightlog({ proc, exitOnRejection: true, bootCheck: false })`: `exitOnRejection: true` so a stray rejection exits non-zero instead of a silent exit-0 (a per-invocation process misread as success); `bootCheck: false` so an unwritable error sink degrades to swallow-on-write instead of taking down the actual work. All append to the same `data/logs/errors.jsonl`, distinguished by `proc`.
+
+- **Global-net capture** (a throw propagates; `exitOnUncaught`/`exitOnRejection` record it): `check-sub-inactivity.js` (`proc:inactivity`), `run-ots-upgrade.js` (`proc:ots-upgrade`), `stats-weekly.js` (`proc:stats-weekly`). Install only — no other change.
+- **Explicit `captureSync`** in the worker's own top-level catch (which bypasses the global handlers): `run-export-queue.js` (`proc:export-queue`), `run-import-queue.js` (`proc:import-queue`), `refresh-urlhaus.js` (`proc:urlhaus`). Records the operational error with job context (`jobId`, `outcome`) before the existing `process.exit(1)`. Job context uses **`jobKind`, not `kind`** — `kind` would clobber the record's core field (the 0.4.0 audit gotcha).
+- New `test/integration/flightlog-cron.test.js` (2 tests) spawns one worker of each class to a forced failure and asserts the `proc`-tagged record lands and the process exits non-zero. Suite 857 → 859.
+
+**Deliberate non-use of `WriteResult.ok` for exit codes.** The canonical consumer of `{ ok }` is a process under a *retrying supervisor* that reads exit codes (e.g. gitdone's Postfix pipe → `EX_TEMPFAIL` → defer + retry). plato's workers run under plain `cron`, which doesn't retry on exit code; the queue workers re-queue in the DB, and flightlog already warns-once-to-stderr on a dropped write (which cron mails to the operator). So an `.ok`-driven `EX_TEMPFAIL` branch would be inert here — added behavior with no consumer — and is intentionally omitted. `captureSync` is used for the durable record; the bump to 0.4.0 stands on the latest contract, the `proc`/query-strip gotchas, and the `read.js` reference.
+
+## [0.12.12] - 2026-06-01 — error flight recorder (flightlog adoption)
+
+### Added — local error capture to JSONL via `flightlog`
+
+plato's only crash trail was `console.error` interleaved into `/var/log/plato.log` (operator-redirected, freeform, gone after `logrotate`). The 0.12.11 magic-link spam incident showed the gap: when something fails you want a durable, structured record you can read on a healthy box, not a grep through request noise. plato now adopts [`flightlog`](https://github.com/hamr0/flightlog) (`^0.3.1`, zero production deps) — the same error flight-recorder git-done runs.
+
+- **`src/flightlog.js`** — adopter glue (policy only; flightlog owns the mechanism). Chooses the sink path (`data/logs/errors.jsonl`, under the gitignored `data/`; override `PLATO_FLIGHTLOG_FILE`) and the static context every record carries (`{app:'plato', release:<version>, proc}`). flightlog never auto-harvests — it logs only what we pass — so nothing sensitive leaks unless we put it there.
+- **`bin/server.js`** — `initFlightlog({ proc: 'server' })` runs before any boot work, so a startup crash (bad config, unwritable DB) lands in the sink instead of vanishing. `exitOnUncaught: true` (systemd restarts a clean process); `exitOnRejection: false` (a stray un-awaited rejection must not down the long-lived server). The returned `capture` is threaded into `createApp`.
+- **`src/web/app.js`** — the top-level request `catch` now flight-records the failed request (`{ where:'request', method, path }`) alongside the existing `console.error` + 500. The **query string is stripped from `path`** so magic-link tokens in `/verify?token=…` / `/auth/callback` never land in the JSONL (flightlog's threat model: the adopter owns what goes into context). `capture` is `null` when `app.js` is imported as a module (tests), so the net is server-only.
+- Sink is created `0600`, self-rotates at ~2× 5 MB (current + one `.1`), and a broken sink is swallowed (never crashes the app). Documented in operator-guide → "When something goes wrong" with the `jq` recipe.
+
+Server-only for now. The short-lived cron/queue scripts (`bin/run-export-queue.js`, `run-import-queue.js`, `run-ots-upgrade.js`, `check-sub-inactivity.js`, `stats-weekly.js`, `refresh-urlhaus.js`) are the natural next adopters — each wants `exitOnRejection: true` + `bootCheck: false` + `captureSync` (a per-invocation process must exit non-zero on failure and must not die for a broken *error* sink). Not wired yet; tracked as a follow-up.
+
 ## [0.12.11] - 2026-05-31 — login rate limit buckets on the real client IP
 
 ### Security — per-IP login cap buckets on the real client IP (v0.12.11)

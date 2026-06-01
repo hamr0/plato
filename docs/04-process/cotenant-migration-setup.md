@@ -53,8 +53,9 @@ Order matters; it avoids split-brain writes:
 
 1. **Stop plato on the old box** — freezes writes.
 2. **Final DB copy, WAL-safe:** snapshot `forum.db` **and** `knowless.db` with
-   plato's bundled `node:sqlite` (`VACUUM INTO`, via `bin/db-snapshot.mjs`) or
-   `sqlite3 .backup` — never a raw `cp` (it races the WAL). rsync `posts/` and
+   plato's bundled `node:sqlite` `VACUUM INTO` (a one-liner:
+   `node -e 'new (require("node:sqlite").DatabaseSync)("forum.db",{readOnly:true}).exec("VACUUM INTO \x27/tmp/forum.db\x27")'`)
+   or `sqlite3 .backup` — never a raw `cp` (it races the WAL). rsync `posts/` and
    `data/`. Re-verify row counts and `PRAGMA integrity_check` on the target.
 3. **Flip DNS** — the A record(s) for your domain → the shared box's IP.
 4. **Issue the LE cert** on the target: `certbot --nginx -d your-domain`
@@ -80,11 +81,11 @@ Only the DNS A record changes. SPF (`v=spf1 … a …` follows the A record), DK
   distros ship a CLI older than 3.37, which **cannot open plato's `STRICT`
   schema**. plato runs on `node:sqlite`, so verify (and back up) the same way —
   the system CLI will either error or silently misbehave.
-- **Per-tenant ops mail.** The weekly digest and health-watch alerts default to
-  the system hostname — which on a shared box is the *box* name, not your
-  forum. Set `branding.forumName` (digest) and pass `DOMAIN=your-domain` to the
-  health-watch cron line, so each tenant's operational mail comes from, and
-  identifies as, its own domain.
+- **Per-tenant ops mail.** pulselog's digest/health alerts go to `operator.email`
+  with the `from` set to that same address (so the send aligns with the operator's
+  own MTA identity). On a shared box, give each tenant its own `config.json`
+  `operator.email` + `operator.service` and regenerate its `pulselog.config.json`
+  (`npm run gen-pulselog`), so each tenant's operational mail is distinct.
 - **uid hygiene.** Run every `git` / `npm` / `migrate` as `sudo -u plato -H`.
   Mixing root- and plato-owned files in `/opt/plato` causes
   `insufficient permission for adding an object to repository database` later;

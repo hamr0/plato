@@ -29,6 +29,14 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/db/index.js';
 import { runInactivitySweep, lastModActivity, SUB_INACTIVITY_THRESHOLD_MS } from '../src/content/mod.js';
 import { pruneOldDrafts, DRAFT_RETENTION_MS } from '../src/content/post.js';
+import { initFlightlog } from '../src/flightlog.js';
+
+// flightlog error net for this short-lived daily sweep. The sweep has no
+// top-level catch (a throw propagates), so the global net records it: exitOnUncaught
+// (default true) logs + exits non-zero on a throw, exitOnRejection:true does the
+// same for a stray rejection. bootCheck:false so an unwritable error sink can't
+// take down the actual sweep/prune work.
+initFlightlog({ proc: 'inactivity', exitOnRejection: true, bootCheck: false });
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');

@@ -15,7 +15,10 @@
 // Wire via system cron:
 //   35 4 * * * cd /opt/plato && node bin/stats.js >> /var/log/plato-stats.log 2>&1
 //
-// --dry-run prints the JSON line to stdout instead of appending.
+// --dry-run      prints the snapshot JSON line to stdout instead of appending.
+// --metrics-json prints a flat {"users":N,...} object (no snapshot_at) for
+//                pulselog's digest `metricsCommand` — pulselog owns the history,
+//                this is just the metrics source. Does not append.
 
 import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -29,6 +32,7 @@ const KNOWLESS_DB = process.env.KNOWLESS_DB_PATH ?? resolve(ROOT, 'knowless.db')
 const STATS_LOG = process.env.PLATO_STATS_LOG ?? resolve(ROOT, 'data/stats.log');
 
 const dryRun = process.argv.includes('--dry-run');
+const metricsJson = process.argv.includes('--metrics-json');
 
 function count(dbPath, sql) {
   if (!existsSync(dbPath)) return 0;
@@ -51,7 +55,10 @@ const snapshot = {
 
 const line = JSON.stringify(snapshot) + '\n';
 
-if (dryRun) {
+if (metricsJson) {
+  const { snapshot_at, ...metrics } = snapshot;
+  process.stdout.write(JSON.stringify(metrics) + '\n');
+} else if (dryRun) {
   process.stdout.write(line);
 } else {
   mkdirSync(dirname(STATS_LOG), { recursive: true });

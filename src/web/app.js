@@ -5502,7 +5502,7 @@ function resolveFeedPageSize(override) {
   return override;
 }
 
-export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined, evalBanner = false, lookupLastLoginAt = null }) {
+export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = null, baseUrl, rateLimits = {}, spamPatternsFile = null, linkCaps = {}, urlhausCacheFile = null, branding: brandingOverrides = {}, urlDisplayMax = undefined, feedPageSize = undefined, evalBanner = false, lookupLastLoginAt = null, captureError = null }) {
   // Operator-replaceable branding: forum name (top wordmark), top
   // tagline (subtitle under the wordmark on the home page), and
   // hostedBy (the @-handle shown in the footer's
@@ -5692,6 +5692,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       send(res, 404, quickPage(req, { db, auth }, 'not found', html`<p class="muted">not found</p>`));
     } catch (err) {
       console.error(err);
+      // Flight-record the failed request. async capture is fine — the request
+      // already failed; we don't block the 500 on a disk flush. Strip the query
+      // string (split on '?') so magic-link tokens in /verify?token=… and
+      // /auth/callback never land in the JSONL. null when imported as a module
+      // (tests) or run without the error net.
+      if (captureError) captureError(err, { where: 'request', method: req.method, path: (req.url || '').split('?')[0] });
       send(res, 500, '<pre>500</pre>');
     }
   };

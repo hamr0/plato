@@ -1,134 +1,125 @@
 # Cron jobs
 
-Plato itself is a single Node process. A handful of operator-facing maintenance tasks run outside the process via system cron — backups, blocklist refresh, malicious-URL feed pull, and a weekly stats digest. They're optional in the sense that plato boots and serves traffic without them, but skipping them means stale defenses and lost data on a drive failure.
+Plato itself is a single Node process. A handful of maintenance tasks run outside the process via system cron. Two kinds:
 
-All cron jobs **autoconfig** from `config.json` and the script's own location. There are no operator edits inside any of the scripts; everything operator-specific reads from the `operator` block:
+1. **plato's own scripts** — URLhaus blocklist refresh, disposable-domains refresh, the daily sub-inactivity/draft-prune sweep. These are plato-specific and ship in `bin/` / `scripts/`.
+2. **[pulselog](https://github.com/hamr0/pulselog)** — the external watcher (the outside sibling to flightlog, which records errors from *inside* the app). One dependency, three modes: **health** (is it up), **digest** (how's it trending), **backup** (is it safe). It replaces the old bespoke `health-watch.sh` / `stats.js` daily + `stats-weekly.js` / `backup.sh`. **On by default** with safe defaults; one config field turns it off.
+
+They're optional in the sense that plato boots and serves traffic without any of them, but skipping them means stale defenses, no alerting, and lost data on a drive failure.
+
+## Operator config — one block, both kinds read it
+
+Everything operator-specific lives in `config.json`'s `operator` block; the forum process never reads it.
 
 ```jsonc
 {
   "operator": {
-    "email": "you@example.com",
-    "service": "plato"
+    "email": "you@example.com",   // alerts + digest go here; unset → pulselog logs only, no mail
+    "service": "plato",            // systemd unit name (health `service` check; restart-on-change)
+    "monitoring": true             // OFF SWITCH: false → no pulselog config generated, skip its timers
   }
 }
 ```
 
-- `email` — where success/failure / digest reports are sent. If unset, scripts print to stderr (cron's default mailer or `journalctl` surfaces it).
-- `service` — the systemd unit name to `systemctl restart` when a snapshot changes. Defaults to `plato`.
+pulselog reads its **own** `pulselog.config.json`, which plato **generates from the block above** so the email / base URL / service name live in one place:
 
-Mail uses `/usr/sbin/sendmail -t` — same binary that magic-link mail flows through (postfix, on a postfix box). One MTA, one DKIM signing path, one queue. Cron alerts inherit the same SPF/DKIM/DMARC posture as user-facing mail. See [`deploy-guide.md`](deploy-guide.md) §5 for postfix + opendkim + DNS setup.
+```bash
+npm run gen-pulselog        # node --env-file=.env bin/gen-pulselog-config.js  →  writes pulselog.config.json
+```
+
+Re-run it whenever `config.json` changes. `pulselog.config.json` is gitignored (box-authored, like `config.json`). What flows in: `operator.email` → all three modes' alerts; `branding.baseUrl` (or `KNOWLESS_BASE_URL`) → the TLS-cert check's host (auto-disabled if neither is set); plato's DB/posts paths → the backup sources.
+
+Mail uses the system `mail`/`sendmail` — the same binary magic-link mail flows through (postfix on a postfix box), so cron alerts inherit the same SPF/DKIM/DMARC posture. See [`deploy-guide.md`](deploy-guide.md) §5.
 
 ## The jobs
 
-| Cadence | Script | What it does |
+| Cadence | Command | What it does |
 |---|---|---|
-| Hourly @ :00 | `bin/refresh-urlhaus.js` | Pulls the [URLhaus](https://urlhaus.abuse.ch/) malicious-URL feed → `data/urlhaus.txt`. Posts/comments linking to a blocked host auto-collapse + flag with `blocked-url: <host>`. |
-| Daily @ 04:30 UTC | `bin/backup.sh` | Tar-snapshots `forum.db` + `knowless.db` + `posts/` + `config.json` + `spam-patterns.txt` to `$BACKUP_DIR/plato-backup-<timestamp>.tar.gz`. Snapshots both databases with plato's bundled `node:sqlite` (`VACUUM INTO`, WAL-safe) — no system `sqlite3` CLI needed, so it works on any distro. Keeps the newest `BACKUP_KEEP` archives (default 7; drop to 4 if disk-tight). Exits non-zero on failure; the cron `MAILTO` surfaces it. |
-| Daily @ 04:35 UTC | `bin/stats.js` | Appends one JSON line to `data/stats.log` with `{snapshot_at, users, subs, posts, comments}`. Append-only — never rewrites. `--dry-run` prints to stdout. |
-| Weekly Mon @ 06:00 UTC | `bin/stats-weekly.js` | Reads `data/stats.log`, groups by ISO week, keeps the latest snapshot per week, takes the most recent 4 weeks, renders a fixed-width table with WoW deltas, mails to `operator.email`. `--dry-run` prints to stdout. |
-| Quarterly, Jan/Apr/Jul/Oct 1st @ 06:00 UTC | `scripts/cron-refresh-disposable.sh` | Refreshes `disposable-domains.txt` from upstream (~5400 domains, MIT), restarts the service if the snapshot changed, mails the operator. |
-| Daily @ 05:15 UTC | `bin/check-sub-inactivity.js` | Two daily housekeeping passes. (1) Walks every active sub; auto-disables any whose mods (owner + co-mods) have been silent for >30 days. Synthesizes a public modlog row (`action=auto_disable_inactivity`, `mod_handle=SYSTEM_HANDLE`). Subs with zero mods are skipped. (2) Prunes drafts older than 24h (`pruneOldDrafts`) — drafts only carry a post across the 15-min magic-link round-trip, so older rows (orphaned or finalized) are dead weight; the published posts they became are untouched. `--dry-run` lists what would be disabled / pruned without writing. |
+| Every 5 min | `pulselog --config pulselog.config.json` | **health** — probes localhost `/healthz`, disk, backup freshness, the `plato.service` unit. **Silent on green**; one summary email when something breaks (with the last 20 flightlog error lines pasted in). Exits 0 even on a health failure — the alert is the signal. (TLS-cert expiry is *not* here — it's slow-moving and a 5-min cadence would re-email for days; `bin/check-cert.sh` covers it daily.) |
+| Weekly Mon @ 06:00 UTC | `pulselog --digest --config pulselog.config.json` | **digest** — runs `bin/stats.js --metrics-json` for `{users, subs, posts, comments, votes}`, appends one snapshot to its history (`data/logs/stats.jsonl`), and emails a week-over-week table plus a 7-day flightlog error rollup (grouped by `proc`). |
+| Daily @ 04:30 UTC | `pulselog --backup --config pulselog.config.json` | **backup** — `VACUUM INTO` dumps of `forum.db` + `knowless.db` (WAL-safe, in-process `node:sqlite`), plus `posts/` + `config.json` + `spam-patterns.txt`, tarred to `data/backups/plato-backup-<stamp>.tar.gz` (`0600`). Keeps newest 7. **Exits 1 loud on failure** (a missing backup must not be silent). |
+| Hourly @ :00 | `node bin/refresh-urlhaus.js` | Pulls the [URLhaus](https://urlhaus.abuse.ch/) malicious-URL feed → `data/urlhaus.txt`. Posts/comments linking to a blocked host auto-collapse + flag with `blocked-url: <host>`. |
+| Daily @ 05:15 UTC | `node bin/check-sub-inactivity.js` | (1) Auto-disables active subs whose mods have been silent >30 days (public `auto_disable_inactivity` modlog row). (2) Prunes drafts older than 24h. `--dry-run` previews. |
+| Quarterly, Jan/Apr/Jul/Oct 1st @ 06:00 UTC | `scripts/cron-refresh-disposable.sh` | Refreshes `disposable-domains.txt` from upstream, restarts the service if the snapshot changed, mails the operator. |
 
-### Counter definitions
+### Counter definitions (digest)
 
-- **users** — `knowless.db.handles` row count. Anyone who has ever requested a magic link, including never-posted lurkers. This is the largest definition of "users on this instance"; if you want "users who have actually posted," query `forum.db.handles` instead.
+- **users** — `knowless.db.handles` row count: anyone who ever requested a magic link, lurkers included. The largest honest definition of the install base.
 - **subs** — `forum.db.subs` row count.
-- **posts**, **comments** — `forum.db` row counts excluding `removed_at IS NOT NULL`. Soft-removed and hard-removed rows both drop from the count.
+- **posts**, **comments** — `forum.db` row counts excluding `removed_at IS NOT NULL`.
+- **votes** — `forum.db.votes` row count (cast votes).
 
-### Sample weekly digest
+### Sample digest
 
 ```
-plato weekly stats — 2026-W16 → 2026-W19
-host: forum.example.com
-snapshots in log: 28
+your-forum weekly stats — 2026-W19 → 2026-W22
+weeks in log: 4
 
-week     |  users     Δ |  subs     Δ |  posts     Δ |  cmnts     Δ
--------------------------------------------------------------------
-2026-W19 |     35    +2 |    12       |     57    +2 |     77    +5
-2026-W18 |     33    +2 |    12    +1 |     55    +7 |     72   +12
-2026-W17 |     31    +3 |    11    +1 |     48    +6 |     60    +9
-2026-W16 |     28       |    10       |     42       |     51
+week     |   users    Δ |    subs    Δ |   posts    Δ | comments    Δ |   votes    Δ
+------------------------------------------------------------------------------------
+2026-W22 |      35   +2 |      12      |      57   +2 |      77    +5 |     221  +18
+2026-W21 |      33   +2 |      12   +1 |      55   +7 |      72   +12 |     203  +20
+…
+flightlog (last 7d): 31 errors. top: server×22, import-queue×7.   ≥flag: server
 ```
 
-Δ blank when zero or no prior week in the window.
+Δ is week-over-week; blank when zero or no prior week.
 
 ## Deployment
 
-This is the install you do **once per instance**, after `npm install` + `npm run migrate` + first `npm start`. Replace `/opt/plato` with your install path.
+Once per instance, after `npm ci --omit=dev` + `npm run migrate` + first start. Replace `/opt/plato` with your install path.
 
-### 1. Set the operator block
+### 1. Set the operator block (above) and generate the pulselog config
 
-```jsonc
-// config.json
-{
-  "operator": {
-    "email":   "you@example.com",
-    "service": "plato"
-  }
-}
+```bash
+cd /opt/plato
+sudo -u plato -H npm run gen-pulselog      # writes pulselog.config.json from config.json
 ```
 
-The forum process ignores this block — only cron tooling reads it. The forum will not restart itself; you can edit `operator.email` and the next cron run picks it up without touching plato.
+To run **without** monitoring, set `"monitoring": false` and skip steps 1's generate + the three pulselog crontab lines below.
 
 ### 2. Install the crontab fragment
 
-Add to **root crontab** (`sudo crontab -e`). All five lines, exactly as shown:
+Add to **root crontab** (`sudo crontab -e`):
 
 ```
 # plato — see docs/02-features/cron-jobs.md
 
+# pulselog health: every 5 min, silent on green, emails on break
+*/5 * * * *         cd /opt/plato && node_modules/.bin/pulselog --config pulselog.config.json >> /var/log/plato-health.log 2>&1
+
+# pulselog backup: daily 04:30 UTC (forum.db + knowless.db + posts/), 7 newest kept
+30 4 * * *          cd /opt/plato && node_modules/.bin/pulselog --backup --config pulselog.config.json >> /var/log/plato-backup.log 2>&1
+
+# pulselog digest: weekly Mon 06:00 UTC, stats + flightlog rollup to operator.email
+0 6 * * 1           cd /opt/plato && node_modules/.bin/pulselog --digest --config pulselog.config.json >> /var/log/plato-stats.log 2>&1
+
 # Hourly: URLhaus malicious-URL feed
 0 * * * *           cd /opt/plato && node bin/refresh-urlhaus.js >> /var/log/plato-urlhaus.log 2>&1
 
-# Daily 04:30 UTC: full-state backup (forum.db + knowless.db + posts/), 7 newest kept
-30 4 * * *          cd /opt/plato && bin/backup.sh >> /var/log/plato-backup.log 2>&1
-
-# Daily 04:35 UTC: counter snapshot to data/stats.log
-35 4 * * *          cd /opt/plato && node bin/stats.js >> /var/log/plato-stats.log 2>&1
-
-# Weekly Mon 06:00 UTC: stats digest email to operator
-0 6 * * 1           cd /opt/plato && node bin/stats-weekly.js >> /var/log/plato-stats.log 2>&1
+# Daily 05:15 UTC: sub inactivity sweep + draft prune
+15 5 * * *          cd /opt/plato && node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
 
 # Quarterly Jan/Apr/Jul/Oct 1st 06:00 UTC: disposable-domains refresh
 0 6 1 1,4,7,10 *    /opt/plato/scripts/cron-refresh-disposable.sh
-
-# Daily 05:15 UTC: sub inactivity sweep — auto-disables subs whose mods
-# have been silent for 30+ days (see plato.context.md §Sub state model).
-15 5 * * *          cd /opt/plato && node bin/check-sub-inactivity.js >> /var/log/plato-inactivity.log 2>&1
 ```
 
 ### 3. Verify each job manually
 
-You don't have to wait a quarter to know it works. From the install dir:
+From the install dir — if it fails here, it'll fail under cron too:
 
 ```bash
-# URLhaus feed (writes data/urlhaus.txt)
-node bin/refresh-urlhaus.js
-
-# Backup (writes backups/plato-backup-<timestamp>.tar.gz)
-bin/backup.sh
-ls -lh backups/
-
-# Stats snapshot (appends to data/stats.log)
-node bin/stats.js
-tail -1 data/stats.log
-
-# Stats weekly digest (prints to stdout, no mail)
-node bin/stats-weekly.js --dry-run
-
-# Disposable-domains (rewrites disposable-domains.txt)
-./scripts/refresh-disposable-domains.sh
-
-# Sub inactivity sweep (writes auto_disable_inactivity modlog rows + disabled_at)
-node bin/check-sub-inactivity.js --dry-run    # preview what would be disabled
-node bin/check-sub-inactivity.js               # actually run
+node_modules/.bin/pulselog --backup --config pulselog.config.json   # writes data/backups/*.tar.gz
+ls -lh data/backups/
+node_modules/.bin/pulselog --digest --dry-run --config pulselog.config.json   # renders the email, no send/append
+node_modules/.bin/pulselog --config pulselog.config.json            # health: silent if all green; logs data/logs/health.jsonl
+node bin/refresh-urlhaus.js                                          # writes data/urlhaus.txt
+node bin/check-sub-inactivity.js --dry-run                          # preview disables/prunes
 ```
-
-If any of these fails on a fresh install, the cron version will fail too — fix it now while you're watching, not at 04:30 next Monday.
 
 ### 4. Confirm mail delivery
 
-The first cron-driven failure or weekly digest is when you discover whether `/usr/sbin/sendmail` is configured. To preflight:
+The first health break or weekly digest is when you find out whether `mail`/`sendmail` works. Preflight:
 
 ```bash
 echo 'plato cron preflight' | /usr/sbin/sendmail -t <<EOF
@@ -138,52 +129,35 @@ plato preflight from $(hostname)
 EOF
 ```
 
-If you don't get the email, fix `/usr/sbin/sendmail` before relying on cron alarms. On a postfix box (the recommended setup for plato), `/usr/sbin/sendmail` is provided by postfix itself, and the message inherits the same opendkim signing path as user-facing mail. Full walkthrough in [`deploy-guide.md`](deploy-guide.md) §5.
+No MTA on the box? Add a sendmail shim (e.g. `msmtp` + `msmtp-mta`) — see pulselog's `msmtp → Gmail` recipe in its `pulselog.context.md`. Until then, pulselog logs the JSONL line and sends nothing.
 
 ## Why these aren't in-process
 
-Plato's design rule is "one process, one DB, one port." Pulling external feeds inside the request loop would turn an outage at the upstream (URLhaus, GitHub) into latency or 5xxs in the forum itself. Cron isolates that surface: if a feed is unreachable, the existing snapshot keeps working until the next successful pull, and the operator gets a failure email rather than user-facing errors.
+Plato's design rule is "one process, one DB, one port." Pulling external feeds or running backups inside the request loop would turn an upstream outage into latency or 5xxs in the forum. Cron isolates that surface — and pulselog watching from *outside* the process is the whole point: a probe of `/healthz` catches a hung process that an in-process check never could.
 
-It also keeps the security posture auditable. The disposable-domains snapshot lives in your git checkout. A remote list change can't silently expand the block surface — it only takes effect after a quarterly cron run + service restart, which the operator sees in their inbox.
+## The shared JSONL dialect (flightlog + pulselog)
 
-## Why these cadences
+Both tools write one JSON line per event in the same core shape (`ts`, `kind`, …), each to its **own** file under `data/logs/`:
 
-- **Hourly** for URLhaus matches what the upstream feed publishes; faster wastes their bandwidth, slower means a malicious URL stays linkable longer than necessary.
-- **Daily** for backups + stats snapshots is the lowest cadence that survives a same-day drive loss. Per-snapshot work is tiny (~hundreds of KB at 100 active users).
-- **Weekly** for the stats digest is the fastest cadence at which week-over-week deltas mean anything. Daily digests would have noisy noise and train operators to ignore the email.
-- **Quarterly** for disposable-domains because the upstream churns slowly — most domains stay on the list for years. 4 emails/year is the right operator-cognitive-load budget.
+| File | Writer | `kind` |
+|---|---|---|
+| `errors.jsonl` | flightlog (in-process) | `uncaught` / `unhandledRejection` / `manual` |
+| `health.jsonl` | pulselog health | `health` |
+| `stats.jsonl` | pulselog digest | `stats` |
+| `backup.jsonl` | pulselog backup | `backup` |
 
-## What "restart on change" means
+Compose them at read time:
 
-Only `cron-refresh-disposable.sh` issues a `systemctl restart`, and only when the snapshot's sha256 changed. Most quarterly runs are no-ops at the snapshot level (upstream may have updated nothing meaningful since last time) and skip the restart. URLhaus, backups, and stats never restart anything — URLhaus is re-read on each post submission, backups are read-only, stats only write to a separate log file.
-
-## Mirroring snapshots back to git
-
-When the disposable cron rewrites `disposable-domains.txt` on the VPS, the working copy diverges from `origin/main`. Drift is harmless (snapshot is append-mostly data), but if you want to keep `origin` honest, the operator email includes the exact `scp` + `git commit` recipe to mirror the change back from your laptop.
-
-## Failure mode
-
-The shell refresh script (`cron-refresh-disposable.sh`) `exit 0`s even on failure and mails the operator itself — the email *is* the signal. `bin/backup.sh` and the node jobs instead exit non-zero on failure, so the cron `MAILTO` (or `journalctl`) surfaces it. Either way a failed backup reaches you the same day, and a missing weekly digest is itself an alarm.
-
-## Disk pressure
-
-Backups are the only job with disk-growth risk. At ~700KB/archive for a small instance, 7 archives = ~5MB; at 50MB/archive for a busy one, 7 archives = ~350MB. If you're running tight on disk:
-
-```bash
-BACKUP_KEEP=4 /opt/plato/bin/backup.sh
+```sh
+jq -s 'sort_by(.ts)' data/logs/*.jsonl              # one timeline across all signals
+jq 'select(.kind=="backup" and .status=="fail")' data/logs/backup.jsonl
 ```
 
-…or set the env var in the crontab line itself:
-
-```
-30 4 * * * cd /opt/plato && BACKUP_KEEP=4 bin/backup.sh >> /var/log/plato-backup.log 2>&1
-```
-
-The stats log grows ~120 bytes/day forever; at 10 years it's still under 500KB. Not worth pruning.
+All are created `0600` and self-bound (`maxBytes` rotation for health; append-only-but-tiny for stats/backup history). No rotation to configure.
 
 ## Rotating the operator-redirected cron logs
 
-Each cron line in this guide redirects stdout/stderr to a file under `/var/log/plato-*.log`. Those grow over time. plato doesn't rotate them — that's `logrotate`'s job, and it's already on every VPS. Drop the following at `/etc/logrotate.d/plato`:
+The crontab lines redirect stdout/stderr to `/var/log/plato-*.log`. plato doesn't rotate those — that's `logrotate`'s job. Drop this at `/etc/logrotate.d/plato`:
 
 ```
 /var/log/plato*.log {
@@ -197,6 +171,8 @@ Each cron line in this guide redirects stdout/stderr to a file under `/var/log/p
 }
 ```
 
-Daily rotation, 14-day retention, gzip-compressed. `copytruncate` means cron jobs don't have to be told to reopen their logs — the truncate happens in place.
+The pulselog/flightlog JSONLs under `data/logs/` are **not** these files — they self-manage; leave them out of logrotate.
 
-`$BACKUP_DIR/health.log` (M8/B4) and `data/stats.log` (M8/B5) are written by plato itself, not by cron-shell-redirect, and stay small by design (one line per failure event / one line per day). No rotation needed.
+## Disk pressure
+
+Backups are the only disk-growth risk. ~200KB/archive for a small instance × 7 = ~1.4MB; ~50MB/archive busy × 7 = ~350MB. Tighten retention in `pulselog.config.json` (`backup.keepLast`, or add `backup.keepDays`) and re-run `npm run gen-pulselog` is **not** needed — edit the generated file directly, or lower the generator's default and regenerate. The stats/backup history JSONLs grow ~one line/week — negligible.

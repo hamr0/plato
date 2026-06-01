@@ -9,9 +9,9 @@
 # Postfix has its own logrotate config (/etc/logrotate.d/syslog or
 # /etc/logrotate.d/postfix on most distros) — we don't duplicate it.
 #
-# Files plato writes itself (./data/stats.log, $BACKUP_DIR/health.log) are
-# NOT rotated here — they grow ~one line per day or per failure event,
-# don't need rotation, and stats-weekly.js reads stats.log end-to-end.
+# The flightlog/pulselog JSONLs under ./data/logs/ (errors/health/stats/backup)
+# are NOT rotated here — flightlog/pulselog self-bound them (size-based rotation
+# or one-line-per-event), and the digest reads stats.jsonl end-to-end.
 
 /var/log/plato*.log {
     daily

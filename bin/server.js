@@ -7,9 +7,18 @@ import { openDb } from '../src/db/index.js';
 import { createAuth } from '../src/auth/index.js';
 import { loadDisposableDomains } from '../src/content/disposable-domain.js';
 import { createApp, resolveBrandingRules } from '../src/web/app.js';
+import { initFlightlog } from '../src/flightlog.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
+
+// Install the flightlog error net before any boot work runs, so an uncaught
+// exception or unhandled rejection during startup (bad config, unwritable db)
+// lands in the JSONL sink instead of vanishing. exitOnUncaught:true so systemd
+// restarts a clean process; exitOnRejection:false so a stray rejection doesn't
+// down the long-lived server. `capture` is threaded into createApp to record
+// failed requests without crashing the server.
+const { capture: flightlogCapture } = initFlightlog({ proc: 'server' });
 
 // Read version from package.json so the startup log line carries the
 // installed version. Operators can grep `journalctl -u plato | grep "plato v"`
@@ -50,7 +59,7 @@ const db = openDb(DB_PATH);
 const brandingRules = resolveBrandingRules(operatorConfig.branding?.rules);
 
 // knowless v0.2.1 mail-outcome hooks. plato logs each to stderr (captured
-// by systemd → /var/log/plato.log) so health-watch can grep success/failure
+// by systemd → /var/log/plato.log) so an operator can grep success/failure
 // rates. The legacy `[knowless] mail submit failed:` console.error fires
 // alongside onTransportFailure — both end up in the same logfile, with the
 // hook line being the structured one.
@@ -99,6 +108,7 @@ const handler = createApp({
   feedPageSize: operatorConfig.feedPageSize,
   evalBanner: process.env.PLATO_EVAL_BANNER === '1',
   lookupLastLoginAt: (handle) => knowlessStore.getLastLogin(handle),
+  captureError: flightlogCapture,
 });
 
 const server = http.createServer(handler);
