@@ -980,6 +980,18 @@ sudo systemctl restart plato
 
 If a step fails mid-bundle, fix the underlying issue and re-run the bundle from scratch — the steps are all idempotent (git pull is a no-op if up to date, npm ci re-installs cleanly, migrations are idempotent).
 
+**Crossing 0.12.14 (pulselog adoption) — one-time, only when upgrading a box first provisioned before 0.12.14.** After step 3, do the pulselog setup that a fresh `bootstrap.sh` would have done:
+
+```bash
+# generate pulselog's config from config.json (skip if operator.monitoring:false):
+sudo -u plato -H bash -c 'cd /opt/plato && npm run gen-pulselog'
+# then refresh the cron — re-run bootstrap.sh (rewrites /etc/cron.d/plato), or
+# hand-swap the retired health-watch.sh / backup.sh / stats-weekly.js lines for
+# the pulselog {health,--digest,--backup} block from deploy/plato.cron.
+```
+
+**flightlog needs nothing set** — it `mkdir -p`s `data/logs/` and write-probes the sink at boot; the records land in `data/logs/errors.jsonl` (gitignored), no config, no env var (override only via `PLATO_FLIGHTLOG_FILE`). Routine bumps *after* you're on ≥0.12.14 don't need `gen-pulselog` again unless you edited `config.json`.
+
 The footer of every page also shows `v<version>` next to the modlog link — eyeball check after refreshing the browser.
 
 **CSS-bumping releases** carry a `?v=N` cache token on the stylesheet link (`/static/style.css?v=N`). A 200 on that exact token after deploy proves the new CSS is being served — useful when a release moves visual chrome (mobile pass, theme changes, layout shifts) and you want to be sure browsers aren't showing the old stylesheet from a CDN or local cache:
