@@ -97,7 +97,7 @@ const HANDLE_RE = /^[0-9a-f]{64}$/;
 // from a renderer — use page() so the rule that "every page reads the
 // same as home, with the forum name replaced by the page action" holds
 // in code, not in convention.
-function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle, description = null, canonical = null, ogType = 'website', feed = null, headExtra = null }, body) {
+function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle, description = null, canonical = null, ogType = 'website', feed = null, headExtra = null, jsonLd = null }, body) {
   // `title` is the plain-text page title — used in <title> and og:title
   // attributes where raw HTML is invalid. `titleHtml` is the body-side
   // rendering, used in the brand-row h1 where decorations like the
@@ -107,7 +107,7 @@ function pageView({ db, currentHandle = null, title, titleHtml = null, subtitle,
   return layout(title, html`
     ${siteHeader({ db, currentHandle, title: titleHtml ?? title, subtitle })}
     ${body}
-  `, { description, canonical, ogType, feed, headExtra });
+  `, { description, canonical, ogType, feed, headExtra, jsonLd });
 }
 
 // One-line error/notice pages. Kept terse so the call sites stay readable
@@ -131,6 +131,13 @@ function layout(title, body, seo = {}) {
     ? html`<link rel="alternate" type="application/atom+xml" href="${seo.feed.href}" title="${seo.feed.title}">`
     : html``;
   const headExtra = seo.headExtra ?? html``;
+  // JSON-LD: application/ld+json is parsed, not executed — pure declarative
+  // data in the same open-web tier as <meta> (privacy-seo.md Tier 1). Helps
+  // agents/LLMs extract what this page is. Every `<` is escaped to its
+  // unicode form so a string value can never close the <script> early.
+  const jsonLdTag = seo.jsonLd
+    ? raw(`<script type="application/ld+json">${JSON.stringify(seo.jsonLd).replace(/</g, '\\u003c')}</script>`)
+    : html``;
   return render(html`<!doctype html>
 <html lang="en">
 <head>
@@ -154,6 +161,7 @@ function layout(title, body, seo = {}) {
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
 <link rel="stylesheet" href="/static/style.css?v=51">
 ${feedTag}
+${jsonLdTag}
 ${headExtra}
 ${themePaletteOverrides()}
 <script>(function(){var r=document.documentElement;var t=null;try{t=localStorage.getItem('theme');}catch(e){}if(t!=='light'&&t!=='dark'){var m=document.cookie.match(/(?:^|; )plato_theme=(light|dark)/);if(m)t=m[1];}if(t==='light'){r.classList.add('theme-light');r.style.colorScheme='light';}else if(t==='dark'){r.classList.add('theme-dark');r.style.colorScheme='dark';}r.classList.add('has-js');})();</script>
@@ -1387,6 +1395,13 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       title: branding.forumName,
       subtitle: branding.tagline,
       canonical: `${siteMeta.baseUrl}/`,
+      jsonLd: {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: branding.forumName,
+        url: `${siteMeta.baseUrl}/`,
+        description: defaultSiteDescription(),
+      },
     }, html`
       ${anonHintFor(currentHandle)}
       ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts, modSet: currentHandle ? new Set(listSubsModeratedBy(db, currentHandle)) : null })}
@@ -2738,6 +2753,17 @@ function renderPostPage(req, res, { db, auth, postsDir }, subName, postId, sort)
         : (postExcerpt(postBody) || `${post.title} — ${branding.forumName} //${subName}`),
       canonical: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(post.id)}`,
       ogType: 'article',
+      // DiscussionForumPosting is schema.org's forum-thread type. Removed
+      // posts emit none — same reasoning as the description fallback above:
+      // don't hand agents structured data for content the operator retracted.
+      jsonLd: post.removed_at ? null : {
+        '@context': 'https://schema.org',
+        '@type': 'DiscussionForumPosting',
+        headline: post.title,
+        url: `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(post.id)}`,
+        datePublished: new Date(post.created_at).toISOString(),
+        author: { '@type': 'Person', name: pseudonyms.get(post.handle) ?? post.handle.slice(0, 8) },
+      },
     }, html`
       <p><a href="/">← home</a> · <a href="/sub/${subName}">//${subName}</a>${importedSubChip({ sub })}</p>
       <div class="post post-page">
@@ -3052,7 +3078,17 @@ function renderAvatar(res, handle) {
 // (homepage, sub feeds, post pages, /about, /modlog, /subs); blocks
 // auth callbacks, POST endpoints, and the per-user /memlog. Sitemap
 // line points crawlers at the dynamic sitemap.xml.
+//
+// AI crawlers are named explicitly (privacy-seo.md Tier 2.5) so the
+// decision is on the record rather than implied by `User-agent: *`. Two
+// classes: retrieval/cite-live bots that fetch at answer-time and link
+// back, and training-corpus bots that ingest into model weights. A plato
+// instance is public forum copy meant to spread — both classes Allow: /.
+// The wildcard group's Disallow list still covers every other crawler;
+// the named bots are well-behaved GET-only and never construct the
+// token-gated /u/ feed URLs.
 function renderRobots(res) {
+  const aiCrawler = (name) => [`User-agent: ${name}`, 'Allow: /'];
   const lines = [
     'User-agent: *',
     'Allow: /',
@@ -3068,6 +3104,19 @@ function renderRobots(res) {
     'Disallow: /modlog/resolve',
     'Disallow: /sub/*/subscribe',
     'Disallow: /u/',
+    '',
+    '# Retrieval / cite-live — fetch at answer-time and link back to you',
+    ...aiCrawler('Claude-User'),
+    ...aiCrawler('Claude-SearchBot'),
+    ...aiCrawler('OAI-SearchBot'),
+    ...aiCrawler('ChatGPT-User'),
+    ...aiCrawler('PerplexityBot'),
+    '',
+    '# Training corpus — allowed: public forum copy is meant to spread',
+    ...aiCrawler('ClaudeBot'),
+    ...aiCrawler('GPTBot'),
+    ...aiCrawler('CCBot'),
+    '',
     `Sitemap: ${siteMeta.baseUrl}/sitemap.xml`,
     '',
   ];
@@ -3100,6 +3149,46 @@ function renderHumans(res) {
     `* no tracking pixels`,
     `* no email retention (magic-link login only; addresses hashed away on receipt)`,
     `* no algorithmic feed`,
+    ``,
+  );
+  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end(lines.join('\n'));
+}
+
+// /llms.txt — agent-facing index (privacy-seo.md Tier 2). Markdown: an H1
+// title, a one-line blockquote with the privacy invariant, then links to
+// the pages worth quoting. Think "sitemap.xml for LLMs" — plain prose an
+// agent reads instead of crawling and guessing. Low-cost include; adoption
+// by major crawlers is still partial. Lists the busiest public subs so an
+// agent gets concrete entry points, not just the chrome pages.
+function renderLlms(res, { db }) {
+  const base = siteMeta.baseUrl;
+  const subs = db.prepare(`
+    SELECT s.name FROM subs s
+    LEFT JOIN posts p ON p.sub_name = s.name AND p.removed_at IS NULL
+    GROUP BY s.name
+    ORDER BY COUNT(p.id) DESC, s.name
+    LIMIT 10
+  `).all();
+  const lines = [
+    `# ${branding.forumName}`,
+    ``,
+    `> ${defaultSiteDescription()}`,
+    ``,
+    `## Pages`,
+    `- [home](${base}/): the live forum index.`,
+    `- [about](${base}/about): who runs this instance, the content rules, and exactly what data it keeps.`,
+    `- [subs](${base}/subs): the directory of every public sub.`,
+    `- [modlog](${base}/modlog): every moderation action on this instance, public by design.`,
+  ];
+  if (subs.length) {
+    lines.push(``, `## Subs`);
+    for (const s of subs) lines.push(`- [//${s.name}](${base}/sub/${encodeURIComponent(s.name)})`);
+  }
+  lines.push(
+    ``,
+    `## Software`,
+    `- plato (Apache-2.0): https://github.com/hamr0/plato — magic-link auth, no accounts, no tracking, no analytics; posts are markdown on disk.`,
     ``,
   );
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -5600,6 +5689,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/humans.txt' && method === 'GET') return renderHumans(res);
+      if (path === '/llms.txt' && method === 'GET') return renderLlms(res, { db });
       if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
       if (path === '/.well-known/plato-pubkey' && method === 'GET') return renderPubkey(res, { db });
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
