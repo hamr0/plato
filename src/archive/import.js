@@ -122,6 +122,15 @@ export function parseAndVerifyArchive(tarBuf) {
 
   const postBodies = new Map();
   for (const p of posts) {
+    // post.id flows into an on-disk path (postFilePathFor) and a tar-entry
+    // lookup. Restrict it to path-safe characters so a crafted id can never
+    // contain a separator or '..' and shape a write outside posts/ — rather
+    // than relying on the tar reader's separate name check to catch it. Kept
+    // deliberately permissive on charset (forks may use non-hex ids); the
+    // point is to forbid '/', '.', and friends, not to pin a native format.
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(p.id))) {
+      throw new Error(`import: post id ${JSON.stringify(p.id)} contains characters not allowed in an id`);
+    }
     const body = entries.get(`posts/${p.id}.md`);
     if (!body) throw new Error(`import: posts/${p.id}.md is referenced in posts.json but missing from archive`);
     postBodies.set(p.id, body);

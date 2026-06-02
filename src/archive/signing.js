@@ -104,6 +104,58 @@ export function verifyBytes(publicKeyBytes, messageBytes, signatureBytes) {
   }
 }
 
+// Verify an imported archive's authenticity before any of its content is
+// trusted. The trust anchor is the key the *source host* publishes at
+// /.well-known/plato-pubkey — the TLS-authenticated origin of the URL the
+// importing user chose to import from. We confirm that key signed the archive
+// bytes and that its fingerprint matches the one the manifest declares.
+// Anchoring on the manifest's own base_url would be circular (the whole
+// manifest is attacker-supplied on a forged archive); anchoring on the
+// fetched-from origin is not — the user vouches for that host by pasting it.
+//
+// Returns { ok: true } on success, { ok: true, unsigned: true } when the
+// archive carries no fingerprint and unsigned imports are explicitly allowed,
+// or { ok: false, reason } describing the refusal. Never throws.
+export function verifyArchiveSignature({ gzBytes, sigBytes, pubkeyHex, manifestFingerprint, allowUnsigned = false }) {
+  if (manifestFingerprint == null) {
+    if (allowUnsigned) return { ok: true, unsigned: true };
+    return { ok: false, reason: 'archive is unsigned (manifest carries no pubkey fingerprint); set IMPORT_ALLOW_UNSIGNED=1 to accept unsigned archives' };
+  }
+  if (!sigBytes || !pubkeyHex) {
+    return { ok: false, reason: 'archive claims a signature but the source did not serve its .sig and /.well-known/plato-pubkey' };
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(pubkeyHex)) {
+    return { ok: false, reason: 'source published key is not a 32-byte hex Ed25519 key' };
+  }
+  const pub = Buffer.from(pubkeyHex, 'hex');
+  const fp = fingerprintFromPublicKey(pub);
+  if (fp !== manifestFingerprint) {
+    return { ok: false, reason: `source key fingerprint (${fp}) does not match the archive's claim (${manifestFingerprint})` };
+  }
+  if (!verifyBytes(pub, gzBytes, sigBytes)) {
+    return { ok: false, reason: 'signature does not verify — the archive was not signed by the source instance, or was altered in transit' };
+  }
+  return { ok: true };
+}
+
+// How to read the HTTP status of a signature-material fetch (the detached
+// `.sig` or /.well-known/plato-pubkey). The distinction matters: collapsing
+// every non-200 into "absent" lets a transient blip on a genuinely signed
+// source masquerade as an unsigned archive, which then refuses terminally —
+// a stable outage permanently kills a legitimate import.
+//   'present' — 200, the material is in hand.
+//   'absent'  — 404/410, the source serves no signature; the unsigned path
+//               applies (per the manifest's own fingerprint claim). Stable, so
+//               retrying is pointless.
+//   'retry'   — anything else (5xx, 429, 403, an unresolved 3xx). The material
+//               may well exist; treat it as a transient fetch failure so the
+//               worker requeues rather than mislabeling the archive unsigned.
+export function signatureFetchDisposition(status) {
+  if (status === 200) return 'present';
+  if (status === 404 || status === 410) return 'absent';
+  return 'retry';
+}
+
 // Internal helper. Ed25519 derives the public key from the seed
 // deterministically; we recover it via Node's crypto rather than
 // hand-rolling curve math.

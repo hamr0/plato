@@ -5,6 +5,7 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 import { createSub } from '../../src/content/sub.js';
 import {
   canModerate,
+  contentTargetInSub,
   recordAction,
   listModActions,
   isBanned,
@@ -206,4 +207,39 @@ test('recordAction: unban targeting the acting mod is rejected (self-unban guard
     }),
     /cannot target the acting mod/,
   );
+});
+
+test('contentTargetInSub: true only when the post/comment lives in the sub', () => {
+  const db = freshDb();
+  createSub(db, { name: 'other', description: '', ownerHandle: RAND });
+  seedPost(db, 'p1');          // in lobby
+  seedComment(db, 'c1', 'p1'); // in lobby (via p1)
+  assert.equal(contentTargetInSub(db, { targetType: 'post', targetId: 'p1', subName: 'lobby' }), true);
+  assert.equal(contentTargetInSub(db, { targetType: 'post', targetId: 'p1', subName: 'other' }), false);
+  assert.equal(contentTargetInSub(db, { targetType: 'comment', targetId: 'c1', subName: 'lobby' }), true);
+  assert.equal(contentTargetInSub(db, { targetType: 'comment', targetId: 'c1', subName: 'other' }), false);
+  assert.equal(contentTargetInSub(db, { targetType: 'post', targetId: 'nope', subName: 'lobby' }), false);
+});
+
+test('recordAction: cross-sub content moderation is rejected (IDOR guard)', () => {
+  const db = freshDb();
+  // RAND owns `other`; the post + comment live in `lobby`, which RAND does not
+  // moderate. Naming `other` passes canModerate but must not flip lobby content.
+  createSub(db, { name: 'other', description: '', ownerHandle: RAND });
+  seedPost(db, 'p1');
+  seedComment(db, 'c1', 'p1');
+  for (const [targetType, targetId] of [['post', 'p1'], ['comment', 'c1']]) {
+    assert.throws(
+      () => recordAction(db, {
+        subName: 'other', modHandle: RAND, action: 'remove',
+        targetType, targetId, reason: 'pwn',
+      }),
+      /not found/,
+      `${targetType} cross-sub remove should be rejected`,
+    );
+  }
+  // The lobby content is untouched and nothing was logged under `other`.
+  assert.equal(db.prepare('SELECT removed_at FROM posts WHERE id = ?').get('p1').removed_at, null);
+  assert.equal(db.prepare('SELECT removed_at FROM comments WHERE id = ?').get('c1').removed_at, null);
+  assert.equal(listModActions(db, 'other').length, 0);
 });

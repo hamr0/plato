@@ -52,7 +52,7 @@ import {
 } from '../content/comment.js';
 import { castVote, getVote, newAccountHandles } from '../content/vote.js';
 import {
-  canModerate, recordAction, listModActions, MOD_ACTIONS,
+  canModerate, contentTargetInSub, recordAction, listModActions, MOD_ACTIONS,
   listSubsModeratedBy, listModActionsAcrossSubs, countModActionsAcrossSubs,
   listInboxAcrossSubs, countInboxAcrossSubs,
   isBanned, isDisabled, listCoMods, listDisabledSubs,
@@ -86,7 +86,7 @@ import {
 } from '../archive/queue.js';
 import { canExportSub, subExportEligibility } from '../archive/gate.js';
 import { getOrCreateInstanceKeypair } from '../archive/signing.js';
-import { enqueueSubImport } from '../archive/import-queue.js';
+import { enqueueSubImport, countActiveImportsForRequester } from '../archive/import-queue.js';
 
 // Handles are HMAC-SHA256 hex (64 chars) plus the SYSTEM sentinel ('0' x64).
 const HANDLE_RE = /^[0-9a-f]{64}$/;
@@ -914,6 +914,12 @@ function friendlyError(message) {
   const m = message.match(/^[a-zA-Z]+:\s*\/\/([a-z0-9-]+) is read-only$/);
   if (m) {
     return `//${m[1]} is read-only — no new posts, comments, votes, or flags until a mod reactivates it.`;
+  }
+  // Never surface a raw node:sqlite driver error — its text leaks table and
+  // column names. Curated mechanism-layer messages above read fine; anything
+  // that looks like a driver-level constraint/schema error collapses to generic.
+  if (/constraint failed|no such (table|column)|datatype mismatch|SQLITE_/i.test(message)) {
+    return 'something went wrong.';
   }
   return message.replace(/^[a-zA-Z]+:\s*/, '');
 }
@@ -3651,6 +3657,17 @@ async function handleSubImportRequest(req, res, { db, auth }) {
       message: `"${renameTo}" doesn't match plato sub-name format (lowercase, 3–30, hyphens ok, no leading/trailing hyphen).`,
     }));
   }
+  // One import at a time per account. Each accepted job drives a server-side
+  // outbound fetch at worker time, and the (source_url, requester) dedupe is
+  // bypassable by varying the URL — so cap on the requester instead. The
+  // off-peak worker drains one job per tick, so a single in-flight slot per
+  // account loses nothing and closes the queue-flood path. No new config knob.
+  if (countActiveImportsForRequester(db, handle) > 0) {
+    return send(res, 429, errorPage(req, { db, auth }, {
+      title: 'import already in progress',
+      message: 'you already have an import queued or running. wait for it to finish (you\'ll get a memlog notice), then request the next one.',
+    }));
+  }
   // Ensure a handles row for this user — import_jobs.requested_by FKs to
   // handles. A user can reach this route after login but before doing
   // anything that materializes their pseudonym, in which case the handle
@@ -3850,9 +3867,10 @@ async function handleModAction(req, res, { db, auth }, subName) {
 
 // Resolve every pending flag on a target plus (when upholding) record
 // the corresponding mod_action. One transaction so a pending flag set
-// can never be partly resolved on a server crash. Mod must moderate the
-// sub the target lives in — otherwise this is rejected as a 403, even
-// if a crafted form names a sub the caller doesn't run.
+// can never be partly resolved on a server crash. The caller must both
+// moderate the named sub (else 403) and have named the sub the target
+// actually lives in (else 404) — a crafted form can't point a sub you run
+// at another sub's content.
 async function handleModlogResolve(req, res, { db, auth }) {
   const handle = auth.handleFromRequest(req);
   if (!handle) {
@@ -3877,6 +3895,14 @@ async function handleModlogResolve(req, res, { db, auth }) {
   if (!canModerate(db, subName, handle)) {
     return send(res, 403, errorPage(req, { db, auth }, {
       title: 'not a mod', message: "you don't moderate this sub.", links: backToModlog,
+    }));
+  }
+  // canModerate trusts the form-supplied sub_name; confirm the target actually
+  // lives in it so a mod of one sub can't resolve/flip another sub's content
+  // (the dismiss path resolves flags outside recordAction's own guard).
+  if (!contentTargetInSub(db, { targetType, targetId, subName })) {
+    return send(res, 404, errorPage(req, { db, auth }, {
+      title: 'not found', message: 'that content is not in this sub.', links: backToModlog,
     }));
   }
   const trimmedReason = reason && reason.trim().length > 0 ? reason.trim() : null;
@@ -5695,9 +5721,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       // Flight-record the failed request. async capture is fine — the request
       // already failed; we don't block the 500 on a disk flush. Strip the query
       // string (split on '?') so magic-link tokens in /verify?token=… and
-      // /auth/callback never land in the JSONL. null when imported as a module
-      // (tests) or run without the error net.
-      if (captureError) captureError(err, { where: 'request', method: req.method, path: (req.url || '').split('?')[0] });
+      // /auth/callback never land in the JSONL, and redact the in-path personal
+      // RSS token (/u/<64hex>/rss) so a throw after token resolution doesn't log
+      // the credential. null when imported as a module (tests) or run without
+      // the error net.
+      const safePath = (req.url || '').split('?')[0].replace(/\/u\/[0-9a-f]{64}\//, '/u/<token>/');
+      if (captureError) captureError(err, { where: 'request', method: req.method, path: safePath });
       send(res, 500, '<pre>500</pre>');
     }
   };

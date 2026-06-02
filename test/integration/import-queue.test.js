@@ -13,6 +13,7 @@ import {
   enqueueSubImport, claimNextPendingImport, completeImport,
   failImport, recordSourceMetadata, markStaleImportsAsFailed,
   findCompletedImportBySource, findLatestImportJob,
+  countActiveImportsForRequester,
   IMPORT_SLA_MS, MAX_ATTEMPTS,
 } from '../../src/archive/import-queue.js';
 import { readTar } from '../../src/archive/extract.js';
@@ -21,6 +22,9 @@ import {
   parseAndVerifyArchive, importSubArchive, pseudonymForImport,
 } from '../../src/archive/import.js';
 import { buildSubArchiveBytes } from '../../src/archive/sub-export.js';
+import {
+  generateInstanceKeypair, signBytes, verifyArchiveSignature,
+} from '../../src/archive/signing.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +66,23 @@ test('enqueueSubImport: dedupes pending requests per (url, handle)', () => {
   ensureHandle(db, BOB, 'bob-pseudo');
   const c = enqueueSubImport(db, { sourceUrl: SOURCE_URL, requestedBy: BOB });
   assert.notEqual(a.id, c.id);
+});
+
+test('countActiveImportsForRequester: counts pending + in-progress, frees on terminal', () => {
+  const db = memDb();
+  ensureHandle(db, ALICE, 'alice-pseudo');
+  assert.equal(countActiveImportsForRequester(db, ALICE), 0);
+  const j = enqueueSubImport(db, { sourceUrl: SOURCE_URL, requestedBy: ALICE });
+  assert.equal(countActiveImportsForRequester(db, ALICE), 1, 'pending counts toward the cap');
+  claimNextPendingImport(db);
+  assert.equal(countActiveImportsForRequester(db, ALICE), 1, 'in-progress still counts');
+  failImport(db, j.id, { errorMessage: 'x', terminal: true });
+  assert.equal(countActiveImportsForRequester(db, ALICE), 0, 'terminal state frees the slot');
+  // Scoped per requester: BOB's slot is independent.
+  ensureHandle(db, BOB, 'bob-pseudo');
+  enqueueSubImport(db, { sourceUrl: SOURCE_URL, requestedBy: BOB });
+  assert.equal(countActiveImportsForRequester(db, ALICE), 0);
+  assert.equal(countActiveImportsForRequester(db, BOB), 1);
 });
 
 test('claimNextPendingImport: pops in requested_at order, sets started_at, increments retry_count', () => {
@@ -240,6 +261,52 @@ test('readTar: rejects header checksum mismatch', () => {
   const buf = writeTar([{ path: 'a.txt', body: 'x' }]);
   buf[10] = (buf[10] + 1) & 0xff; // flip a bit in the name
   assert.throws(() => readTar(buf), /checksum mismatch/);
+});
+
+// --- signature verification on a real exported archive (C1) ---
+
+test('verifyArchiveSignature: accepts a genuine signed export, rejects a forged-origin one', () => {
+  const kp = generateInstanceKeypair();
+  const sourceDb = memDb();
+  const postsDir = mkdtempSync(join(tmpdir(), 'plato-sigtest-'));
+  try {
+    seedSourceFixture(sourceDb, postsDir, 'lobby');
+    const tar = buildSubArchiveBytes(sourceDb, 'lobby', {
+      postsDir,
+      branding: { forumName: 'sourceforum', baseUrl: 'https://source.example.com' },
+      platoVersion: '0.1.0',
+      exportedAt: new Date(ts(100)),
+      pubkeyFingerprint: kp.fingerprint,
+    });
+    const gz = gzipSync(tar);                       // what the worker fetches
+    const sig = signBytes(kp.privateKey, gz);       // detached .sig the source serves
+    const { manifest } = parseAndVerifyArchive(tar);
+    assert.equal(manifest.instance.pubkey_fingerprint, kp.fingerprint);
+
+    // Genuine: source publishes kp's key, which signed the gz, and the
+    // manifest claims kp's fingerprint.
+    assert.deepEqual(
+      verifyArchiveSignature({
+        gzBytes: gz, sigBytes: sig,
+        pubkeyHex: kp.publicKey.toString('hex'),
+        manifestFingerprint: manifest.instance.pubkey_fingerprint,
+      }),
+      { ok: true },
+    );
+
+    // Forged: an attacker re-signs the same bytes with their own key, but the
+    // manifest still claims the source's fingerprint → refused before import.
+    const attacker = generateInstanceKeypair();
+    const forged = verifyArchiveSignature({
+      gzBytes: gz, sigBytes: signBytes(attacker.privateKey, gz),
+      pubkeyHex: attacker.publicKey.toString('hex'),
+      manifestFingerprint: manifest.instance.pubkey_fingerprint,
+    });
+    assert.equal(forged.ok, false);
+  } finally {
+    rmSync(postsDir, { recursive: true, force: true });
+    sourceDb.close();
+  }
 });
 
 // --- importSubArchive end-to-end ---
