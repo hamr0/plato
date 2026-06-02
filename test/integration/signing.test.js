@@ -7,6 +7,7 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 import {
   generateInstanceKeypair, getOrCreateInstanceKeypair,
   signBytes, verifyBytes, fingerprintFromPublicKey,
+  verifyArchiveSignature,
 } from '../../src/archive/signing.js';
 
 function memDb() {
@@ -64,6 +65,82 @@ test('verifyBytes: bogus signature returns false (does not throw)', () => {
   const msg = Buffer.from('hello plato');
   assert.equal(verifyBytes(kp.publicKey, msg, Buffer.alloc(64)), false);
   assert.equal(verifyBytes(kp.publicKey, msg, Buffer.alloc(7)), false);
+});
+
+// --- verifyArchiveSignature: the import-side authenticity gate (C1) ---
+
+const GZ = Buffer.from('pretend-this-is-the-gzipped-archive-bytes');
+
+test('verifyArchiveSignature: a correctly signed archive passes', () => {
+  const kp = generateInstanceKeypair();
+  const sig = signBytes(kp.privateKey, GZ);
+  const v = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: sig,
+    pubkeyHex: kp.publicKey.toString('hex'),
+    manifestFingerprint: kp.fingerprint,
+  });
+  assert.deepEqual(v, { ok: true });
+});
+
+test('verifyArchiveSignature: rejects tampered archive bytes', () => {
+  const kp = generateInstanceKeypair();
+  const sig = signBytes(kp.privateKey, GZ);
+  const tampered = Buffer.concat([GZ, Buffer.from('!')]);
+  const v = verifyArchiveSignature({
+    gzBytes: tampered, sigBytes: sig,
+    pubkeyHex: kp.publicKey.toString('hex'),
+    manifestFingerprint: kp.fingerprint,
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /signature does not verify/);
+});
+
+test('verifyArchiveSignature: rejects a key whose fingerprint != the manifest claim', () => {
+  // Attacker signs with their own key but the manifest claims a different
+  // instance's fingerprint — the cross-check must catch it.
+  const attacker = generateInstanceKeypair();
+  const victim = generateInstanceKeypair();
+  const sig = signBytes(attacker.privateKey, GZ);
+  const v = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: sig,
+    pubkeyHex: attacker.publicKey.toString('hex'),
+    manifestFingerprint: victim.fingerprint,
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /does not match/);
+});
+
+test('verifyArchiveSignature: unsigned archive refused by default, accepted only with allowUnsigned', () => {
+  const refused = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: null, pubkeyHex: null, manifestFingerprint: null,
+  });
+  assert.equal(refused.ok, false);
+  assert.match(refused.reason, /unsigned/);
+  const allowed = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: null, pubkeyHex: null, manifestFingerprint: null,
+    allowUnsigned: true,
+  });
+  assert.deepEqual(allowed, { ok: true, unsigned: true });
+});
+
+test('verifyArchiveSignature: a signed archive whose .sig/pubkey could not be fetched is refused', () => {
+  const kp = generateInstanceKeypair();
+  const v = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: null, pubkeyHex: null,
+    manifestFingerprint: kp.fingerprint,
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /did not serve/);
+});
+
+test('verifyArchiveSignature: rejects a malformed published key', () => {
+  const kp = generateInstanceKeypair();
+  const sig = signBytes(kp.privateKey, GZ);
+  const v = verifyArchiveSignature({
+    gzBytes: GZ, sigBytes: sig, pubkeyHex: 'xyz', manifestFingerprint: kp.fingerprint,
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /not a 32-byte hex/);
 });
 
 test('getOrCreateInstanceKeypair: lazy-creates on first call, returns same row on second', () => {

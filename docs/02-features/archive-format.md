@@ -317,15 +317,18 @@ plato-export-<scope>-<YYYY-MM-DD>.tar.gz.sig   # the signature, raw 64 bytes
 
 The `fingerprint` is `"sha256:" + sha256(raw_32_byte_pubkey).hex()` — the same value that appears in `manifest.json.instance.pubkey_fingerprint`.
 
-**Verification recipe:**
+**Verification recipe** (enforced by the import worker as of M7/B5 — see Import below):
 
-1. Read `manifest.json` from the archive; note `instance.pubkey_fingerprint` and `instance.base_url`.
-2. `GET <base_url>/.well-known/plato-pubkey`. Confirm its `fingerprint` equals the manifest's claim. If not, refuse — the archive does not match the instance it names.
-3. Verify the 64-byte `.tar.gz.sig` against the gzipped archive bytes using `public_key_hex`.
+1. Note `manifest.json`'s `instance.pubkey_fingerprint`.
+2. `GET <origin-of-the-import-URL>/.well-known/plato-pubkey` and fetch `<import-URL>.sig`. The key is fetched from the **origin of the URL the importer pasted**, not from anything inside the (attacker-controllable) archive — that origin is the TLS-authenticated host the importer chose to trust.
+3. Confirm the fetched key's `fingerprint` equals the manifest's claim. If not, refuse — the archive does not match the key the source host actually publishes.
+4. Verify the 64-byte `.sig` against the gzipped archive bytes using `public_key_hex`. Refuse on failure.
+
+> Anchoring step 2 on `manifest.instance.base_url` would be circular: a forged archive can name any `base_url` and any fingerprint and sign with the matching key. Anchoring on the pasted URL's origin is what makes the signature meaningful — it binds the bytes to a host the importer named.
 
 **Key lifecycle:** one Ed25519 keypair per plato instance, generated lazily on first signing or first `/.well-known/plato-pubkey` hit, never rotated in v1. The privkey lives in the instance's SQLite database (single-row `instance_keypair` table); the operator backs it up exactly the way they back up `forum.db`.
 
-**No fingerprint, no signature:** an archive whose `manifest.json.instance.pubkey_fingerprint` is `null` was built before B4 was wired (or by a fork that strips signing). Importers may accept it under a `--unsigned-ok` flag; the default is to refuse.
+**No fingerprint, no signature:** an archive whose `manifest.json.instance.pubkey_fingerprint` is `null` was built before B4 was wired (or by a fork that strips signing). The import worker **refuses these by default**; an operator migrating trusted legacy archives can opt in with `IMPORT_ALLOW_UNSIGNED=1`.
 
 ## Import (M7/B5)
 
@@ -336,9 +339,16 @@ with a static `index.html` reader for that purpose.
 The import model is **URL-fetch**: a logged-in user on the destination
 instance pastes the URL of an exported archive into `/sub/create?mode=import`,
 the destination's worker fetches the bytes itself via HTTPS, no upload
-path exists. The trust anchor is the URL — TLS handles transit
-integrity, the per-file SHA-256s in the manifest catch corruption, and
-the importer's choice of URL is the authenticity claim.
+path exists. The trust anchor is the URL the importer chose: the worker
+fetches that origin's published key and **verifies the archive's Ed25519
+signature against it before inserting anything** (Verification recipe,
+above). TLS authenticates the host; the signature proves the bytes are
+the ones that host signed; the per-file SHA-256s catch in-archive
+corruption. A forged or unsigned archive is refused, not imported.
+
+One import runs per account at a time — the off-peak worker drains one
+job per tick, so a single in-flight slot per requester bounds the queue
+without a config knob (a second request while one is pending returns 429).
 
 ### Identity on import
 

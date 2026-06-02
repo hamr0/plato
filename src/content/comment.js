@@ -94,12 +94,21 @@ const COMMENT_SORT_CLAUSES = {
   new: 'created_at DESC',
 };
 
+// Hard cap on comments fetched + tree-built per post render. A post's whole
+// thread loads into memory on every GET; without a ceiling one viral post is a
+// forced-large fetch on an unauthenticated path. 500 is far above any real
+// thread at plato's scale and trivial in memory, so it bounds the worst case
+// without changing the common case. Past the cap, the lowest-ranked comments
+// (by the active sort) are not rendered; buildCommentTree already surfaces any
+// reply whose parent fell outside the set as a root, so nothing 500s.
+export const COMMENT_FETCH_CAP = 500;
+
 export function listCommentsForPost(db, postId, { sort = 'best' } = {}) {
   if (!COMMENT_SORT_CLAUSES[sort]) {
     throw new Error(`listCommentsForPost: unknown sort '${sort}'`);
   }
   return db.prepare(
-    `SELECT * FROM comments WHERE post_id = ? ORDER BY ${COMMENT_SORT_CLAUSES[sort]}`
+    `SELECT * FROM comments WHERE post_id = ? ORDER BY ${COMMENT_SORT_CLAUSES[sort]} LIMIT ${COMMENT_FETCH_CAP}`
   ).all(postId);
 }
 

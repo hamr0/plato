@@ -1124,6 +1124,14 @@ Since 0.12.16 `openDb` sets `PRAGMA busy_timeout = 5000`, so a momentary write-l
 - Confirm only **one** of each worker runs: `cat /etc/cron.d/*` **and** `sudo crontab -l`, looking for stray or duplicate lines. cron.d executes *every* file in the directory regardless of name — a backup left *inside* `/etc/cron.d/` (e.g. `plato.bak`) runs too. Move backups out of the directory.
 - Otherwise a writer held the lock for >5 s — look for a long-running migration or an external process holding `forum.db` open.
 
+### A sub-import keeps failing with `archive verification failed`
+
+Since 0.13 the import worker verifies the archive's Ed25519 signature before importing (it fetches the `.sig` beside the archive and the source instance's `/.well-known/plato-pubkey`). The user's `/memlog` shows the reason. Common causes:
+
+- **The source is older than signing (M7/B4) or a fork that strips it** — the archive has no `pubkey_fingerprint`. These are refused by default. If you trust the source, set `IMPORT_ALLOW_UNSIGNED=1` in the import worker's environment (the cron line) and let it retry.
+- **The archive was re-hosted on a different domain** than the instance that signed it, so `<url-origin>/.well-known/plato-pubkey` doesn't serve the signing key. Import from the original instance's URL, or have the re-host also serve that instance's pubkey.
+- **`fingerprint does not match` / `signature does not verify`** — the bytes don't match the key the source publishes (tampering, or a truncated/corrupt download). Re-export from the source and retry; do **not** set `IMPORT_ALLOW_UNSIGNED` to paper over this — it only bypasses the *no-signature* case, not a *failed* one.
+
 ### certbot --nginx fails
 
 Most common: DNS hasn't propagated yet, or you set the A record after running certbot. Fix:

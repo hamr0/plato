@@ -10,11 +10,14 @@
 //
 // Per-job flow:
 //   1. Fetch source URL (HTTPS preferred). Refuse non-200, oversize.
-//   2. Gunzip → tar buffer.
+//   2. Gunzip → tar buffer (decompressed size also capped).
 //   3. Parse + verify per-file SHA-256 (transit integrity).
-//   4. Check idempotence — was this exact source archive already imported?
-//   5. Open transaction; importSubArchive(); commit.
-//   6. Emit memlog notification (import_ready or import_failed).
+//   4. Verify the Ed25519 signature against the source origin's published
+//      key (archive-format.md → Verifying). Refuse forged/unsigned archives
+//      before any insert. The trust anchor is the pasted URL's origin.
+//   5. Check idempotence — was this exact source archive already imported?
+//   6. Open transaction; importSubArchive(); commit.
+//   7. Emit memlog notification (import_ready or import_failed).
 // Retry up to MAX_ATTEMPTS; SLA sweep terminal-fails stuck rows.
 
 import { resolve, dirname } from 'node:path';
@@ -29,6 +32,7 @@ import {
 } from '../src/archive/import-queue.js';
 import { recordNotification } from '../src/content/notification.js';
 import { parseAndVerifyArchive, importSubArchive } from '../src/archive/import.js';
+import { verifyArchiveSignature } from '../src/archive/signing.js';
 import { assertPublicUrl } from '../src/archive/ssrf.js';
 import { initFlightlog } from '../src/flightlog.js';
 
@@ -50,6 +54,13 @@ const POSTS_DIR = process.env.POSTS_DIR ?? resolve(ROOT, 'posts');
 const MAX_ARCHIVE_BYTES = parseInt(process.env.IMPORT_MAX_BYTES ?? `${500 * 1024 * 1024}`, 10);
 const FETCH_TIMEOUT_MS = parseInt(process.env.IMPORT_FETCH_TIMEOUT_MS ?? '120000', 10);
 const MAX_REDIRECTS = 5;
+const MAX_SIG_BYTES = 4096;          // a detached Ed25519 sig is 64 bytes
+const MAX_PUBKEY_BYTES = 64 * 1024;  // /.well-known/plato-pubkey is tiny JSON
+
+// Default-refuse archives that carry no signature (manifest fingerprint null —
+// pre-signing exports, or a fork that strips signing). Operators migrating
+// trusted legacy archives can opt in. Matches archive-format.md (Verifying).
+const ALLOW_UNSIGNED = process.env.IMPORT_ALLOW_UNSIGNED === '1';
 
 const dryRun = process.argv.includes('--dry-run');
 const startHour = clampHour(process.env.IMPORT_OFFPEAK_START, 1);
@@ -94,7 +105,11 @@ console.log(`[import-queue] start job=${job.id} url=${job.source_url} attempt=${
 
 try {
   const gz = await fetchArchive(job.source_url);
-  const tarBuf = gunzipSync(gz);
+  // Cap the *decompressed* size too: the fetch limit bounds the compressed
+  // bytes, but gzip ratios are unbounded, so a small blob could otherwise
+  // expand to gigabytes and OOM the worker. Node throws ERR_BUFFER_TOO_LARGE
+  // past the cap, which the surrounding catch turns into a job failure.
+  const tarBuf = gunzipSync(gz, { maxOutputLength: MAX_ARCHIVE_BYTES });
   const parsed = parseAndVerifyArchive(tarBuf);
 
   // Stamp manifest metadata onto the row regardless of what comes next —
@@ -108,6 +123,25 @@ try {
     sourceForumName: parsed.manifest.instance.forum_name ?? null,
     archiveSizeBytes: gz.length,
   });
+
+  // Authenticity gate (archive-format.md → Verifying). Fetch the detached
+  // signature and the source instance's published key, then confirm that key
+  // signed these exact bytes and matches the fingerprint the manifest claims.
+  // The trust anchor is the host the user chose to import from — not anything
+  // self-asserted inside the (attacker-controllable) archive. Nothing is
+  // inserted until this passes; a forged/unsigned archive fails terminally
+  // (it won't start passing on a retry).
+  const { sigBytes, pubkeyHex } = await fetchSignatureMaterial(job.source_url);
+  const verdict = verifyArchiveSignature({
+    gzBytes: gz, sigBytes, pubkeyHex,
+    manifestFingerprint: parsed.manifest.instance.pubkey_fingerprint ?? null,
+    allowUnsigned: ALLOW_UNSIGNED,
+  });
+  if (!verdict.ok) {
+    const refusedErr = new Error(`archive verification failed: ${verdict.reason}`);
+    refusedErr.terminal = true;
+    throw refusedErr;
+  }
 
   // Idempotence: same archive identity already imported? Fail loud, but
   // tag the failure so the user sees "already imported as X" instead of
@@ -177,8 +211,10 @@ try {
 
 // --- helpers ---
 
-async function fetchArchive(url) {
-  // Cap response size to MAX_ARCHIVE_BYTES; abort on timeout.
+// SSRF-guarded, redirect-following, size-capped GET. Returns { status, buf }
+// (buf is null for any non-200). Throws only on network/abort failure so the
+// caller can distinguish "server said 404" from "could not reach server".
+async function fetchCapped(url, maxBytes) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   let res;
@@ -202,12 +238,13 @@ async function fetchArchive(url) {
   }
   if (res.status !== 200) {
     clearTimeout(t);
-    throw new Error(`source returned HTTP ${res.status}`);
+    try { await res.body?.cancel(); } catch {}
+    return { status: res.status, buf: null };
   }
   const len = parseInt(res.headers.get('content-length') ?? '0', 10);
-  if (Number.isFinite(len) && len > MAX_ARCHIVE_BYTES) {
+  if (Number.isFinite(len) && len > maxBytes) {
     clearTimeout(t);
-    throw new Error(`archive too large: ${len} bytes (limit ${MAX_ARCHIVE_BYTES})`);
+    throw new Error(`response too large: ${len} bytes (limit ${maxBytes})`);
   }
   // Read the body in chunks so a server lying about Content-Length can't
   // exhaust memory.
@@ -218,15 +255,36 @@ async function fetchArchive(url) {
     const { value, done } = await reader.read();
     if (done) break;
     total += value.length;
-    if (total > MAX_ARCHIVE_BYTES) {
+    if (total > maxBytes) {
       clearTimeout(t);
       try { ctrl.abort(); } catch {}
-      throw new Error(`archive too large: streamed past ${MAX_ARCHIVE_BYTES} bytes`);
+      throw new Error(`response too large: streamed past ${maxBytes} bytes`);
     }
     chunks.push(value);
   }
   clearTimeout(t);
-  return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+  return { status: 200, buf: Buffer.concat(chunks.map((c) => Buffer.from(c))) };
+}
+
+async function fetchArchive(url) {
+  const { status, buf } = await fetchCapped(url, MAX_ARCHIVE_BYTES);
+  if (status !== 200) throw new Error(`source returned HTTP ${status}`);
+  return buf;
+}
+
+// Fetch the detached `.sig` (written beside the archive by the exporter) and
+// the source instance's published key (/.well-known/plato-pubkey on the same
+// origin as the pasted URL). Returns nulls when the source serves neither — an
+// unsigned/forked export — which verifyArchiveSignature then handles per the
+// archive's own fingerprint claim. A network failure (not a 404) propagates so
+// the job retries rather than mislabeling a transient outage as "unsigned".
+async function fetchSignatureMaterial(sourceUrl) {
+  const sig = await fetchCapped(`${sourceUrl}.sig`, MAX_SIG_BYTES);
+  const pub = await fetchCapped(new URL('/.well-known/plato-pubkey', sourceUrl).href, MAX_PUBKEY_BYTES);
+  if (sig.status !== 200 || pub.status !== 200) return { sigBytes: null, pubkeyHex: null };
+  let pubkeyHex = null;
+  try { pubkeyHex = JSON.parse(pub.buf.toString('utf8')).public_key_hex ?? null; } catch { pubkeyHex = null; }
+  return { sigBytes: sig.buf, pubkeyHex };
 }
 
 function clampHour(raw, fallback) {

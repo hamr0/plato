@@ -76,6 +76,18 @@ export function enqueueSubImport(db, { sourceUrl, renameTo = null, requestedBy, 
   return db.prepare('SELECT * FROM import_jobs WHERE id = ?').get(id);
 }
 
+// Count a requester's in-flight imports (pending OR in-progress, i.e. not
+// yet completed or failed). Used to cap an account to one import at a time —
+// the off-peak worker drains one job per tick anyway, so a single slot per
+// account closes the "vary the URL to flood the queue" path without any new
+// config knob, the same way the export queue limits in-flight jobs.
+export function countActiveImportsForRequester(db, requestedBy) {
+  return db.prepare(
+    `SELECT COUNT(*) AS n FROM import_jobs
+      WHERE requested_by = ? AND completed_at IS NULL AND failed_at IS NULL`
+  ).get(requestedBy).n;
+}
+
 // Pop the oldest pending import, mark in-progress (started_at = now,
 // retry_count++). Returns the claimed row, or null if none pending.
 export function claimNextPendingImport(db, { now = Date.now() } = {}) {

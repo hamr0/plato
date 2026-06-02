@@ -4,6 +4,7 @@ import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 import {
   addComment, listCommentsForPost, buildCommentTree, COMMENT_SORTS, COMMENT_BODY_MAX,
+  COMMENT_FETCH_CAP,
 } from '../../src/content/comment.js';
 import { recordAction } from '../../src/content/mod.js';
 
@@ -43,6 +44,22 @@ test('addComment: reply links via parent_comment_id', () => {
   const { commentId: replyId } = addComment(db, { postId: 'p1', parentId, handle: HANDLE_B, body: 'reply' });
   const reply = db.prepare('SELECT parent_comment_id FROM comments WHERE id = ?').get(replyId);
   assert.equal(reply.parent_comment_id, parentId);
+});
+
+test('listCommentsForPost: caps the fetch at COMMENT_FETCH_CAP (availability bound)', () => {
+  const db = fixture();
+  const stmt = db.prepare(
+    `INSERT INTO comments (id, post_id, parent_comment_id, handle, body, created_at, score)
+     VALUES (?, ?, NULL, ?, ?, ?, ?)`
+  );
+  // Seed well past the cap; give distinct scores so 'best' ordering is total.
+  const n = COMMENT_FETCH_CAP + 50;
+  for (let i = 0; i < n; i++) {
+    stmt.run(i.toString(16).padStart(16, '0'), 'p1', HANDLE, `c${i}`, Date.now() + i, i);
+  }
+  assert.equal(listCommentsForPost(db, 'p1').length, COMMENT_FETCH_CAP);
+  // The cap is per-post: p2 is unaffected.
+  assert.equal(listCommentsForPost(db, 'p2').length, 0);
 });
 
 test('addComment: nonexistent post throws', () => {

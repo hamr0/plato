@@ -55,6 +55,23 @@ export function canModerate(db, subName, handle) {
   return row.role === 'owner' ? 'owner' : 'co';
 }
 
+// True when the post/comment `targetId` actually lives in `subName`. The mod
+// role gate (canModerate) trusts a caller-supplied subName; without this a mod
+// of ANY sub could collapse/remove/resolve another sub's content by passing
+// that target's id with their own sub's name. posts carry sub_name directly;
+// comments reach their sub through their post.
+export function contentTargetInSub(db, { targetType, targetId, subName }) {
+  if (targetType === 'post') {
+    return !!db.prepare('SELECT 1 FROM posts WHERE id = ? AND sub_name = ?').get(targetId, subName);
+  }
+  if (targetType === 'comment') {
+    return !!db.prepare(
+      'SELECT 1 FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ? AND p.sub_name = ?'
+    ).get(targetId, subName);
+  }
+  return false;
+}
+
 // Apply the state flip for an action. Returns nothing; throws on
 // invariant violations. Caller must already be inside a transaction.
 function applyState(db, { action, targetType, targetId, subName, modHandle, reason, now }) {
@@ -206,6 +223,13 @@ export function recordAction(db, {
         throw new Error(`recordAction: ${action} is owner-only`);
       }
     }
+  }
+
+  // The role check above trusts the caller-supplied subName. For content
+  // actions, re-confirm the target actually lives in that sub so a mod of one
+  // sub can't act on another sub's post/comment by id (cross-sub IDOR).
+  if (CONTENT_ACTIONS.has(action) && !contentTargetInSub(db, { targetType, targetId, subName })) {
+    throw new Error(`recordAction: ${targetType} ${targetId} not found`);
   }
 
   const id = newId();
