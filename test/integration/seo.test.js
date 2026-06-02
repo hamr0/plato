@@ -74,6 +74,39 @@ test('GET /robots.txt: standard policy + sitemap reference', async (t) => {
   assert.match(body, /^Disallow: \/sub\/\*\/subscribe$/m);
 });
 
+test('GET /robots.txt: names AI crawlers explicitly — retrieval + training, all allowed', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/robots.txt');
+  const body = await res.text();
+  // Retrieval / cite-live bots (link back) — named and allowed.
+  for (const bot of ['Claude-User', 'Claude-SearchBot', 'OAI-SearchBot', 'ChatGPT-User', 'PerplexityBot']) {
+    assert.match(body, new RegExp(`^User-agent: ${bot}$`, 'm'), `${bot} named`);
+  }
+  // Training-corpus bots — named and allowed (public forum copy spreads).
+  for (const bot of ['ClaudeBot', 'GPTBot', 'CCBot']) {
+    assert.match(body, new RegExp(`^User-agent: ${bot}$`, 'm'), `${bot} named`);
+  }
+  // None of the AI crawlers carry a Disallow — every named block is Allow: /.
+  assert.doesNotMatch(body, /^Disallow: \/$/m);
+});
+
+test('GET /llms.txt: markdown index — privacy invariant up top, links subs + chrome pages', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('alpha', Date.now());
+  const res = await fetch(baseUrl + '/llms.txt');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/plain/);
+  const body = await res.text();
+  // H1 title + blockquote summary carrying the privacy invariant.
+  assert.match(body, /^# tests$/m);
+  assert.match(body, /^> .*no tracking, no analytics/m);
+  // Chrome pages and the sub are linked with absolute URLs.
+  assert.match(body, new RegExp(`\\[about\\]\\(${baseUrl}/about\\)`));
+  assert.match(body, new RegExp(`\\[//alpha\\]\\(${baseUrl}/sub/alpha\\)`));
+  assert.match(body, /github\.com\/hamr0\/plato/);
+});
+
 test('GET /humans.txt: lists project + privacy posture, no analytics mention', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const res = await fetch(ctx.baseUrl + '/humans.txt');
@@ -243,6 +276,59 @@ test('GET /modlog: canonical = /modlog regardless of query params', async (t) =>
   const body = await res.text();
   assert.match(body, new RegExp(`<link rel="canonical" href="${ctx.baseUrl}/modlog">`));
   assert.match(body, /<meta name="description" content="every moderation action on tests/);
+});
+
+// Pull the first JSON-LD block out of a page and parse it. Returns null
+// when the page emits none (e.g. a removed post).
+function extractJsonLd(html) {
+  const m = html.match(/<script type="application\/ld\+json">(.+?)<\/script>/s);
+  return m ? JSON.parse(m[1]) : null;
+}
+
+test('GET /: emits WebSite JSON-LD with name + url + description', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/');
+  const ld = extractJsonLd(await res.text());
+  assert.ok(ld, 'home emits a JSON-LD block');
+  assert.equal(ld['@context'], 'https://schema.org');
+  assert.equal(ld['@type'], 'WebSite');
+  assert.equal(ld.name, 'tests');
+  assert.equal(ld.url, `${ctx.baseUrl}/`);
+  assert.match(ld.description, /no tracking, no analytics/);
+});
+
+test('GET /sub/<name>/post/<id>: emits DiscussionForumPosting JSON-LD; removed post emits none', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl, postsDir } = ctx;
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('alpha', Date.now());
+  const author = 'h'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(author, 'au', Date.now());
+  const made = Date.now();
+  const writePost = (id, removed) => {
+    const fm = `---\ntitle: T ${id}\nhandle: ${author}\ncreated_at: ${made}\nsub_name: alpha\n---\nBody for ${id}.\n`;
+    writeFileSync(join(postsDir, `${id}.md`), fm);
+    const cols = removed
+      ? `(id, sub_name, handle, title, file_path, score, created_at, removed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      : `(id, sub_name, handle, title, file_path, score, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    const args = ['T ' + id, `${id}.md`, 0, made];
+    db.prepare(`INSERT INTO posts ${cols}`).run(id, 'alpha', author, ...args, ...(removed ? [made] : []));
+  };
+  writePost('0123456789abcde1', false);
+  writePost('0123456789abcde2', true);
+
+  const live = await fetch(baseUrl + '/sub/alpha/post/0123456789abcde1');
+  const ld = extractJsonLd(await live.text());
+  assert.ok(ld, 'live post emits JSON-LD');
+  assert.equal(ld['@type'], 'DiscussionForumPosting');
+  assert.equal(ld.headline, 'T 0123456789abcde1');
+  assert.equal(ld.url, `${baseUrl}/sub/alpha/post/0123456789abcde1`);
+  assert.equal(ld.author.name, 'au');
+  assert.match(ld.datePublished, /^\d{4}-\d{2}-\d{2}T/);
+
+  const dead = await fetch(baseUrl + '/sub/alpha/post/0123456789abcde2');
+  assert.equal(dead.status, 200);
+  assert.equal(extractJsonLd(await dead.text()), null, 'removed post emits no JSON-LD');
 });
 
 test('branding.metaDescription override is used when set', async (t) => {

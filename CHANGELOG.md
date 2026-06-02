@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-02 — agent & LLM discoverability (JSON-LD, llms.txt, named AI crawlers)
+
+Brings the discoverability surface up to the updated privacy-respecting SEO playbook (`docs/04-process/privacy-seo.md`): everything declarative and open-web, nothing extractive — no analytics, no third-party JS, no tracking. The earlier "skip JSON-LD on principle" stance is reversed for *agent extraction* specifically: `application/ld+json` is parsed, not executed, so it sits in the same open-web tier as `<meta>`.
+
+### Added
+
+- **JSON-LD structured data.** The homepage emits a `WebSite` block; every live post page emits a `DiscussionForumPosting` (schema.org's forum-thread type) with headline, canonical URL, publish date, and the author's pseudonym. Threaded through `pageView`/`layout` as a new `jsonLd` seo field; the `<` in any string value is escaped to its unicode form so it can't close the `<script>` early. **Removed posts emit no JSON-LD** — same reasoning as the description fallback: don't hand agents structured data for retracted content.
+- **`/llms.txt`.** A curated, markdown, agent-facing index — "sitemap.xml for LLMs". H1 title, a one-line blockquote with the privacy invariant, then links to the chrome pages and the ten busiest public subs, plus the source repo. Low-cost include; major-crawler adoption is still partial.
+- **Named AI crawlers in `robots.txt`.** Retrieval/cite-live bots (`Claude-User`, `Claude-SearchBot`, `OAI-SearchBot`, `ChatGPT-User`, `PerplexityBot`) and training-corpus bots (`ClaudeBot`, `GPTBot`, `CCBot`) are now named explicitly so the decision is on the record rather than implied by `User-agent: *`. All are `Allow: /`: a plato instance is public forum copy meant to spread, and retrieval bots link back. The wildcard group's `Disallow` list still covers every other crawler.
+
+### Tests
+
+- `+5` (880 → 885): robots AI-crawler naming, `/llms.txt` shape, home `WebSite` JSON-LD, post `DiscussionForumPosting` JSON-LD + removed-post absence.
+
+### Docs
+
+- `docs/04-process/privacy-seo.md`: reversed the "skip JSON-LD" stance for agent extraction, documented named AI crawlers + `llms.txt`, added a `### plato` per-project note recording the implemented surface.
+- `docs/01-product/prd-open-web-revival.md`: documented the declarative-only discoverability posture and the "AI crawlers all `Allow: /`, no config knob" decision next to the existing `og:image` lock.
+
 ## [0.13.0] - 2026-06-02 — security pass: import signature verification + moderation/availability hardening
 
 A focused security review (validated with reproductions before fixing) closed one critical and several lower findings. No schema changes, no new config knobs.

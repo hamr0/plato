@@ -37,14 +37,15 @@ Twitter Card:
 
 JSON-LD (optional rich snippets, pure data, no executable JS — `type="application/ld+json"` is parsed, not run):
 
-- `SoftwareApplication` schema for tools, `WebSite` for landing pages, `Article` for blog posts.
-- Costs ~15 lines, gives Google enough structured data to render a richer card.
-- Skippable if it feels grimy. Many privacy-respecting sites omit it on principle.
+- `SoftwareApplication` schema for tools, `WebSite` for landing pages, `Article`/`DiscussionForumPosting` for posts/threads.
+- Costs ~15 lines of structured data agents parse directly.
+- **Not** in the extractive category, despite first impressions: `application/ld+json` is parsed, not executed — pure declarative data, same open-web tier as `<meta>`. Earlier drafts here called it skippable; for agent/LLM extraction, include it. The payoff now is agent extraction, not a richer Google card (Google restricted FAQ rich results to gov/health sites in 2023).
 
 ## Tier 2 — static files at the root
 
-- `robots.txt` — three lines: `User-agent: *` + `Allow: /` + `Sitemap: https://example.com/sitemap.xml`. The Sitemap line is the part crawlers actually need.
-- `sitemap.xml` — even a one-URL sitemap signals "yes please index". Use `<changefreq>` and `<priority>` if you want.
+- `robots.txt` — baseline is `User-agent: *` + `Allow: /` + `Sitemap: …`. The Sitemap line is the part crawlers actually need. **Name AI crawlers explicitly** so the decision is on the record, not implied: retrieval/cite-live bots (`Claude-User`, `Claude-SearchBot`, `OAI-SearchBot`, `ChatGPT-User`, `PerplexityBot`) fetch at answer-time and link back; training-corpus bots (`ClaudeBot`, `GPTBot`, `CCBot`) ingest into model weights. Public marketing/forum copy with no PII → allow both. Any surface that touches user data → auth-gate it (401/403), not merely `Disallow`. Confirm bot names against each vendor's published page before shipping — they shift, and the easy trap is that `ClaudeBot` is the *training* crawler, not retrieval.
+- `sitemap.xml` — even a one-URL sitemap signals "yes please index". Emit `<lastmod>`; `<changefreq>`/`<priority>` are noise (Google ignores both).
+- `llms.txt` (`/llms.txt`) — a curated, markdown, agent-facing index of your key pages: one line on what the tool is, the privacy invariant once, then links. "sitemap.xml for LLMs." Low-cost include (~20 lines), adoption still partial.
 - `humans.txt` — optional, web-revival adjacent. Lists the people behind the project.
 - `security.txt` (`.well-known/security.txt`) — declares how to report vulns. Doesn't help SEO but signals seriousness to the audience that cares.
 
@@ -101,6 +102,15 @@ Privacy communities link to *posts*, not landing pages. The post lives forever, 
 Implemented 2026-05-04 (commit TBD): tier 1 head tags + robots.txt + sitemap.xml. Skipped JSON-LD on principle for now. og-card.png deferred — design task.
 
 The privacy-claim invariant is in `CLAUDE.md` (state/active/<msgid>.json deleted on terminal, no archive). The landing page section "What we don't do" must stay in sync; if retention changes, update the page first per CLAUDE.md.
+
+### plato
+
+Tier 1 + Tier 2 implemented in `src/web/app.js` (dynamic, per-instance — every value derives from operator branding + `siteMeta.baseUrl`, so forks inherit the surface without editing it). Tests in `test/integration/seo.test.js`.
+
+- **Head tags** (`layout()`): title, description, canonical, theme-color, viewport, `html lang`, favicon, full OpenGraph (`og:image` 1200×630 + width/height/alt), `twitter:card = summary_large_image`. Per-page overrides flow through `pageView`'s `seo` opts (description / canonical / og:type / feed / jsonLd).
+- **JSON-LD** (0.14.0): homepage `WebSite`; live post pages `DiscussionForumPosting`. Removed posts emit none. Reversed the earlier "skip on principle" stance for agent extraction — see Tier 1.
+- **Static files**: `/robots.txt` (named AI crawlers, all `Allow: /` — a plato instance is public forum copy meant to spread; wildcard `Disallow` list covers private POST/auth/`/memlog`/`/u/` paths), `/sitemap.xml` (static pages + every sub + every non-removed post, with `<lastmod>`), `/llms.txt` (0.14.0), `/humans.txt`, `/.well-known/security.txt`. Per-sub Atom feeds at `/sub/<name>/rss` with `<link rel="alternate">` autodiscovery.
+- **The privacy invariant** ("magic-link auth, no tracking, no analytics; posts are markdown on disk") is the description default — surfaced in the result snippet, the OG card, and `llms.txt` so the audience self-selects. It must stay in sync with what the code does (CLAUDE.md: the privacy claim is a contract).
 
 ### (other projects)
 
