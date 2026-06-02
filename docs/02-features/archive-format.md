@@ -346,6 +346,13 @@ above). TLS authenticates the host; the signature proves the bytes are
 the ones that host signed; the per-file SHA-256s catch in-archive
 corruption. A forged or unsigned archive is refused, not imported.
 
+The worker only treats the signature as *absent* (the unsigned path) when
+the source genuinely serves no `.sig`/pubkey — a `404`/`410`. A transient
+fetch failure (a network error, or a `5xx`/`429`/`403`) re-queues the job
+instead, so a momentary outage on the source's well-known endpoint can't
+permanently fail a legitimately signed import or silently downgrade it to
+"unsigned." Unsigned archives skip the signature fetch entirely.
+
 One import runs per account at a time — the off-peak worker drains one
 job per tick, so a single in-flight slot per requester bounds the queue
 without a config knob (a second request while one is pending returns 429).

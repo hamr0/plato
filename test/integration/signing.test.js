@@ -7,7 +7,7 @@ import { applyAllMigrations } from '../_helpers/migrations.js';
 import {
   generateInstanceKeypair, getOrCreateInstanceKeypair,
   signBytes, verifyBytes, fingerprintFromPublicKey,
-  verifyArchiveSignature,
+  verifyArchiveSignature, signatureFetchDisposition,
 } from '../../src/archive/signing.js';
 
 function memDb() {
@@ -131,6 +131,20 @@ test('verifyArchiveSignature: a signed archive whose .sig/pubkey could not be fe
   });
   assert.equal(v.ok, false);
   assert.match(v.reason, /did not serve/);
+});
+
+// signatureFetchDisposition decides whether a non-200 on the .sig / pubkey
+// fetch means "genuinely unsigned" or "transient — retry". Getting this wrong
+// is the difference between a stable source outage terminally killing a
+// legitimately signed import (treating 5xx as unsigned) and a correct retry.
+test('signatureFetchDisposition: 200 present; 404/410 absent; everything else retries', () => {
+  assert.equal(signatureFetchDisposition(200), 'present');
+  assert.equal(signatureFetchDisposition(404), 'absent');
+  assert.equal(signatureFetchDisposition(410), 'absent');
+  // Transient / ambiguous — the material may exist; don't mislabel as unsigned.
+  for (const s of [500, 502, 503, 504, 429, 403, 401, 301, 0]) {
+    assert.equal(signatureFetchDisposition(s), 'retry', `HTTP ${s} must retry, not collapse to unsigned`);
+  }
 });
 
 test('verifyArchiveSignature: rejects a malformed published key', () => {

@@ -32,7 +32,7 @@ import {
 } from '../src/archive/import-queue.js';
 import { recordNotification } from '../src/content/notification.js';
 import { parseAndVerifyArchive, importSubArchive } from '../src/archive/import.js';
-import { verifyArchiveSignature } from '../src/archive/signing.js';
+import { verifyArchiveSignature, signatureFetchDisposition } from '../src/archive/signing.js';
 import { assertPublicUrl } from '../src/archive/ssrf.js';
 import { initFlightlog } from '../src/flightlog.js';
 
@@ -131,10 +131,19 @@ try {
   // self-asserted inside the (attacker-controllable) archive. Nothing is
   // inserted until this passes; a forged/unsigned archive fails terminally
   // (it won't start passing on a retry).
-  const { sigBytes, pubkeyHex } = await fetchSignatureMaterial(job.source_url);
+  const manifestFingerprint = parsed.manifest.instance.pubkey_fingerprint ?? null;
+  // Only a signed archive needs its .sig/pubkey fetched — verifyArchiveSignature
+  // ignores them when the manifest claims no fingerprint. Skipping the fetch for
+  // unsigned archives saves two round-trips and, more importantly, keeps a 5xx
+  // on the source's well-known endpoint from breaking an otherwise-fine unsigned
+  // import (that path only consults the fingerprint claim).
+  let sigBytes = null, pubkeyHex = null;
+  if (manifestFingerprint != null) {
+    ({ sigBytes, pubkeyHex } = await fetchSignatureMaterial(job.source_url));
+  }
   const verdict = verifyArchiveSignature({
     gzBytes: gz, sigBytes, pubkeyHex,
-    manifestFingerprint: parsed.manifest.instance.pubkey_fingerprint ?? null,
+    manifestFingerprint,
     allowUnsigned: ALLOW_UNSIGNED,
   });
   if (!verdict.ok) {
@@ -274,13 +283,20 @@ async function fetchArchive(url) {
 
 // Fetch the detached `.sig` (written beside the archive by the exporter) and
 // the source instance's published key (/.well-known/plato-pubkey on the same
-// origin as the pasted URL). Returns nulls when the source serves neither — an
-// unsigned/forked export — which verifyArchiveSignature then handles per the
-// archive's own fingerprint claim. A network failure (not a 404) propagates so
-// the job retries rather than mislabeling a transient outage as "unsigned".
+// origin as the pasted URL). Returns nulls only when the source genuinely
+// serves neither (404/410) — an unsigned/forked export — which
+// verifyArchiveSignature then handles per the archive's own fingerprint claim.
+// A network failure OR a transient/ambiguous status (5xx, 429, 403) throws so
+// the job retries rather than mislabeling a blip as "unsigned" and refusing a
+// genuinely signed archive forever (signatureFetchDisposition).
 async function fetchSignatureMaterial(sourceUrl) {
   const sig = await fetchCapped(`${sourceUrl}.sig`, MAX_SIG_BYTES);
   const pub = await fetchCapped(new URL('/.well-known/plato-pubkey', sourceUrl).href, MAX_PUBKEY_BYTES);
+  for (const r of [sig, pub]) {
+    if (signatureFetchDisposition(r.status) === 'retry') {
+      throw new Error(`signature material fetch returned HTTP ${r.status}`);
+    }
+  }
   if (sig.status !== 200 || pub.status !== 200) return { sigBytes: null, pubkeyHex: null };
   let pubkeyHex = null;
   try { pubkeyHex = JSON.parse(pub.buf.toString('utf8')).public_key_hex ?? null; } catch { pubkeyHex = null; }

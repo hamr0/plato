@@ -12,7 +12,7 @@ A focused security review (validated with reproductions before fixing) closed on
 
 ### Fixed — Critical
 
-- **The sub-import worker now verifies the archive's Ed25519 signature before importing anything.** The signing machinery existed end-to-end on the *export* side (detached `.tar.gz.sig`, `/.well-known/plato-pubkey`, fingerprint in the manifest) but the importer never checked it — it fetched the `.tar.gz` and trusted it, so a hand-crafted archive could import as a real sub with a forged "imported from `<instance>`" provenance badge. The worker now fetches the `.sig` and the **origin-of-the-pasted-URL**'s published key, confirms that key's fingerprint matches the manifest's claim, and verifies the signature over the gzipped bytes — all before any insert. The trust anchor is the URL the importer chose (TLS-authenticated), not anything self-asserted inside the archive (which would be circular). Unsigned archives (`pubkey_fingerprint: null` — pre-signing or fork-stripped) are **refused by default**; `IMPORT_ALLOW_UNSIGNED=1` opts in for trusted legacy migrations. See `archive-format.md` → Signing/Import.
+- **The sub-import worker now verifies the archive's Ed25519 signature before importing anything.** The signing machinery existed end-to-end on the *export* side (detached `.tar.gz.sig`, `/.well-known/plato-pubkey`, fingerprint in the manifest) but the importer never checked it — it fetched the `.tar.gz` and trusted it, so a hand-crafted archive could import as a real sub with a forged "imported from `<instance>`" provenance badge. The worker now fetches the `.sig` and the **origin-of-the-pasted-URL**'s published key, confirms that key's fingerprint matches the manifest's claim, and verifies the signature over the gzipped bytes — all before any insert. The trust anchor is the URL the importer chose (TLS-authenticated), not anything self-asserted inside the archive (which would be circular). Unsigned archives (`pubkey_fingerprint: null` — pre-signing or fork-stripped) are **refused by default**; `IMPORT_ALLOW_UNSIGNED=1` opts in for trusted legacy migrations. The sig fetch distinguishes *genuine absence* (a `404`/`410` on the `.sig`/pubkey → the unsigned path) from a *transient blip* (a `5xx`/`429`/`403` → the job retries instead of permanently refusing a legitimately signed archive over a momentary source outage); unsigned archives skip the sig fetch entirely. See `archive-format.md` → Signing/Import.
 
 ### Fixed — High
 
@@ -28,7 +28,7 @@ A focused security review (validated with reproductions before fixing) closed on
 
 ### Tests
 
-- `+11`: cross-sub IDOR guard + `contentTargetInSub` (mod ×2), `verifyArchiveSignature` unit + real-archive round-trip (signing ×6, import-queue ×2 — genuine accepted / forged-origin rejected + the queue cap), `listCommentsForPost` 500-cap (comment ×1). Suite 869 → 880, all green.
+- `+12`: cross-sub IDOR guard + `contentTargetInSub` (mod ×2), `verifyArchiveSignature` unit + real-archive round-trip + `signatureFetchDisposition` transient-vs-absent policy (signing ×7, import-queue ×2 — genuine accepted / forged-origin rejected + the queue cap), `listCommentsForPost` 500-cap (comment ×1). Suite 869 → 881, all green.
 
 ### Deferred (documented, not changed)
 

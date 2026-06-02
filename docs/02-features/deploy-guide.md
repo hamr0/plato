@@ -1131,6 +1131,7 @@ Since 0.13 the import worker verifies the archive's Ed25519 signature before imp
 - **The source is older than signing (M7/B4) or a fork that strips it** — the archive has no `pubkey_fingerprint`. These are refused by default. If you trust the source, set `IMPORT_ALLOW_UNSIGNED=1` in the import worker's environment (the cron line) and let it retry.
 - **The archive was re-hosted on a different domain** than the instance that signed it, so `<url-origin>/.well-known/plato-pubkey` doesn't serve the signing key. Import from the original instance's URL, or have the re-host also serve that instance's pubkey.
 - **`fingerprint does not match` / `signature does not verify`** — the bytes don't match the key the source publishes (tampering, or a truncated/corrupt download). Re-export from the source and retry; do **not** set `IMPORT_ALLOW_UNSIGNED` to paper over this — it only bypasses the *no-signature* case, not a *failed* one.
+- **`signature material fetch returned HTTP 5xx`** (or `429`/`403`) — the source's `.sig` or `/.well-known/plato-pubkey` was momentarily unreachable, not genuinely absent. The worker re-queues rather than refusing, so a transient source outage isn't mistaken for "unsigned." If it persists across the retry budget, the source's well-known endpoint is misconfigured (or behind a rate limiter / WAF) — fix it there, or import once it recovers. Only a `404`/`410` is treated as "the source serves no signature."
 
 ### certbot --nginx fails
 

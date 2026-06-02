@@ -138,6 +138,24 @@ export function verifyArchiveSignature({ gzBytes, sigBytes, pubkeyHex, manifestF
   return { ok: true };
 }
 
+// How to read the HTTP status of a signature-material fetch (the detached
+// `.sig` or /.well-known/plato-pubkey). The distinction matters: collapsing
+// every non-200 into "absent" lets a transient blip on a genuinely signed
+// source masquerade as an unsigned archive, which then refuses terminally —
+// a stable outage permanently kills a legitimate import.
+//   'present' — 200, the material is in hand.
+//   'absent'  — 404/410, the source serves no signature; the unsigned path
+//               applies (per the manifest's own fingerprint claim). Stable, so
+//               retrying is pointless.
+//   'retry'   — anything else (5xx, 429, 403, an unresolved 3xx). The material
+//               may well exist; treat it as a transient fetch failure so the
+//               worker requeues rather than mislabeling the archive unsigned.
+export function signatureFetchDisposition(status) {
+  if (status === 200) return 'present';
+  if (status === 404 || status === 410) return 'absent';
+  return 'retry';
+}
+
 // Internal helper. Ed25519 derives the public key from the seed
 // deterministically; we recover it via Node's crypto rather than
 // hand-rolling curve math.
