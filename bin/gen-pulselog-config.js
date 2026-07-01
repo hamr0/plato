@@ -74,10 +74,29 @@ const POSTS_DIR = process.env.POSTS_DIR ?? resolve(ROOT, 'posts');
 const SPAM_PATTERNS = process.env.PLATO_SPAM_PATTERNS ?? resolve(ROOT, 'spam-patterns.txt');
 
 // Mail block reused by all three modes — omit entirely when no operator email
-// (pulselog then logs the JSONL line and sends nothing). from === to so the
-// send aligns with the operator's own authenticated MTA identity (the msmtp →
-// Gmail recipe in pulselog.context.md).
-const mail = email ? { email, from: email } : {};
+// (pulselog then logs the JSONL line and sends nothing).
+//
+// `from` is NOT the operator's mailbox. pulselog sends via the box's own MTA
+// (Postfix), so From: must be an identity that MTA can authenticate (DKIM/SPF).
+// Using the operator's e.g. gmail.com address makes every alert unauthenticated
+// spoofing of gmail.com → Gmail rejects it 550-5.7.26. So default `from` to an
+// on-domain sender derived from the app's already-signed mail identity
+// (KNOWLESS_FROM=auth@<domain>, else KNOWLESS_BASE_URL host). An operator on the
+// msmtp→Gmail recipe (where From: gmail.com IS authenticated) can force their
+// mailbox back via operator.mailFrom. Fall back to the operator email only when
+// no domain is discoverable (dev / log-only) — mail isn't leaving the box there.
+function senderDomain() {
+  const from = process.env.KNOWLESS_FROM || '';
+  const at = from.lastIndexOf('@');
+  if (at >= 0 && at < from.length - 1) return from.slice(at + 1).trim();
+  for (const u of [process.env.KNOWLESS_BASE_URL, branding.baseUrl]) {
+    try { const h = new URL(u || '').hostname; if (h) return h; } catch { /* not a URL */ }
+  }
+  return '';
+}
+const mailFrom = operator.mailFrom
+  || (() => { const d = senderDomain(); return d ? `noreply@${d}` : email; })();
+const mail = email ? { email, from: mailFrom } : {};
 
 const pulselogConfig = {
   // --- health (default mode): silent on green, one email when something breaks

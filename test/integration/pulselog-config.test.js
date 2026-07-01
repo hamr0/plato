@@ -62,6 +62,33 @@ test('health check set is the acute ones only — no cert (that stays on the dai
   assert.ok(!out.checks.some((c) => c.type === 'ssl'), 'no ssl/cert check in the 5-min health run');
 });
 
+test('alert from is an on-domain sender, NOT the operator mailbox (Gmail 550-5.7.26 guard)', () => {
+  // The box sends via its own Postfix; From: a gmail.com mailbox is unauthenticated
+  // spoofing and Gmail rejects it. Derive noreply@<domain> from the app's signed
+  // identity (KNOWLESS_FROM), applied to all three mail modes.
+  const { out } = gen(
+    { operator: { email: 'avoidaccess@gmail.com', service: 'plato' } },
+    { KNOWLESS_FROM: 'auth@forum.example.com' },
+  );
+  assert.equal(out.alert.from, 'noreply@forum.example.com');
+  assert.equal(out.digest.from, 'noreply@forum.example.com');
+  assert.equal(out.backup.from, 'noreply@forum.example.com');
+  assert.equal(out.alert.email, 'avoidaccess@gmail.com', 'recipient stays the operator');
+});
+
+test('branding.baseUrl is a from-domain source when no KNOWLESS_FROM env', () => {
+  const { out } = gen({ operator: { email: 'ops@x.com' }, branding: { baseUrl: 'https://f.example.com' } });
+  assert.equal(out.alert.from, 'noreply@f.example.com');
+});
+
+test('operator.mailFrom overrides the derived sender (msmtp→Gmail recipe)', () => {
+  const { out } = gen(
+    { operator: { email: 'me@gmail.com', mailFrom: 'me@gmail.com' } },
+    { KNOWLESS_FROM: 'auth@forum.example.com' },
+  );
+  assert.equal(out.alert.from, 'me@gmail.com');
+});
+
 test('no operator.email → log-only (no mail keys anywhere)', () => {
   const { out } = gen({ operator: { service: 'plato' } });
   assert.equal(out.alert.email, undefined);
