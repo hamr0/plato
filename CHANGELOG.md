@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-07-01 — ops hotfix: forum crash-loop + unauthenticated alert mail
+
+Two production incidents on the shared VPS, both in ops glue — **not** pulselog or flightlog (flightlog is in fact what recorded the crash cause). Found while diagnosing bounced health alerts.
+
+### Fixed
+
+- **Forum down ~11h in a crash-loop (4500+ restarts).** The quarterly `scripts/refresh-disposable-domains.sh` runs as **root**; `mktemp`'s 0600 umask plus `mv` left `disposable-domains.txt` `root:root 0600`, and `bin/server.js`'s boot `readFileSync` (`loadDisposableDomains`) hit **EACCES** under the `plato`-user service → uncaught exception → crash-loop. The cause was only visible in flightlog's `errors.jsonl` (stderr/journal were empty). The refresh now `chmod 644`s the snapshot after writing, so it is always readable by the service regardless of who ran the refresh. (The live file was `chown`/`chmod`'d to recover immediately; systemd auto-restart came back in ~2s.)
+- **Health / digest / backup alert mail silently bounced at Gmail (`550-5.7.26`).** `bin/gen-pulselog-config.js` set the pulselog `from` to `operator.email` — a `gmail.com` mailbox. Sent via the box's own Postfix, that is unauthenticated spoofing of gmail.com, so **every** alert bounced (invisibly). Now derives an on-domain `noreply@<domain>` from the app's already-DKIM-signed identity (`KNOWLESS_FROM` → `KNOWLESS_BASE_URL` → `branding.baseUrl`), with `operator.mailFrom` as an explicit override for the msmtp→Gmail recipe. Verified end-to-end: `From: noreply@ownsub.com` → opendkim-signed → Gmail `250 sent`.
+- **Refresh-cron From was also unsignable.** `cron-refresh-disposable.sh` sent `From: noreply@<bare-hostname>` (e.g. `noreply@gitdone`) — same `550` class. Now uses the same on-domain sender derivation.
+
+### Tests
+
+- `+3` (885 → 888): on-domain `from` derivation from `KNOWLESS_FROM`, `branding.baseUrl` fallback, `operator.mailFrom` override.
+
 ## [0.14.0] - 2026-06-02 — agent & LLM discoverability (JSON-LD, llms.txt, named AI crawlers)
 
 Brings the discoverability surface up to the updated privacy-respecting SEO playbook (`docs/04-process/privacy-seo.md`): everything declarative and open-web, nothing extractive — no analytics, no third-party JS, no tracking. The earlier "skip JSON-LD on principle" stance is reversed for *agent extraction* specifically: `application/ld+json` is parsed, not executed, so it sits in the same open-web tier as `<meta>`.
