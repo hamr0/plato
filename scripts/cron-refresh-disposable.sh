@@ -39,8 +39,42 @@ NOTIFY="$(read_config_field email)"
 SERVICE="$(read_config_field service)"
 [ -z "$SERVICE" ] && SERVICE='plato'
 
+# Derive a DKIM-signable From: an on-domain sender, NOT noreply@<bare-hostname>
+# (unsignable → Gmail 550-5.7.26, same class as the pulselog-from bug). Mirrors
+# bin/gen-pulselog-config.js: operator.mailFrom, else noreply@<domain> from
+# KNOWLESS_FROM (env or .env), KNOWLESS_BASE_URL, branding.baseUrl.
+mail_from() {
+  CONFIG="$CONFIG" ENVFILE="$ROOT/.env" node -e '
+    const fs = require("fs");
+    let c = {}; try { c = JSON.parse(fs.readFileSync(process.env.CONFIG, "utf8")); } catch (_) {}
+    const op = c.operator || {}, br = c.branding || {};
+    function compute() {
+      if (op.mailFrom) return String(op.mailFrom);
+      let env = {};
+      try {
+        for (const line of fs.readFileSync(process.env.ENVFILE, "utf8").split("\n")) {
+          const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+          if (m) env[m[1]] = m[2].replace(/^["\x27]|["\x27]$/g, "");
+        }
+      } catch (_) {}
+      const from = process.env.KNOWLESS_FROM || env.KNOWLESS_FROM || "";
+      const at = from.lastIndexOf("@");
+      let domain = at >= 0 && at < from.length - 1 ? from.slice(at + 1).trim() : "";
+      if (!domain) {
+        for (const u of [process.env.KNOWLESS_BASE_URL, env.KNOWLESS_BASE_URL, br.baseUrl]) {
+          try { const h = new URL(u || "").hostname; if (h) { domain = h; break; } } catch (_) {}
+        }
+      }
+      return domain ? "noreply@" + domain : "";
+    }
+    process.stdout.write(compute());
+  ' 2>/dev/null
+}
+
 NOW="$(date -u +%FT%TZ)"
 HOST="$(hostname -f 2>/dev/null || hostname)"
+FROM_ADDR="$(mail_from)"
+[ -z "$FROM_ADDR" ] && FROM_ADDR="noreply@$HOST"  # last resort (unsignable, but never empty)
 
 OLD_COUNT=0
 [ -f "$DEST" ] && OLD_COUNT="$(wc -l < "$DEST")"
@@ -80,7 +114,7 @@ fi
 # mail(1) isn't installed by default on minimal hosts; use sendmail directly
 # so we don't add another package dependency.
 {
-  printf 'From: noreply@%s\n' "$HOST"
+  printf 'From: %s\n' "$FROM_ADDR"
   printf 'To: %s\n' "$NOTIFY"
   printf 'Subject: %s\n' "$SUBJECT"
   printf 'Content-Type: text/plain; charset=utf-8\n'
