@@ -31,4 +31,9 @@ if [ "$LINES" -gt 50000 ]; then
   exit 1
 fi
 mv "$TMP" "$DEST"
+# mktemp created $TMP with a 0600 umask; under the root cron that leaves $DEST
+# root:root 0600, and the plato-user service EACCESes on it at boot (readFileSync
+# in loadDisposableDomains) → crash-loop. Force world-readable so the service can
+# always read the snapshot regardless of who ran the refresh.
+chmod 644 "$DEST"
 echo "wrote $DEST ($LINES domains)"
