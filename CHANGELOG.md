@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-02 — opt-in fallback alert sink (pulselog 0.7.0)
+
+Bumps **pulselog `^0.4.1` → `^0.7.0`** and adopts its new fallback alert sink, opt-in and transport-agnostic so it respects plato's *no vendor SMTP relay* posture (deploy-guide § "No vendor SMTP relay anywhere"). Closes the **circular-alert gap**: pulselog's alerts/digest leave via the box's one Postfix path, so if that path breaks (SPF/DKIM/PTR/IP-reputation), the alert *about* the break bounces too — silently. 0.14.1 fixed plato's primary `from` deliverability; this adds a second, independent path for operators who want one. Backward-compatible: absent config → byte-for-byte prior behavior.
+
+### Added
+
+- **`operator.fallbackCommand` (+ optional `fallbackArgs`, `fallbackWhen`, `fallbackTimeoutMs`) in `config.json`.** When set, `bin/gen-pulselog-config.js` emits a `fallback` sink on the generated `alert` / `digest` / `backup` blocks: pulselog runs the command with **no shell**, the alert body on **stdin** and the subject in **`$PULSELOG_SUBJECT`**. The operator supplies their own independent channel (e.g. `curl` → ntfy/Slack, or an authenticated-submission wrapper) — plato bakes in no transport. Per-mode `when` defaults: `alert`/`backup` → `"always"` (fire only on failure anyway, and the only mode that survives an *async* bounce after a clean local handoff); `digest` → `"on-primary-failure"` (no duplicate weekly mail). A global `operator.fallbackWhen` overrides both. Works as the **sole sink** when `operator.email` is unset. Absent `fallbackCommand` → no fallback (default), preserving zero vendor coupling. Bad values (empty command, non-string args, unknown `when`, out-of-range timeout) fail the deploy loudly like the other generator options.
+
+### Changed
+
+- **`pulselog` `^0.4.1` → `^0.7.0`** — brings the `fallback` sink (0.7.0) and a `command`-check timeout-label fix (0.6.0). No change to the health/digest/backup config plato already generates.
+
+### Tests
+
+- `+5` (888 → 893): fallback omitted by default; `fallbackCommand` wires all three modes with the per-mode `when` defaults; `fallbackArgs` + global `fallbackWhen` threaded through; fallback present as sole sink with no `operator.email`; a bad `fallbackWhen` fails the deploy and writes nothing.
+
 ## [0.14.1] - 2026-07-01 — ops hotfix: forum crash-loop + unauthenticated alert mail
 
 Two production incidents on the shared VPS, both in ops glue — **not** pulselog or flightlog (flightlog is in fact what recorded the crash cause). Found while diagnosing bounced health alerts.

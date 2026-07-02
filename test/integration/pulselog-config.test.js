@@ -126,3 +126,42 @@ test('operator.monitoring:false is the off switch — writes nothing, exits 0', 
   assert.equal(out, null, 'no config written when monitoring is off');
   assert.equal(res.status, 0);
 });
+
+test('no fallback sink by default — omitted from all three modes (zero vendor coupling)', () => {
+  const { out } = gen({ operator: { email: 'ops@x.com' } });
+  assert.equal(out.alert.fallback, undefined);
+  assert.equal(out.digest.fallback, undefined);
+  assert.equal(out.backup.fallback, undefined);
+});
+
+test('operator.fallbackCommand wires an opt-in fallback sink with per-mode when defaults', () => {
+  // health/backup fire only on failure → "always" (also survives an async bounce
+  // after a clean handoff); digest emails weekly → "on-primary-failure" (no dupe).
+  const { out } = gen({ operator: { email: 'ops@x.com', fallbackCommand: '/usr/local/bin/notify.sh' } });
+  assert.deepEqual(out.alert.fallback, { when: 'always', command: '/usr/local/bin/notify.sh', timeoutMs: 15000 });
+  assert.equal(out.digest.fallback.when, 'on-primary-failure');
+  assert.equal(out.backup.fallback.when, 'always');
+});
+
+test('operator.fallbackArgs + fallbackWhen override are threaded through', () => {
+  const { out } = gen({ operator: {
+    email: 'ops@x.com',
+    fallbackCommand: 'curl',
+    fallbackArgs: ['-m', '10', '-fsS', '-d', '@-', 'https://ntfy.sh/topic'],
+    fallbackWhen: 'always',
+  } });
+  assert.deepEqual(out.alert.fallback.args, ['-m', '10', '-fsS', '-d', '@-', 'https://ntfy.sh/topic']);
+  assert.equal(out.digest.fallback.when, 'always', 'global fallbackWhen overrides the per-mode default');
+});
+
+test('fallback is emitted even with no operator.email (sole sink — a box with no MTA)', () => {
+  const { out } = gen({ operator: { fallbackCommand: '/usr/local/bin/notify.sh' } });
+  assert.equal(out.alert.email, undefined, 'no primary email');
+  assert.equal(out.alert.fallback.command, '/usr/local/bin/notify.sh', 'fallback still present as sole sink');
+});
+
+test('a bad operator.fallbackWhen fails the deploy loudly — writes nothing', () => {
+  const { res, out } = gen({ operator: { email: 'ops@x.com', fallbackCommand: 'x', fallbackWhen: 'sometimes' } });
+  assert.equal(out, null, 'no config written on invalid input');
+  assert.notEqual(res.status, 0, 'generator exits non-zero');
+});

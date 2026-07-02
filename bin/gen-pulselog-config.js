@@ -98,10 +98,56 @@ const mailFrom = operator.mailFrom
   || (() => { const d = senderDomain(); return d ? `noreply@${d}` : email; })();
 const mail = email ? { email, from: mailFrom } : {};
 
+// Optional fallback alert sink (pulselog >= 0.7.0): a second, out-of-band
+// delivery path so a broken primary mail path can't also swallow the alert
+// about it (the "circular alert" gap — the one alert that says "mail is broken"
+// rides the same broken path and bounces). Opt-in and transport-agnostic: plato
+// bakes in NO vendor SMTP relay (deploy-guide §"No vendor SMTP relay anywhere"),
+// so the operator supplies their own independent channel in config.json, e.g.
+//   "operator": {
+//     "fallbackCommand": "curl",
+//     "fallbackArgs": ["-m","10","-fsS","-d","@-","https://ntfy.sh/<secret-topic>"],
+//     "fallbackWhen": "always"            // optional; else per-mode default below
+//   }
+// pulselog runs the command with NO shell, the alert body on stdin and the
+// subject in $PULSELOG_SUBJECT. Absent fallbackCommand → no fallback (default),
+// preserving the zero-vendor-coupling posture. Validated as a deploy boundary.
+const fallbackCommand = operator.fallbackCommand;
+if (fallbackCommand !== undefined && (typeof fallbackCommand !== 'string' || !fallbackCommand.trim())) {
+  console.error(`[gen-pulselog] operator.fallbackCommand must be a non-empty string — got ${JSON.stringify(fallbackCommand)}`);
+  process.exit(1);
+}
+const fallbackArgs = operator.fallbackArgs;
+if (fallbackArgs !== undefined && (!Array.isArray(fallbackArgs) || !fallbackArgs.every((a) => typeof a === 'string'))) {
+  console.error(`[gen-pulselog] operator.fallbackArgs must be an array of strings — got ${JSON.stringify(fallbackArgs)}`);
+  process.exit(1);
+}
+const FALLBACK_WHENS = ['always', 'on-primary-failure'];
+if (operator.fallbackWhen !== undefined && !FALLBACK_WHENS.includes(operator.fallbackWhen)) {
+  console.error(`[gen-pulselog] operator.fallbackWhen must be one of ${FALLBACK_WHENS.join(' | ')} — got ${JSON.stringify(operator.fallbackWhen)}`);
+  process.exit(1);
+}
+const fallbackTimeoutMs = intOption(operator.fallbackTimeoutMs, 15000, 'operator.fallbackTimeoutMs', 1000, 120000);
+
+// Per-mode default `when`: health + backup alerts fire only on failure, so
+// "always" adds no noise AND is the only mode that survives an async bounce
+// after a clean local handoff (Postfix accepts on :25, recipient bounces later).
+// The digest emails every week, so default it to "on-primary-failure" to avoid
+// a duplicate weekly digest. A global operator.fallbackWhen overrides both.
+function fallbackFor(defaultWhen) {
+  if (!fallbackCommand) return undefined;
+  const f = { when: operator.fallbackWhen || defaultWhen, command: fallbackCommand, timeoutMs: fallbackTimeoutMs };
+  if (fallbackArgs) f.args = fallbackArgs;
+  return f;
+}
+const alertFallback = fallbackFor('always');
+const digestFallback = fallbackFor('on-primary-failure');
+const backupFallback = fallbackFor('always');
+
 const pulselogConfig = {
   // --- health (default mode): silent on green, one email when something breaks
   output: { file: resolve(LOGS, 'health.jsonl'), maxBytes: 5_000_000 },
-  alert: { ...mail, app: service, logTail: ERRORS_JSONL },
+  alert: { ...mail, app: service, logTail: ERRORS_JSONL, ...(alertFallback ? { fallback: alertFallback } : {}) },
   retry: { retries: 2, retryDelayMs: 2000 },
   checks: [
     { type: 'http', name: 'app', enabled: true, url: `http://127.0.0.1:${PORT}/healthz`, expectStatus: 200 },
@@ -119,6 +165,7 @@ const pulselogConfig = {
     metricsCommand: { command: 'node', args: ['bin/stats.js', '--metrics-json'] },
     metrics: [{ name: 'users' }, { name: 'subs' }, { name: 'posts' }, { name: 'comments' }, { name: 'votes' }],
     flightlog: { file: ERRORS_JSONL, groupBy: 'proc', flagAtLeast: 20 },
+    ...(digestFallback ? { fallback: digestFallback } : {}),
   },
 
   // --- backup (--backup): nightly archive, scope mirrors the retired backup.sh
@@ -139,6 +186,7 @@ const pulselogConfig = {
     keepLast,
     minBytes: 1024,
     history: resolve(LOGS, 'backup.jsonl'),
+    ...(backupFallback ? { fallback: backupFallback } : {}),
   },
 };
 
