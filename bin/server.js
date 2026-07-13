@@ -112,6 +112,14 @@ const handler = createApp({
 });
 
 const server = http.createServer(handler);
+// Slowloris / slow-body defense-in-depth. Node's defaults (headersTimeout 60s,
+// requestTimeout 300s) are generous for a text forum where the largest body is
+// ~1 MiB (see readBody's MAX_BODY_BYTES). Tighten them: a legitimate client
+// sends headers and a small body in well under these windows, while a
+// slow-trickle connection is dropped instead of pinning a socket. 0 would
+// disable them, so set explicit finite values.
+server.headersTimeout = 20_000;
+server.requestTimeout = 30_000;
 
 server.listen(PORT, () => {
   const v = APP_VERSION ? `v${APP_VERSION} ` : '';

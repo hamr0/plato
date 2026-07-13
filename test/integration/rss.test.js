@@ -147,11 +147,69 @@ test('GET /sub/<name>: HTML page advertises Atom feed via <link rel="alternate">
   assert.match(body, /<a href="\/sub\/lobby\/rss" class="rssvp-link">rssvp<\/a>/);
 });
 
-test('GET /: home page does NOT advertise an Atom feed (per-sub only for now)', async (t) => {
+test('GET /: home page advertises the public whole-instance Atom feed (/rss)', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const res = await fetch(ctx.baseUrl + '/');
   const body = await res.text();
-  assert.doesNotMatch(body, /<link rel="alternate" type="application\/atom\+xml"/);
+  assert.match(body, /<link rel="alternate" type="application\/atom\+xml" href="\/rss"/);
+  assert.match(body, /<a href="\/rss" class="rssvp-link">rssvp<\/a>/);
+});
+
+test('GET /rss: whole-instance firehose merges posts across every sub, newest-first', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, postsDir } = ctx;
+  seedSub(db, 'lobby');
+  seedSub(db, 'tech');
+  const author = 'a'.repeat(64);
+  seedAuthor(db, author, 'firehose-author');
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'lobby-older' });
+  seedPost(db, postsDir, { sub: 'tech', handle: author, title: 'tech-newer' });
+  db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(1000, 'lobby-older');
+  db.prepare('UPDATE posts SET created_at = ? WHERE title = ?').run(2000, 'tech-newer');
+
+  const res = await fetch(ctx.baseUrl + '/rss');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/atom\+xml/);
+  assert.equal(res.headers.get('cache-control'), 'public, max-age=300');
+  const body = await res.text();
+  // Both subs appear in one feed — this is the cross-sub firehose.
+  assert.match(body, /tech-newer/);
+  assert.match(body, /lobby-older/);
+  // Entry links carry each post's own sub, not a single sub.
+  assert.match(body, new RegExp(`href="${ctx.baseUrl}/sub/tech/post/`));
+  assert.match(body, new RegExp(`href="${ctx.baseUrl}/sub/lobby/post/`));
+  // Newest-first across subs.
+  assert.ok(body.indexOf('tech-newer') < body.indexOf('lobby-older'));
+  // Self/alternate links point at the instance, and the pseudonym (not handle) shows.
+  assert.match(body, new RegExp(`<link rel="self" href="${ctx.baseUrl}/rss"/>`));
+  assert.match(body, new RegExp(`<link rel="alternate" type="text/html" href="${ctx.baseUrl}/"/>`));
+  assert.match(body, /<name>firehose-author<\/name>/);
+  assert.doesNotMatch(body, new RegExp(author));
+});
+
+test('GET /rss: excludes hard-removed and soft-collapsed posts (feed shape, not drama shape)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, postsDir } = ctx;
+  seedSub(db, 'lobby');
+  const author = 'a'.repeat(64);
+  seedAuthor(db, author);
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'FIREHOSE-VISIBLE' });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'FIREHOSE-REMOVED', removed: true });
+  seedPost(db, postsDir, { sub: 'lobby', handle: author, title: 'FIREHOSE-COLLAPSED', collapsed: true });
+
+  const body = await (await fetch(ctx.baseUrl + '/rss')).text();
+  assert.match(body, /FIREHOSE-VISIBLE/);
+  assert.doesNotMatch(body, /FIREHOSE-REMOVED/);
+  assert.doesNotMatch(body, /FIREHOSE-COLLAPSED/);
+});
+
+test('GET /rss: empty instance yields a valid, non-empty-error Atom document (200)', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await fetch(ctx.baseUrl + '/rss');
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /<feed xmlns="http:\/\/www\.w3\.org\/2005\/Atom">/);
+  assert.doesNotMatch(body, /<entry>/, 'no entries, but still a valid feed a reader can poll');
 });
 
 test('GET /sub/<name>/rss: post body / title with HTML special chars are XML-escaped', async (t) => {

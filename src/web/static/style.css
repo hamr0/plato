@@ -8,7 +8,7 @@
  * never a literal hex. The one exception is favicon.svg, which
  * is served standalone; copy + recolor it in the same place.
  *
- * Light mode (M8/B0; light became the default in 0.15.1):
+ * Light mode (M8/B0; light became the default in 0.16.0):
  *   - Pre-click default: LIGHT. Only an explicit OS dark
  *     preference flips it, via @media (prefers-color-scheme: dark).
  *   - Post-click: the toggle stamps .theme-light or .theme-dark
@@ -889,6 +889,10 @@ article, .comment-body, .preview, .sub-sticky-note { overflow-wrap: anywhere; }
 
 /* Home active-subs block: vertical list of the top 4 subs by 24h post count */
 .active-subs { margin-bottom: 1.5rem; }
+/* Header row: section label at one end, the feed rssvp at the other. baseline
+ * so the small rssvp link sits on the label's text line. The h3 keeps its own
+ * margins (the flex row is a thin wrapper, not a spacing reset). */
+.active-subs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .active-subs-list { font-size: 0.92rem; }
 .active-sub-row {
   display: flex;

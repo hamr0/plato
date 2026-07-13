@@ -75,7 +75,7 @@ These are the operator surfaces. The project assumes you'll touch them.
 
 **Colors.** Open `src/web/static/style.css`, find the `:root` block at the top. Every color in the forum is a `--variable`. Change `--accent: #7aa2f7` to your brand color and reload — vote arrows, links, logo dots, mod-button hover, the modlog accent rows all switch together. Forkable color tokens are a v1 commitment, not a "we might do this someday" — every PR that adds a new color has to add a variable, not a hex literal.
 
-**Built-in palette presets (M8/B0).** `style.css` ships nine drop-in dark palettes and five light palettes — each is one commented `:root { ... }` line in the file. Copy any block over the active one and reload, no config touch needed. Since 0.15.1 **light is the default**: the light palette lives in the bare `:root` block (swap it there), while the dark palette lives in *both* `:root.theme-dark` and the `@media (prefers-color-scheme: dark)` block — mirror a dark swap into both so the post-click and OS-hint paths stay aligned.
+**Built-in palette presets (M8/B0).** `style.css` ships nine drop-in dark palettes and five light palettes — each is one commented `:root { ... }` line in the file. Copy any block over the active one and reload, no config touch needed. Since 0.16.0 **light is the default**: the light palette lives in the bare `:root` block (swap it there), while the dark palette lives in *both* `:root.theme-dark` and the `@media (prefers-color-scheme: dark)` block — mirror a dark swap into both so the post-click and OS-hint paths stay aligned.
 
 | Preset | Bg | Vibe |
 |---|---|---|
@@ -116,7 +116,7 @@ The light palette is the default and lives in the bare `:root` block — swap it
 | `branding.rules` | optional, ≤4 lines (defaults ship if omitted) | `/about` rules section, footer of every magic-link email (single source of truth — knowless mail-footer cap, no URL schemes, no bare domains) |
 | `branding.feedbackEmail` | optional | `/about` "feedback" link target, magic-link footer attribution line (`a plato instance hosted by @<hostedBy> . <feedbackEmail>` — both halves graceful when one is unset) |
 | `branding.colors.up` / `branding.colors.down` | optional | `--up` / `--down` CSS variables under `:root.theme-dark` + the `@media (prefers-color-scheme: dark)` block (dark theme) — vote arrows, score color, "you voted here" memory shade |
-| `branding.colorsLight.up` / `branding.colorsLight.down` | optional | same `--up` / `--down` under `:root` — the light palette is the default (M8/B0 light-theme toggle; light became the default in 0.15.1) |
+| `branding.colorsLight.up` / `branding.colorsLight.down` | optional | same `--up` / `--down` under `:root` — the light palette is the default (M8/B0 light-theme toggle; light became the default in 0.16.0) |
 | `branding.metaDescription` | optional | `<meta name="description">` and `og:description` for `/`, link-unfurls (Slack/Signal/iMessage/Mastodon). Per-page descriptions for `/about`, `/modlog`, `/subs`, `/sub/<name>`, `/sub/<name>/post/<id>` are auto-derived and not operator-tunable |
 | `urlDisplayMax` | optional, default 30 | bare-URL truncation ceiling in rendered post + comment bodies (`href` always preserved; full URL on hover) |
 | `feedPageSize` | optional, default 50 | items per page on the home feed and on each sub feed before the `← prev | page N | next →` footer |
@@ -250,7 +250,7 @@ Set at `/sub/create` (all knobs) or via owner-only `/sub/<name>/edit` (everythin
 
 Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file. The per-sub `flagThreshold` is the one exception — it's a moderation lever (when does mod review trigger), not a spam-defense permissiveness control, and the floor prevents abuse.
 
-**They apply to edits, not just new posts (since 0.15.1).** The link cap, `spam-patterns.txt`, and URLhaus all run when an author edits a post, exactly as they run when one is submitted — an over-cap edit is rejected outright, and a pattern or blocked-host hit auto-collapses the post and files a `system` flag you'll see in `/modlog`. Before 0.15.1 the edit route checked none of them, so a spammer could publish something clean and edit the payload in afterwards. If you run an instance that has been live since before 0.15.1, that bypass was reachable — a `?mod=system` sweep of `/modlog` will not show posts that used it, because nothing was ever checked. There is no backfill for this: the matchers only run on write, so an old post that took the bypass is only caught if someone edits it again or a mod flags it by hand.
+**They apply to edits, not just new posts (since 0.16.0).** The link cap, `spam-patterns.txt`, and URLhaus all run when an author edits a post, exactly as they run when one is submitted — an over-cap edit is rejected outright, and a pattern or blocked-host hit auto-collapses the post and files a `system` flag you'll see in `/modlog`. Before 0.16.0 the edit route checked none of them, so a spammer could publish something clean and edit the payload in afterwards. If you run an instance that has been live since before 0.16.0, that bypass was reachable — a `?mod=system` sweep of `/modlog` will not show posts that used it, because nothing was ever checked. There is no backfill for this: the matchers only run on write, so an old post that took the bypass is only caught if someone edits it again or a mod flags it by hand.
 
 ### Tier 4: Operator config (`config.json`), boot-validated, tighten-only
 
@@ -275,6 +275,8 @@ Forum-wide spam-defense knobs. Drop a `config.json` at the project root (or set 
 The values shown are the floors. To tighten (e.g. limit new accounts to 1 post/day instead of 3), drop `postsPerDay` to a lower number. Setting `perAccount.new.postsPerHour: 5` would throw `exceeds floor of 1; operator can only tighten`.
 
 **`spam-patterns.txt`** ships with conservative starter regexes for crypto/job/wire/romance scams. Add one line per spam wave you encounter; restart picks them up. Comments start with `#`. Bad regex skips with a stderr warning rather than killing boot.
+
+> **Avoid catastrophic backtracking.** Each pattern runs with `.test()` against every submitted post and comment body on the single request-handling process — a regex that backtracks exponentially (nested quantifiers over an overlapping class, e.g. `(a+)+$`, `(\w+\s?)*!`, `(.*a){20}`) can freeze the whole forum on one crafted submission. This is the one spam knob that is operator-authored free-form rather than a bounded number, so the floor model can't guard it for you. Keep patterns anchored and linear: prefer explicit character counts (`\d{9,}`) over open-ended nested groups, test a new pattern against a long adversarial string before deploying it, and treat a pattern that makes the process hang as the bug — remove it, don't wrap the forum in a timeout.
 
 **`bin/refresh-urlhaus.js`** fetches the URLhaus blocklist hourly. Wire to system cron — see [`cron-jobs.md`](cron-jobs.md) for the full crontab + how it interacts with `data/urlhaus.txt`. Posts/comments linking to a blocked host auto-collapse + flag for mod review with the note `blocked-url: <host>`.
 
@@ -580,7 +582,7 @@ Plato bets on **soft moderation by default + visible accountability**.
 
 ## Brand identity
 
-The aesthetic is **terminal-honest**. Mono font where it fits, no emoji unless the operator adds them, no rich icons. Logo is three blue dots with ascending opacity, doubling as the loading indicator. Color palette is light by default (since 0.15.1; dark before) with a warm accent (`--accent-warm`) for moderation actions — visitors whose OS prefers dark still get the dark palette, and the header toggle overrides either way.
+The aesthetic is **terminal-honest**. Mono font where it fits, no emoji unless the operator adds them, no rich icons. Logo is three blue dots with ascending opacity, doubling as the loading indicator. Color palette is light by default (since 0.16.0; dark before) with a warm accent (`--accent-warm`) for moderation actions — visitors whose OS prefers dark still get the dark palette, and the header toggle overrides either way.
 
 - The dots ascend in opacity left-to-right, suggesting thinking-through-things. The wave animation on the same dots is the loading state — you only ever see it during fetch round-trips, like comment submission.
 - The tagline "opinion is the medium between knowledge and ignorance." is from Plato's *Republic* (Book V) and is the project's name origin. It's locked on the official build; your fork can change it.

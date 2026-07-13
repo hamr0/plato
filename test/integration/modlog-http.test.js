@@ -60,7 +60,7 @@ function ageHandles(db) {
   db.prepare('UPDATE handles SET first_seen_at = ? WHERE first_seen_at > ?').run(old, old);
 }
 
-async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null } = {}) {
+async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null, maxLoginRequestsPerIpPerHour } = {}) {
   return new Promise((res) => {
     const tmp = http.createServer((q, r) => r.end()).listen(0, () => {
       const port = tmp.address().port;
@@ -73,6 +73,7 @@ async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null } = {})
           secret: randomBytes(32).toString('hex'),
           baseUrl, from: 'a@t', dbPath: ':memory:',
           openRegistration: true, cookieSecure: false, mailer,
+          ...(maxLoginRequestsPerIpPerHour != null ? { maxLoginRequestsPerIpPerHour } : {}),
         });
         const postsDir = mkdtempSync(join(tmpdir(), 'plato-modlog-'));
         const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
@@ -585,6 +586,47 @@ async function seedCleanPost(ctx, jar, { title = 'clean title', body = 'clean bo
   assert.equal(res.status, 302);
   return ctx.db.prepare('SELECT id FROM posts WHERE title = ?').get(title).id;
 }
+
+// The anonymous /draft path writes a draft row before knowless's per-IP login
+// gate, so without a plato-side cap an IP could flood orphaned rows past the
+// email limit. The cap shares knowless's maxLoginRequestsPerIpPerHour budget.
+test('anonymous /draft is capped per IP on the knowless login budget', async (t) => {
+  const ctx = await spinUp({ maxLoginRequestsPerIpPerHour: 2 });
+  t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+
+  const draft = (n) => jfetch(newJar(), `${ctx.baseUrl}/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: `anon${n}@x.test`, sub_name: 'lobby', title: `t${n}`, body: 'b' }),
+  });
+
+  assert.equal((await draft(1)).status, 200, 'first anonymous draft accepted');
+  assert.equal((await draft(2)).status, 200, 'second (at the cap) accepted');
+  const third = await draft(3);
+  assert.equal(third.status, 429, 'third from the same IP is refused');
+  assert.match(await third.text(), /too many drafts/);
+  // Only the two accepted drafts were persisted — the refused one wrote nothing.
+  assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 2, 'refused draft wrote no row');
+});
+
+// A crafted POST can carry a body past the form's maxlength; submitDraft is
+// the boundary and throws. The anonymous branch must surface that as a 400,
+// not fall through to a bare 500 (and it must persist no draft row).
+test('anonymous /draft: over-cap body is rejected with 400, no row written', async (t) => {
+  const ctx = await spinUp();
+  t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+
+  const res = await jfetch(newJar(), `${ctx.baseUrl}/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: 'anon@x.test', sub_name: 'lobby', title: 't', body: 'x'.repeat(40001) }),
+  });
+
+  assert.equal(res.status, 400, 'over-cap body is a 400, not a 500');
+  assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 0, 'no draft row written');
+});
 
 test('edit path: spam regex in an edited TITLE collapses the post + writes audit row', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'plato-spam-edit-'));

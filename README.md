@@ -40,7 +40,7 @@ The modern web has trained us to accept that what you see isn't what you get —
 - **One mod dashboard, one public audit.** `/modlog` has three modes: *open* (pending flags, decide inline), *inbox* (current state), *audit* (every event flat, instance-wide, public, no login).
   Per-sub `/sub/<name>/modlog` is public too. Audit by default beats trust by default.
 
-- **RSSvp — feeds, not notifications.** Every sub publishes `/sub/<name>/rss`; each logged-in user gets two token-gated personal feeds (`/u/<token>/subs.rss` for subs they follow; `/u/<token>/rss` adds replies + mod actions on their content).
+- **RSSvp — feeds, not notifications.** The whole instance publishes `/rss` (public firehose, latest 50 across every sub); every sub publishes `/sub/<name>/rss`; each logged-in user gets two token-gated personal feeds (`/u/<token>/subs.rss` for subs they follow; `/u/<token>/rss` adds replies + mod actions on their content). The home page's one rssvp link points anonymous readers at the public firehose and logged-in readers at their personal feed.
   Drop the URLs into [NetNewsWire](https://netnewswire.com) / [Miniflux](https://miniflux.app) / [FreshRSS](https://freshrss.org). No app, no push, no algorithm.
   **Plato will never email you about activity** — magic-link login is the only outbound mail, deliberately.
 

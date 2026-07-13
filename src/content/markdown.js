@@ -41,7 +41,15 @@ function escapeHtml(s) {
 }
 
 function safeHref(href) {
-  const trimmed = String(href ?? '').trim();
+  // Strip C0 controls + DEL before the scheme test. A browser's URL parser
+  // removes tab/CR/LF while resolving the scheme, so `java\tscript:` navigates
+  // as `javascript:` — but our scheme regex sees the raw tab, fails to match
+  // DANGEROUS_URL_SCHEME (\t isn't in [a-z0-9+.-]), and would pass the href
+  // through with the control char intact. CommonMark's angle-bracket
+  // destination `[x](<java\tscript:…>)` is how the tab reaches here. Removing
+  // the chars the browser removes closes the obfuscation: the stripped form is
+  // then correctly rejected. Legitimate URLs never carry raw control bytes.
+  const trimmed = String(href ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (!trimmed) return '';
   // Allow http(s), mailto, fragments, and relative URLs.
   if (SAFE_URL_SCHEME.test(trimmed)) return trimmed;

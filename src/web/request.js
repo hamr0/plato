@@ -2,9 +2,26 @@
 // Pure functions where possible; the only stateful bit is readBody (reads
 // the request stream once, returns the body as a string).
 
+// Hard ceiling on a buffered request body. The largest legitimate POST is a
+// post/comment submission — BODY_MAX is 40 000 chars plus form-field overhead —
+// so 1 MiB is ~25x headroom and still small enough that many concurrent maxed
+// bodies can't exhaust the single process. Without a cap, `readBody` buffers
+// the whole stream: an unauthenticated `POST /login` or `/draft` with a
+// multi-GB body is a trivial memory-exhaustion DoS. On overflow we destroy the
+// socket and throw; the dispatch try/catch turns it into a 500 for the abuser.
+export const MAX_BODY_BYTES = 1024 * 1024;
+
 export async function readBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_BODY_BYTES) {
+      req.destroy();
+      throw new Error('readBody: request body exceeds limit');
+    }
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks).toString('utf8');
 }
 
