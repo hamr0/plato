@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-07-13 — knowless 1.3.4 (patched nodemailer)
+
+Dependency security patch. Supersedes 0.16.0 (which was tagged but not deployed).
+
+### Security
+
+- **Bumped `knowless` `^1.3.0` → `^1.3.4`, which moves the transitive `nodemailer` dependency `^8.0.7` → `^9.0.3`.** During the 0.16.0 release sweep, `nodemailer 8.0.7` carried published advisories; the assessment was that none were reachable through knowless's mail API (plato drives knowless, not nodemailer directly), so the fix was raised upstream as a knowless PRD rather than forced via a plato-side override. knowless has now shipped it in 1.3.4. `npm audit` is clean (0 vulnerabilities) and the full suite (924 tests) passes unchanged against 1.3.4 — no knowless API surface plato uses changed across 1.3.0 → 1.3.4.
+
 ## [0.16.0] - 2026-07-13 — light by default, a whole-instance RSS feed, and a security-hardening pass
 
 Started as a handful of reader-facing fixes (light default, outbound links, a 15-minute title-edit window) and grew, via a repo-wide `/security` sweep, into a hardening release with a new public feed. Minor bump (not a patch) because of the new `/rss` capability. Highlights: **light is the out-of-box theme**; **post titles are editable for 15 minutes** then frozen (amends a PRD §Permanently out lock — the lock's reasoning survives intact, only its edge moved); a **public whole-instance `/rss` feed** with a context-aware home affordance; and a batch of security fixes — the edit route now runs the spam gates, a control-char XSS vector is closed, request bodies are capped, and anonymous-draft + sub-creation abuse are bounded.
