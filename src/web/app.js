@@ -13,6 +13,7 @@ import {
   finalizeDraft,
   getPost,
   editPost,
+  postTitleLocked,
   getPostPreview,
   getPostRawBody,
   listPostsInSub,
@@ -20,6 +21,7 @@ import {
   SUB_SORTS,
   EDIT_WINDOW_MS as POST_EDIT_WINDOW_MS,
   BODY_MAX as POST_BODY_MAX,
+  TITLE_MAX as POST_TITLE_MAX,
 } from '../content/post.js';
 import {
   createSub,
@@ -159,7 +161,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=51">
+<link rel="stylesheet" href="/static/style.css?v=53">
 ${feedTag}
 ${jsonLdTag}
 ${headExtra}
@@ -172,7 +174,7 @@ ${themePaletteOverrides()}
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
-<script src="/static/theme.js?v=5" defer></script>
+<script src="/static/theme.js?v=6" defer></script>
 </head>
 <body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);
@@ -226,23 +228,24 @@ const APP_VERSION = (() => {
 })();
 
 // Operator-supplied vote-color overrides emitted as inline <style> in
-// <head>. Two scopes: the dark palette wins under :root; the light
-// palette wins under both .theme-light (post-click) and the media
-// query when the user hasn't clicked yet (and isn't sticky-dark).
+// <head>. Two scopes mirror style.css's light-default architecture: the
+// light palette wins under :root (the hard default); the dark palette
+// wins under both .theme-dark (post-click) and the media query when the
+// user hasn't clicked yet (and isn't sticky-light).
 // resolveBrandingColors has already screened the values for CSS
 // injection at boot, so direct interpolation is safe.
 function themePaletteOverrides() {
   const out = [];
-  const dark = branding.colors;
-  if (dark.up || dark.down) {
-    const decls = `${dark.up ? `--up:${dark.up};` : ''}${dark.down ? `--down:${dark.down};` : ''}`;
-    out.push(`:root{${decls}}`);
-  }
   const light = branding.colorsLight;
   if (light.up || light.down) {
     const decls = `${light.up ? `--up:${light.up};` : ''}${light.down ? `--down:${light.down};` : ''}`;
-    out.push(`:root.theme-light{${decls}}`);
-    out.push(`@media (prefers-color-scheme: light){:root:not(.theme-dark){${decls}}}`);
+    out.push(`:root{${decls}}`);
+  }
+  const dark = branding.colors;
+  if (dark.up || dark.down) {
+    const decls = `${dark.up ? `--up:${dark.up};` : ''}${dark.down ? `--down:${dark.down};` : ''}`;
+    out.push(`:root.theme-dark{${decls}}`);
+    out.push(`@media (prefers-color-scheme: dark){:root:not(.theme-light){${decls}}}`);
   }
   return out.length === 0 ? html`` : raw(`<style>${out.join('')}</style>`);
 }
@@ -1170,19 +1173,27 @@ function buildFlairMap(db, posts) {
 // `mem` matches the /subs directory column header (subscribers count is
 // the "membership" signal exposed at instance level — actual subscriber
 // identities are private per PRD §Sub subscription mechanics).
-function activeSubsBlock({ subs, currentHandle, memCounts, modSet }) {
+function activeSubsBlock({ subs, currentHandle, memCounts, modSet, feedHref }) {
   const top = subs.slice(0, 4);
   const newSubLink = currentHandle
     ? html`<a class="new-sub" href="/sub/create">+ new sub</a>`
     : html``;
+  // rssvp at the other end of the header line. Click-to-copy (rssvp.js) so a
+  // reader grabs the feed URL for their reader app; the target is context-aware
+  // (personal feed when logged in, public firehose otherwise — see renderHome).
+  // Shown even in the empty state: you subscribe once and updates arrive later.
+  const header = html`<div class="active-subs-head">
+    <h3 class="section">// active subs · last 24h</h3>
+    <a href="${feedHref}" class="rssvp-link">rssvp</a>
+  </div>`;
   if (top.length === 0) {
     return html`<section class="active-subs">
-      <h3 class="section">// active subs · last 24h</h3>
+      ${header}
       <p class="muted"><em>no activity in the last 24h.</em> <a href="/subs">browse all subs</a> ${newSubLink}</p>
     </section>`;
   }
   return html`<section class="active-subs">
-    <h3 class="section">// active subs · last 24h</h3>
+    ${header}
     <div class="active-subs-list">
       ${top.map((s) => html`<div class="active-sub-row">
         ${modSet?.has(s.name) ? html`<span class="mod-indicator" title="you mod this sub">&gt;</span>` : html``}<a class="name sub-link sub-${subColorIndex(s.name)}" href="/sub/${s.name}">//${s.name}</a>${importedSubChip({ sub: s })}
@@ -1348,6 +1359,23 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
     : null;
   const subscribedEmpty = subNames !== null && subNames.length === 0;
 
+  // Context-aware feed target for the header rssvp affordance + <head>
+  // autodiscovery: personal token feed when logged in, public /rss firehose
+  // otherwise. See the `feed:` note on pageView below. A session can exist
+  // before the handle has a `handles` row (logged in, never posted) — and
+  // getOrCreateRssToken throws on an unknown handle — so guard on the row
+  // and fall back to the public feed (a never-posted user has no personal
+  // content to feed anyway).
+  const hasHandleRow = currentHandle
+    ? db.prepare('SELECT 1 FROM handles WHERE handle = ?').get(currentHandle) != null
+    : false;
+  const feedHref = hasHandleRow
+    ? `/u/${getOrCreateRssToken(db, currentHandle)}/rss`
+    : '/rss';
+  const feedTitle = hasHandleRow
+    ? `${branding.forumName} · your feed`
+    : branding.forumName;
+
   const { page, offset, limit } = parsePage(searchParams);
   const overFetch = limit + 1;
   let feedView;
@@ -1395,6 +1423,13 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       title: branding.forumName,
       subtitle: branding.tagline,
       canonical: `${siteMeta.baseUrl}/`,
+      // Context-aware feed: a logged-in reader gets their personal feed (posts
+      // across their subs + notifications on their own content); a logged-out
+      // reader gets the public whole-instance firehose. Same affordance, right
+      // target. getOrCreateRssToken mints a token on first home load if the
+      // user has none — the token also surfaces on /memlog, so this doesn't
+      // widen the credential beyond where it already lives.
+      feed: { href: feedHref, title: feedTitle },
       jsonLd: {
         '@context': 'https://schema.org',
         '@type': 'WebSite',
@@ -1404,7 +1439,7 @@ function renderHome(req, res, { db, auth, postsDir }, searchParams) {
       },
     }, html`
       ${anonHintFor(currentHandle)}
-      ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts, modSet: currentHandle ? new Set(listSubsModeratedBy(db, currentHandle)) : null })}
+      ${activeSubsBlock({ subs: subsNav, currentHandle, memCounts: navMemCounts, modSet: currentHandle ? new Set(listSubsModeratedBy(db, currentHandle)) : null, feedHref })}
       <details class="new-post-toggle">
         <summary>+ new post</summary>
         ${postFormFor({ currentHandle, postableSubs })}
@@ -2334,7 +2369,40 @@ async function handleSubMods(req, res, { db, auth }, subName) {
   redirect(res, back);
 }
 
-async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride }) {
+// Per-IP hourly cap on ANONYMOUS draft submissions. An anonymous /draft is a
+// login request (it calls auth.startLogin), which knowless already caps at
+// maxLoginRequestsPerIpPerHour per IP — but plato writes the draft row *before*
+// that gate, so past the cap you get no email yet the row still lands. Those
+// rows are orphaned (no email → no finalize) and pruned at 24h, so it's a pure
+// disk-flood. This bounds the row-write on the SAME budget knowless uses for
+// the email: no new tunable, the limit is read from auth.config.
+//
+// Kept in-memory (not a table, no drafts.ip column) on purpose: plato stores
+// NO IP at rest (identity is HMAC handles, email never stored), and one process
+// by design means an in-memory Map is coherent. A restart clearing the window
+// is fine — that is standard rate-limiter behavior. State lives in the createApp
+// closure so each app instance (and each test spin-up) gets a fresh limiter.
+const ANON_DRAFT_WINDOW_MS = 60 * 60 * 1000; // mirror knowless's per-hour login window
+export function makeAnonDraftLimiter(limit) {
+  const counts = new Map(); // `${ip}:${windowIndex}` -> count this window
+  let currentWindow = -1;
+  return function allow(ip, now = Date.now()) {
+    const w = Math.floor(now / ANON_DRAFT_WINDOW_MS);
+    if (w !== currentWindow) {
+      // New hour: drop every prior-window bucket so the map stays bounded to
+      // the set of IPs active in the current window.
+      for (const k of counts.keys()) if (!k.endsWith(`:${w}`)) counts.delete(k);
+      currentWindow = w;
+    }
+    const key = `${ip}:${w}`;
+    const n = counts.get(key) ?? 0;
+    if (n >= limit) return false;
+    counts.set(key, n + 1);
+    return true;
+  };
+}
+
+async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
@@ -2431,12 +2499,33 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     );
   }
 
-  const { draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug, sensitive });
+  // Bound the anonymous draft-row write per IP on knowless's login budget.
+  // Vague message on purpose (0.10.4 UX-honesty rule: rate-limit copy never
+  // reveals the cap or window). Checked before the write, so a flooded IP
+  // stops accumulating rows once it is past the email cap anyway.
+  const draftIp = determineSourceIp(req, auth.config.trustedProxies);
+  if (!anonDraftAllow(draftIp)) {
+    return send(res, 429, quickPage(req, { db, auth }, 'slow down',
+      html`<p class="muted">too many drafts from your network right now — try again later. <a href="/">back</a></p>`
+    ));
+  }
+
+  let draftId;
+  try {
+    ({ draftId } = submitDraft(db, { title, body: postBody, subName, flairSlug, sensitive }));
+  } catch (err) {
+    // submitDraft is the input boundary here: a crafted POST can carry an
+    // over-cap title/body past the form's maxlength. Surface a 400 with
+    // friendly copy instead of letting it fall through to a bare 500.
+    return send(res, 400, quickPage(req, { db, auth }, 'post not accepted',
+      html`<p class="muted">${friendlyPostError(err.message, subName)} <a href="/">back</a></p>`
+    ));
+  }
 
   await auth.startLogin({
     email,
     nextUrl: `${baseUrl}/draft/${draftId}/finalize`,
-    sourceIp: determineSourceIp(req, auth.config.trustedProxies),
+    sourceIp: draftIp,
     bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
 
@@ -2945,6 +3034,10 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     <p><a href="${permalink}">← back to post</a></p>
     <h2 class="section">// edit post</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
+      <label>title</label>
+      ${postTitleLocked(post)
+        ? html`<p class="muted">${post.title}<br>titles are editable for 15 minutes after posting — this one has locked.</p>`
+        : html`<input name="title" maxlength="${POST_TITLE_MAX}" value="${post.title}" required>`}
       <label>body (markdown)</label>
       <div class="textarea-wrap">
         <textarea name="body" maxlength="${POST_BODY_MAX}" data-charcount required>${body}</textarea>
@@ -2964,19 +3057,57 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
   `));
 }
 
-async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId) {
+async function handlePostEdit(req, res, { db, auth, postsDir, spamPatterns, linkCapConfig, urlhausHosts }, subName, postId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
+  // Absent title field = the post's title has locked; editPost leaves it be.
+  const title = form.title;
   const body = form.body ?? '';
   const sensitive = form.sensitive === '1';
-  try {
-    editPost(db, { postId, handle, body, sensitive, postsDir });
-  } catch (err) {
-    const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
-    return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+
+  // The edit path runs the same three spam gates as the submit path
+  // (handleDraft / handleFinalize). Without them, "publish clean, edit spam
+  // in" walks straight past the link cap, the pattern file, and URLhaus —
+  // and the 15-minute title window widened that lane to the title, which is
+  // the field feeds and RSS actually show. Same order as submit: link cap
+  // rejects before the write; patterns and URLhaus auto-collapse after it.
+  const existing = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  const effectiveTitle = title === undefined ? (existing?.title ?? '') : title;
+  const spamText = `${effectiveTitle}\n${body}`;
+
+  const linkBlock = checkLinkCap(db, handle, spamText, Date.now(), linkCapConfig);
+  if (linkBlock) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'too many links', message: linkBlock.message,
+      links: html`<p><a href="/sub/${subName}/post/${postId}">← back to post</a></p>`,
+    }));
   }
-  const post = db.prepare('SELECT sub_name, id FROM posts WHERE id = ?').get(postId);
+
+  try {
+    editPost(db, { postId, handle, title, body, sensitive, postsDir });
+  } catch (err) {
+    // 403 for state/permission refusals the caller cannot fix by correcting
+    // their input (wrong author, closed window, locked title); 400 for the
+    // rest (blank body, over-cap title).
+    const forbidden = err.message.includes('not the author')
+      || err.message.includes('window')
+      || err.message.includes('title is locked');
+    return send(res, forbidden ? 403 : 400, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+  }
+
+  const post = db.prepare('SELECT sub_name, id, title FROM posts WHERE id = ?').get(postId);
+  // Re-read the stored title: a locked title leaves the submitted value on the
+  // floor, so matching the form's value would scan text the post doesn't carry.
+  const storedText = `${post.title}\n${body}`;
+  const matched = matchSpamPatterns(storedText, spamPatterns);
+  if (matched.length > 0) {
+    applySpamMatches(db, { targetType: 'post', targetId: postId, subName: post.sub_name, matched });
+  }
+  const matchedHosts = matchUrlhaus(storedText, urlhausHosts);
+  if (matchedHosts.length > 0) {
+    applyUrlhausMatches(db, { targetType: 'post', targetId: postId, subName: post.sub_name, matchedHosts });
+  }
   redirect(res, permalinkFor(post));
 }
 
@@ -3297,10 +3428,20 @@ function renderSitemap(res, { db }) {
   for (const s of subs) {
     push(`${base}/sub/${encodeURIComponent(s.name)}`, isoDay(s.last_post_at ?? Date.now()), '0.7', 'daily');
   }
-  // Post pages — exclude removed.
+  // Post pages — exclude removed. Capped at the sitemap-protocol ceiling of
+  // 50 000 URLs: without a LIMIT this scans and materializes the entire posts
+  // table into a string on every unauthenticated hit. Newest-first, so the cap
+  // drops only the oldest posts (Google/SEO already have those indexed; this is
+  // a crawl hint, not the archive). A future spillover to a sitemap index is
+  // the move if an instance ever exceeds 50k live posts.
+  // Clamp at 0: SQLite reads a negative LIMIT as *unlimited*, so once the
+  // static + per-sub URLs alone reach 50k (subs are disabled, never deleted,
+  // so the count only grows) an unclamped `50000 - urls.length` would flip
+  // negative and silently defeat the cap it exists to enforce.
+  const SITEMAP_MAX_POSTS = Math.max(0, 50000 - urls.length);
   const posts = db.prepare(`
-    SELECT id, sub_name, created_at FROM posts WHERE removed_at IS NULL ORDER BY created_at DESC
-  `).all();
+    SELECT id, sub_name, created_at FROM posts WHERE removed_at IS NULL ORDER BY created_at DESC LIMIT ?
+  `).all(SITEMAP_MAX_POSTS);
   for (const p of posts) {
     push(`${base}/sub/${encodeURIComponent(p.sub_name)}/post/${encodeURIComponent(p.id)}`, isoDay(p.created_at), '0.7', 'weekly');
   }
@@ -3309,7 +3450,12 @@ function renderSitemap(res, { db }) {
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
     urls.join('\n') + '\n' +
     '</urlset>\n';
-  res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' });
+  // Cache like the RSS feeds (max-age=300): a crawler hitting this repeatedly
+  // shouldn't re-scan the posts table on every request.
+  res.writeHead(200, {
+    'Content-Type': 'application/xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
   res.end(xml);
 }
 
@@ -3319,6 +3465,26 @@ function renderSitemap(res, { db }) {
 // readers probe. Bridges the forum to external readers per PRD §M6 →
 // per-sub RSS feeds. Cache-Control of 5 min keeps polling cheap without
 // going stale visibly. 404s for unknown subs.
+// Shared Atom <entry> for a post row. The per-post envelope is byte-identical
+// across the per-sub, whole-instance, and personal feeds; only the permalink
+// and the displayed title vary, so the caller passes those in.
+function atomPostEntry(p, { postsDir, pseudonyms, url, title }) {
+  const author = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
+  const preview = getPostPreview(p, postsDir, { maxChars: 600 });
+  const stamp = new Date(p.created_at).toISOString();
+  return (
+    `  <entry>\n` +
+    `    <id>${escapeXml(url)}</id>\n` +
+    `    <title>${escapeXml(title)}</title>\n` +
+    `    <link href="${escapeXml(url)}"/>\n` +
+    `    <published>${stamp}</published>\n` +
+    `    <updated>${stamp}</updated>\n` +
+    `    <author><name>${escapeXml(author)}</name></author>\n` +
+    `    <content type="html">${escapeXml(preview.html)}</content>\n` +
+    `  </entry>`
+  );
+}
+
 function renderSubRss(res, { db, postsDir }, subName) {
   const sub = getSubByName(db, subName);
   if (!sub) {
@@ -3344,20 +3510,7 @@ function renderSubRss(res, { db, postsDir }, subName) {
   ).toISOString();
   const entries = posts.map((p) => {
     const url = `${siteMeta.baseUrl}/sub/${encodeURIComponent(subName)}/post/${encodeURIComponent(p.id)}`;
-    const author = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
-    const preview = getPostPreview(p, postsDir, { maxChars: 600 });
-    const stamp = new Date(p.created_at).toISOString();
-    return (
-      `  <entry>\n` +
-      `    <id>${escapeXml(url)}</id>\n` +
-      `    <title>${escapeXml(p.title)}</title>\n` +
-      `    <link href="${escapeXml(url)}"/>\n` +
-      `    <published>${stamp}</published>\n` +
-      `    <updated>${stamp}</updated>\n` +
-      `    <author><name>${escapeXml(author)}</name></author>\n` +
-      `    <content type="html">${escapeXml(preview.html)}</content>\n` +
-      `  </entry>`
-    );
+    return atomPostEntry(p, { postsDir, pseudonyms, url, title: p.title });
   }).join('\n');
   const subtitle = sub.description
     ? `  <subtitle>${escapeXml(sub.description)}</subtitle>\n`
@@ -3370,6 +3523,46 @@ function renderSubRss(res, { db, postsDir }, subName) {
     subtitle +
     `  <link rel="self" href="${escapeXml(feedUrl)}"/>\n` +
     `  <link rel="alternate" type="text/html" href="${escapeXml(subUrl)}"/>\n` +
+    `  <updated>${updated}</updated>\n` +
+    (entries ? entries + '\n' : '') +
+    `</feed>\n`;
+  res.writeHead(200, {
+    'Content-Type': 'application/atom+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=300',
+  });
+  res.end(xml);
+}
+
+// /rss — Atom 1.0 feed of the latest 50 non-removed, non-collapsed posts
+// across the WHOLE instance (every sub). The public firehose: the logged-out
+// counterpart to the token-gated personal feed, so a reader can follow "what's
+// new here" without an account. Same latest-50 window as the per-sub and
+// personal feeds — a live sliding window recomputed per fetch, never a frozen
+// list — and the same drama-shape exclusion (hard-removed AND soft-collapsed
+// omitted: a reader has no collapse affordance, so surfacing collapsed content
+// would over-amplify it). PRD §Outbound channels: pull-only. 5-min cache like
+// the other feeds.
+function renderHomeRss(res, { db, postsDir }) {
+  const all = listPostsAcrossSubs(db, { sort: 'new', limit: 50 });
+  const posts = all.filter((p) => p.removed_at == null && p.collapsed_at == null);
+  const handles = [...new Set(posts.map((p) => p.handle))];
+  const pseudonyms = pseudonymsByHandle(db, handles);
+  const feedUrl = `${siteMeta.baseUrl}/rss`;
+  const homeUrl = `${siteMeta.baseUrl}/`;
+  const updated = new Date(
+    posts.length > 0 ? Math.max(...posts.map((p) => p.created_at)) : Date.now()
+  ).toISOString();
+  const entries = posts.map((p) => {
+    const url = `${siteMeta.baseUrl}/sub/${encodeURIComponent(p.sub_name)}/post/${encodeURIComponent(p.id)}`;
+    return atomPostEntry(p, { postsDir, pseudonyms, url, title: p.title });
+  }).join('\n');
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<feed xmlns="http://www.w3.org/2005/Atom">\n` +
+    `  <id>${escapeXml(feedUrl)}</id>\n` +
+    `  <title>${escapeXml(branding.forumName)}</title>\n` +
+    `  <link rel="self" href="${escapeXml(feedUrl)}"/>\n` +
+    `  <link rel="alternate" type="text/html" href="${escapeXml(homeUrl)}"/>\n` +
     `  <updated>${updated}</updated>\n` +
     (entries ? entries + '\n' : '') +
     `</feed>\n`;
@@ -3444,20 +3637,7 @@ function renderPersonalRss(res, { db, postsDir }, token, { includeNotifications 
     if (e.kind === 'post') {
       const p = e.post;
       const url = `${siteMeta.baseUrl}/sub/${encodeURIComponent(p.sub_name)}/post/${encodeURIComponent(p.id)}`;
-      const author = pseudonyms.get(p.handle) ?? p.handle.slice(0, 8);
-      const preview = getPostPreview(p, postsDir, { maxChars: 600 });
-      const stamp = new Date(p.created_at).toISOString();
-      return (
-        `  <entry>\n` +
-        `    <id>${escapeXml(url)}</id>\n` +
-        `    <title>${escapeXml(`//${p.sub_name}: ${p.title}`)}</title>\n` +
-        `    <link href="${escapeXml(url)}"/>\n` +
-        `    <published>${stamp}</published>\n` +
-        `    <updated>${stamp}</updated>\n` +
-        `    <author><name>${escapeXml(author)}</name></author>\n` +
-        `    <content type="html">${escapeXml(preview.html)}</content>\n` +
-        `  </entry>`
-      );
+      return atomPostEntry(p, { postsDir, pseudonyms, url, title: `//${p.sub_name}: ${p.title}` });
     }
     // notif: build link via memlogTargetLink shape, fall back to /memlog
     const n = e.notif;
@@ -3544,7 +3724,16 @@ function modStateView({ removedAt, collapsedAt, body }) {
 // requires a reason; soft removal (collapse) makes it optional. The
 // expand-form pattern is the friction that makes hard moderation
 // deliberate without needing a JS modal.
-function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled }) {
+//
+// `group` is the shared <details name>, which makes the strip an exclusive
+// accordion: opening one action closes any other, and clicking an open one
+// closes it. Native HTML, so it holds on the no-JS path. It must be one name
+// per control strip rather than per target — `ban` addresses the author
+// handle while collapse/remove address the post/comment, so keying on
+// targetId would put ban in its own group and let two forms sit open.
+// Browsers without <details name> support just fall back to independent
+// toggles (the old behavior) — degradation, not breakage.
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled, group }) {
   if (disabled) {
     // Dimmed marker: only one mod-state should be active at a time. When
     // the target is hard-removed, the collapse/uncollapse pair is meaningless
@@ -3552,7 +3741,7 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
     // the <details> button. The mod must `unremove` first to re-enable.
     return html`<span class="mod-btn mod-btn-disabled" aria-disabled="true" title="not available while ${MOD_ACTION_LABELS.remove ?? 'removed'}">${action}</span>`;
   }
-  return html`<details class="mod-confirm">
+  return html`<details class="mod-confirm" name="${group}">
     <summary class="mod-btn">${action}</summary>
     <form method="POST" action="/sub/${subName}/mod" class="mod-form">
       <input type="hidden" name="action" value="${action}">
@@ -3571,6 +3760,9 @@ function modControls({
 }) {
   const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
   const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
+  // One accordion group per control strip — keyed on the content target so
+  // two posts on the same page keep independent strips. See modActionForm.
+  const group = `mod-${targetType}-${targetId}`;
   // Mutual exclusion: hard-removal supersedes soft-collapse. While the item
   // is hard-removed, dim the collapse pair — the body is gone, so toggling a
   // collapse on/off is a no-op. A mod escalating from collapse → remove is
@@ -3596,13 +3788,14 @@ function modControls({
         targetId: authorHandle,
         returnTo,
         reasonRequired: !authorBanned,
+        group,
       })
     : html``;
   return html`<div class="mod-controls">
     ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo,
-      reasonRequired: false, disabled: removedAt != null })}
+      reasonRequired: false, disabled: removedAt != null, group })}
     ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo,
-      reasonRequired: removeAction === 'remove' })}
+      reasonRequired: removeAction === 'remove', group })}
     ${banForm}
   </div>`;
 }
@@ -5645,6 +5838,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
   // request rather than at the moment a user happens to trip a check.
   const rateLimitConfig = resolveRateLimitConfig(rateLimits);
   const linkCapConfig = resolveLinkCapConfig(linkCaps);
+  // Anonymous-draft per-IP limiter, sharing knowless's per-hour login budget
+  // (no separate plato tunable). Per-app-instance state; see makeAnonDraftLimiter.
+  const anonDraftAllow = makeAnonDraftLimiter(auth.config.maxLoginRequestsPerIpPerHour);
   // Spam patterns: load once at boot. File path is operator-supplied;
   // when missing or empty, the matcher returns no matches (a no-op).
   const spamPatterns = loadSpamPatterns(spamPatternsFile);
@@ -5688,6 +5884,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/healthz' && (method === 'GET' || method === 'HEAD')) return handleHealthz(res, { db, exportsDir });
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
+      if (path === '/rss' && method === 'GET') return renderHomeRss(res, { db, postsDir });
       if (path === '/humans.txt' && method === 'GET') return renderHumans(res);
       if (path === '/llms.txt' && method === 'GET') return renderLlms(res, { db });
       if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
@@ -5702,7 +5899,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/about' && method === 'GET') return renderAbout(req, res, { db, auth });
       if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
-        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride });
+        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow });
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });
@@ -5721,7 +5918,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
         return renderPostEditPage(req, res, { db, auth, postsDir }, m[1], m[2]);
       }
       if ((m = path.match(SUB_POST_EDIT_PATH_RE)) && method === 'POST') {
-        return handlePostEdit(req, res, { db, auth, postsDir }, m[1], m[2]);
+        return handlePostEdit(req, res, { db, auth, postsDir, spamPatterns, linkCapConfig, urlhausHosts }, m[1], m[2]);
       }
       if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
         return handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, m[1], m[2]);

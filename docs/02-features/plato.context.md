@@ -138,7 +138,7 @@ Three categories. Pick the right effort tier before changing.
 
 These are explicit operator surfaces. Changing them is a one-line edit + restart, and the design assumes you will.
 
-- **Color tokens.** Every color in the UI is a `--*` CSS variable on `:root` in `style.css`. Re-skinning is a search-and-replace: `--bg`, `--text`, `--accent`, `--accent-warm`, `--border`, `--text-dim`. Vote arrows, links, logo dots, mod-button hover, modlog accent rows all re-skin together. **v1 requirement.** `style.css` also ships nine drop-in dark presets and five light presets — `tokyo-night` (active dark default), `github-dark`, `warm-amber`, `cool-cyan`, `mocha-purple`, `monokai-pro`, `nord`, `gruvbox-dark`, `night-owl`; `zinc-cool` (active light default), `github-light`, `notion-cream`, `solarized-light`, `stone-warm`. Each is a single commented `:root { ... }` line at the top of `style.css`; copy any block over the active one and reload. The light presets sit under `:root.theme-light` plus a `@media (prefers-color-scheme: light)` mirror — both blocks must change together.
+- **Color tokens.** Every color in the UI is a `--*` CSS variable on `:root` in `style.css`. Re-skinning is a search-and-replace: `--bg`, `--text`, `--accent`, `--accent-warm`, `--border`, `--text-dim`. Vote arrows, links, logo dots, mod-button hover, modlog accent rows all re-skin together. **v1 requirement.** `style.css` also ships nine drop-in dark presets and five light presets — `tokyo-night` (active dark palette), `github-dark`, `warm-amber`, `cool-cyan`, `mocha-purple`, `monokai-pro`, `nord`, `gruvbox-dark`, `night-owl`; `zinc-cool` (active default — light ships out of the box since 0.16.0), `github-light`, `notion-cream`, `solarized-light`, `stone-warm`. Each is a single commented `:root { ... }` line at the top of `style.css`; copy any block over the active one and reload. The light palette is the default and sits in the bare `:root` block — one place. The dark palette sits under `:root.theme-dark` plus a `@media (prefers-color-scheme: dark)` mirror — both blocks must change together.
 - **Reserved sub names.** Add to `RESERVED_SUB_NAMES` to block names that collide with new top-level routes you've added.
 - **Disposable-email blocklist.** `disposable-domains.txt`, one domain per line. Operator owns the file; M5 adds a cron sync to the upstream community-maintained list.
 - **Auto-uncollapse thresholds (per sub).** Set on sub creation via the form; floors are enforced (post ≥ 50, comment ≥ 20). Higher means harder for the community to overrule a soft-removal.
@@ -282,7 +282,7 @@ The `branding.colors` (dark) and `branding.colorsLight` (light) sections of `con
 }
 ```
 
-`colors.up` overrides `--up` and `colors.down` overrides `--down` under `:root` (dark default). `colorsLight` overrides the same two variables under `:root.theme-light` plus the `@media (prefers-color-scheme: light)` block. Any CSS color string works (hex, `rgb()`, named); the same injection guard as flair colors rejects `;{}<>"'`. Bad value throws at boot with a field-name error — `branding.colors.up must be a string` vs `branding.colorsLight.down contains invalid characters` so the operator knows which palette failed.
+`colorsLight` overrides `--up` / `--down` under `:root` — light is the default palette, so it needs no class or media scope. `colors` (the dark pair) overrides the same two variables under `:root.theme-dark` plus the `@media (prefers-color-scheme: dark)` block. Any CSS color string works (hex, `rgb()`, named); the same injection guard as flair colors rejects `;{}<>"'`. Bad value throws at boot with a field-name error — `branding.colors.up must be a string` vs `branding.colorsLight.down contains invalid characters` so the operator knows which palette failed.
 
 The user-facing theme toggle (M8/B0) sits last in the header right-cluster. Two-state, no OS-default once clicked: a click stamps `.theme-light` or `.theme-dark` on `<html>` and persists to **both** `localStorage.theme` (string `'light'` or `'dark'`) **and** a first-party functional cookie `plato_theme=light|dark; path=/; max-age=31536000; SameSite=Lax`. Anti-flash inline `<script>` in `<head>` reads localStorage first (warm path), falls back to the cookie, applies the class before first paint so reloads don't strobe. The dual-persistence layer is the fix for mobile Firefox's privacy mode session-clearing localStorage between refreshes — first-party cookies survive that mode. Class-based, not attribute-based, because iOS Safari has chronic CSSOM-invalidation bugs around attribute selectors that surface as "first toggle works, post-navigation toggles fail" — class selectors don't have this problem in any engine. A `pageshow` listener gated on `event.persisted === true` also re-syncs theme state on bfcache restoration (mobile Firefox pull-to-refresh). Without JS the button hides itself (`html:not(.has-js) .theme-toggle`) so no-JS users get the OS-hint behavior with no dead chrome. **Known residual limitation**: regular mobile Firefox refresh (F5 / pull-to-refresh on some build variants) occasionally restores the page to dark even after toggling to light. Recoverable with one extra tap. Documented in operator-guide § Known limitations.
 
@@ -371,7 +371,7 @@ Pagination primitives live in `src/archive/reader-pagination.js` (shared module:
 | One vote per handle per target | enforced by composite PK |
 | Re-vote same direction | toggles off |
 | Re-vote opposite direction | switches |
-| Edit window | 24h from creation (`EDIT_WINDOW_MS`); applies to posts and comments; migration 008 added `edited_at` column |
+| Edit window | 24h from creation (`EDIT_WINDOW_MS`); applies to posts and comments; migration 008 added `edited_at` column. Covers body + `sensitive`. A post's **title** has its own, much shorter gate — editable for 15 min after posting (`TITLE_EDIT_WINDOW_MS` / `postTitleLocked`), then frozen for good. Deliberately a pure function of the clock, not of engagement: `castVote` deletes the row on toggle-off, so a vote-derived lock un-locks itself |
 
 ## Numeric reference (every threshold in one place)
 
@@ -403,6 +403,12 @@ Code path: `checkPostRate(db, handle, now, config, { skipHourly: true, doubledFo
 | new | 1 |
 | recent | 3 |
 | established | 5 |
+
+### Where the spam gates run (submit **and** edit — 0.16.0)
+
+The link cap, the `spam-patterns.txt` matcher, and the URLhaus host matcher all run on **three** routes, not one: `POST /draft`, `GET /auth/callback`→`handleFinalize`, and `POST /sub/<name>/post/<id>/edit`. All three match on `` `${title}\n${body}` `` and apply the same two-stage shape — the link cap rejects with a 400 *before* the write; the pattern and host matchers auto-collapse + system-flag *after* it.
+
+The edit route ran none of them until 0.16.0, which made "publish something clean, then edit the spam in" a working bypass of the whole stack. Adding the 15-minute title-edit window would have extended that bypass from the body to the **title** — the field that actually appears in feeds, RSS, and sub indexes — so both were closed together. If you add a fourth route that writes post content, wire these three gates into it; a defense that only guards the front door is not a defense. Re-matching on an edit is idempotent by construction (the collapse is `WHERE collapsed_at IS NULL`-guarded; `flags` carries `UNIQUE(target_type, target_id, flagger_handle)`), so an already-collapsed spam post can't accumulate duplicate modlog rows on repeat edits. The matchers read the **stored** title, not the submitted one — a locked title discards the submitted value, and scanning text the post doesn't carry would be theatre.
 
 ### Per-sub thresholds (set at `/sub/create`, raise-only via `/sub/<name>/edit`)
 
@@ -436,6 +442,7 @@ Every long-form input pairs three layers: `<textarea data-charcount maxlength="�
 | Window | Duration | Source |
 |---|---|---|
 | Post edit window | 24h | `EDIT_WINDOW_MS` (`post.js`) |
+| Post title edit window | 15 min | `TITLE_EDIT_WINDOW_MS` / `postTitleLocked` (`post.js`) |
 | Comment edit window | 24h | `EDIT_WINDOW_MS` (`comment.js`) |
 | New-account voting window (half weight, no comment voting, posts <24h only) | 7d | `NEW_ACCOUNT_WINDOW_MS` (`vote.js`) |
 | Young-post window (new accounts can only vote on posts younger than this) | 24h | `YOUNG_POST_WINDOW_MS` (`vote.js`) |

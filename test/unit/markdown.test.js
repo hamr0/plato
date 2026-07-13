@@ -23,7 +23,23 @@ test('renderMarkdown: bold + italic', () => {
 
 test('renderMarkdown: links', () => {
   const out = renderMarkdown('[click here](https://example.com)');
-  assert.match(out, /<a href="https:\/\/example\.com">click here<\/a>/);
+  assert.match(out, /<a href="https:\/\/example\.com" target="_blank" rel="noopener">click here<\/a>/);
+});
+
+test('renderMarkdown: external links open in a new tab with rel=noopener', () => {
+  const out = renderMarkdown('[ex](https://example.com/page)');
+  assert.match(out, /target="_blank"/);
+  assert.match(out, /rel="noopener"/);
+});
+
+test('renderMarkdown: internal + fragment links stay same-tab (no target)', () => {
+  const rel = renderMarkdown('[sub](/sub/lobby)');
+  assert.match(rel, /<a href="\/sub\/lobby">sub<\/a>/);
+  assert.doesNotMatch(rel, /target=/);
+  const frag = renderMarkdown('[top](#comments)');
+  assert.doesNotMatch(frag, /target=/);
+  const mail = renderMarkdown('[mail](mailto:a@b.com)');
+  assert.doesNotMatch(mail, /target=/);
 });
 
 test('renderMarkdown: inline code', () => {
@@ -96,6 +112,24 @@ test('SECURITY: data: URL in markdown link is filtered', () => {
   assert.doesNotMatch(out, /href="data:/, 'data: URL must not survive');
 });
 
+// A browser's URL parser strips tab/CR/LF while resolving a scheme, so an href
+// of `java<TAB>script:…` navigates as `javascript:`. The angle-bracket link
+// destination `[x](<java\tscript:…>)` is how a raw control char reaches safeHref;
+// the scheme regex sees the tab and fails to classify it as dangerous unless the
+// control chars are stripped first. Assert no control char and no script: scheme
+// survives in any href, for every C0 control the parser would eat.
+test('SECURITY: control-char-obfuscated javascript: scheme is filtered', () => {
+  for (const code of [0x09, 0x0a, 0x0d, 0x00, 0x0b, 0x0c]) {
+    const ch = String.fromCharCode(code);
+    const out = renderMarkdown(`[x](<java${ch}script:alert(1)>)`);
+    assert.doesNotMatch(out, /href="[^"]*script:/i, `\\x${code.toString(16)} must not smuggle a script: scheme`);
+    const m = out.match(/href="([^"]*)"/);
+    if (m) for (const c of m[1]) {
+      assert.ok(c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) !== 0x7f, `control char \\x${code.toString(16)} leaked into href`);
+    }
+  }
+});
+
 test('SECURITY: vbscript: URL in markdown link is filtered', () => {
   const out = renderMarkdown('[evil](vbscript:msgbox(1))');
   assert.doesNotMatch(out, /href="vbscript:/);
@@ -116,7 +150,7 @@ test('renderMarkdown: http(s), mailto, relative, and fragment URLs survive', () 
 test('PRD: image markdown is rewritten as a link (no inline embeds)', () => {
   const out = renderMarkdown('![cat photo](https://example.com/cat.jpg)');
   assert.doesNotMatch(out, /<img/i, 'no <img> tag should be emitted');
-  assert.match(out, /<a href="https:\/\/example\.com\/cat\.jpg">/);
+  assert.match(out, /<a href="https:\/\/example\.com\/cat\.jpg"/);
   assert.match(out, /cat photo/);
 });
 

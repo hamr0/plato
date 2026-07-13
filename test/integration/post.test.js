@@ -377,7 +377,9 @@ test('parseFrontmatter: body that itself starts with --- is not mis-parsed', (t)
 
 // --- editPost ---
 
-import { editPost, EDIT_WINDOW_MS } from '../../src/content/post.js';
+import { editPost, EDIT_WINDOW_MS, TITLE_EDIT_WINDOW_MS } from '../../src/content/post.js';
+import { castVote } from '../../src/content/vote.js';
+import { addComment } from '../../src/content/comment.js';
 
 function postFixture(t) {
   const db = freshDb();
@@ -389,13 +391,121 @@ function postFixture(t) {
   return { db, postsDir, postId };
 }
 
+// The .md file is the canonical record, and getPost's `post` is the DB row —
+// so anything asserting the on-disk frontmatter has to read the file itself.
+function rawFileFor(db, postsDir, postId) {
+  const { file_path: filePath } = db.prepare('SELECT file_path FROM posts WHERE id = ?').get(postId);
+  return readFileSync(join(postsDir, filePath.replace(/^posts\//, '')), 'utf8');
+}
+
 test('editPost: author within window can update body', (t) => {
   const { db, postsDir, postId } = postFixture(t);
-  editPost(db, { postId, handle: HANDLE, body: 'new body', postsDir });
+  editPost(db, { postId, handle: HANDLE, title: 'original title', body: 'new body', postsDir });
   const { body } = getPost(db, postId, postsDir);
   assert.equal(body.trim(), 'new body');
   const row = db.prepare('SELECT edited_at FROM posts WHERE id = ?').get(postId);
   assert.ok(row.edited_at != null, 'edited_at set after edit');
+});
+
+test('editPost: author within window can update title (DB + frontmatter)', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  editPost(db, { postId, handle: HANDLE, title: 'a fresh title', body: 'original body', postsDir });
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, 'a fresh title', 'DB title updated');
+  assert.match(rawFileFor(db, postsDir, postId), /^title: "a fresh title"$/m, 'frontmatter title rewritten on disk');
+});
+
+// `$&` / `$'` / `` $` `` are replacement patterns to String.replace. A title
+// carrying one must land on disk literally, not expand into the matched line.
+test('editPost: a title containing $& is written literally to the frontmatter', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const tricky = "fix $& and $' and $1";
+  editPost(db, { postId, handle: HANDLE, title: tricky, body: 'original body', postsDir });
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, tricky, 'DB title is the literal string');
+  const raw = rawFileFor(db, postsDir, postId);
+  assert.match(raw, /^title: "fix \$& and \$' and \$1"$/m, 'frontmatter matches the DB, unexpanded');
+  assert.doesNotMatch(raw, /original title/, 'no expansion of the old title into the new one');
+});
+
+test('editPost: title locks once TITLE_EDIT_WINDOW_MS has passed', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const late = Date.now() + TITLE_EDIT_WINDOW_MS + 1000;
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, title: 'sneaky new title', body: 'original body', postsDir, now: late }),
+    /title is locked/,
+  );
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, 'original title', 'title unchanged after a blocked edit');
+});
+
+// submitDraft stores the raw form title, so a stored title can carry padding.
+// Resubmitting it unchanged must not read as a title change — otherwise a
+// body-only edit past the 15-minute mark trips a lock the author never touched.
+test('editPost: a padded stored title resubmitted unchanged does not trip the lock', (t) => {
+  const db = freshDb();
+  const postsDir = freshPostsDir();
+  t.after(() => rmSync(postsDir, { recursive: true, force: true }));
+  db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+  const { draftId } = submitDraft(db, { title: '  padded title  ', body: 'original body', subName: 'lobby' });
+  const { postId } = finalizeDraft(db, { draftId, handle: HANDLE, postsDir });
+
+  const late = Date.now() + TITLE_EDIT_WINDOW_MS + 1000;
+  editPost(db, { postId, handle: HANDLE, title: '  padded title  ', body: 'revised body', postsDir, now: late });
+  const { body } = getPost(db, postId, postsDir);
+  assert.equal(body.trim(), 'revised body');
+});
+
+test('editPost: title is still editable just inside the window', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const justInside = Date.now() + TITLE_EDIT_WINDOW_MS - 1000;
+  editPost(db, { postId, handle: HANDLE, title: 'fixed typo', body: 'original body', postsDir, now: justInside });
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, 'fixed typo');
+});
+
+// The title lock is a pure function of the clock. It must NOT be derived from
+// vote/comment rows: castVote DELETEs the row on toggle-off, so an engagement-
+// derived lock un-locks itself when a voter changes their mind.
+test('editPost: votes and replies do not lock the title inside the window', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const VOTER = 'c'.repeat(64);
+  db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(VOTER, 'voter-one', Date.now());
+  castVote(db, { targetType: 'post', targetId: postId, voterHandle: VOTER, direction: 'up' });
+  addComment(db, { postId, handle: VOTER, body: 'first!' });
+  editPost(db, { postId, handle: HANDLE, title: 'fixed typo', body: 'original body', postsDir });
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, 'fixed typo');
+});
+
+test('editPost: body stays editable after the title locks (title unchanged)', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  const late = Date.now() + TITLE_EDIT_WINDOW_MS + 1000;
+  // Resubmitting the same title is not a change — must not trip the lock.
+  editPost(db, { postId, handle: HANDLE, title: 'original title', body: 'revised body', postsDir, now: late });
+  // Omitting the title entirely (the locked form drops the field) also works.
+  editPost(db, { postId, handle: HANDLE, body: 'revised again', postsDir, now: late });
+  const { body } = getPost(db, postId, postsDir);
+  assert.equal(body.trim(), 'revised again');
+  const row = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.title, 'original title');
+});
+
+test('editPost: blank title throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, title: '   ', body: 'new body', postsDir }),
+    /title is required/,
+  );
+});
+
+test('editPost: title over TITLE_MAX throws', (t) => {
+  const { db, postsDir, postId } = postFixture(t);
+  assert.throws(
+    () => editPost(db, { postId, handle: HANDLE, title: 'x'.repeat(TITLE_MAX + 1), body: 'new body', postsDir }),
+    /title exceeds/,
+  );
 });
 
 test('editPost: edited_at is null before any edit', (t) => {
@@ -408,7 +518,7 @@ test('editPost: non-author throws', (t) => {
   const { db, postsDir, postId } = postFixture(t);
   const OTHER = 'b'.repeat(64);
   assert.throws(
-    () => editPost(db, { postId, handle: OTHER, body: 'x', postsDir }),
+    () => editPost(db, { postId, handle: OTHER, title: 'original title', body: 'x', postsDir }),
     /not the author/,
   );
 });
@@ -417,7 +527,7 @@ test('editPost: expired window throws', (t) => {
   const { db, postsDir, postId } = postFixture(t);
   const future = Date.now() + EDIT_WINDOW_MS + 1000;
   assert.throws(
-    () => editPost(db, { postId, handle: HANDLE, body: 'x', postsDir, now: future }),
+    () => editPost(db, { postId, handle: HANDLE, title: 'original title', body: 'x', postsDir, now: future }),
     /edit window has closed/,
   );
 });
@@ -425,7 +535,7 @@ test('editPost: expired window throws', (t) => {
 test('editPost: blank body throws', (t) => {
   const { db, postsDir, postId } = postFixture(t);
   assert.throws(
-    () => editPost(db, { postId, handle: HANDLE, body: '   ', postsDir }),
+    () => editPost(db, { postId, handle: HANDLE, title: 'original title', body: '   ', postsDir }),
     /body is required/,
   );
 });
@@ -433,7 +543,7 @@ test('editPost: blank body throws', (t) => {
 test('editPost: body over BODY_MAX throws', (t) => {
   const { db, postsDir, postId } = postFixture(t);
   assert.throws(
-    () => editPost(db, { postId, handle: HANDLE, body: 'x'.repeat(40001), postsDir }),
+    () => editPost(db, { postId, handle: HANDLE, title: 'original title', body: 'x'.repeat(40001), postsDir }),
     /body exceeds/,
   );
 });

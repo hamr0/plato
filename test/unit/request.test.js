@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { readBody, parseForm, parseCookie, send, redirect } from '../../src/web/request.js';
+import { readBody, MAX_BODY_BYTES, parseForm, parseCookie, send, redirect } from '../../src/web/request.js';
 
 class MockResponse {
   constructor() {
@@ -28,6 +28,22 @@ test('readBody: collects chunks into a string', async () => {
 test('readBody: handles empty body', async () => {
   const req = Readable.from([]);
   assert.equal(await readBody(req), '');
+});
+
+test('readBody: a body just under the cap is accepted', async () => {
+  const req = Readable.from([Buffer.alloc(MAX_BODY_BYTES, 0x61)]);
+  assert.equal((await readBody(req)).length, MAX_BODY_BYTES);
+});
+
+// Without the cap this test would buffer the whole stream; with it, the read
+// aborts partway. Feed chunks lazily so an un-capped readBody would OOM long
+// before the generator finishes — the throw is what stops it.
+test('readBody: rejects a body past the cap instead of buffering it', async () => {
+  async function* flood() {
+    const chunk = Buffer.alloc(256 * 1024, 0x61);
+    for (let sent = 0; sent < MAX_BODY_BYTES * 8; sent += chunk.length) yield chunk;
+  }
+  await assert.rejects(readBody(Readable.from(flood())), /exceeds limit/);
 });
 
 test('parseForm: parses URL-encoded form body', () => {

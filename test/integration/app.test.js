@@ -571,6 +571,35 @@ test('home active-subs block: empty-state when no sub had posts in last 24h', as
   assert.doesNotMatch(body, /\/sub\/beta/);
 });
 
+test('home rssvp affordance: logged-out points at the public /rss firehose', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+
+  const body = await (await fetch(ctx.baseUrl + '/')).text();
+  // Visible affordance at the other end of the active-subs header.
+  assert.match(body, /<a href="\/rss" class="rssvp-link"/, 'header rssvp link targets /rss');
+  // <head> autodiscovery so reader extensions light up.
+  assert.match(body, /<link rel="alternate" type="application\/atom\+xml" href="\/rss"/, 'head alternate targets /rss');
+  // Anonymous readers never get a personal token URL on the home page.
+  assert.doesNotMatch(body, /\/u\/[0-9a-f]{64}\/rss/, 'no personal feed URL for anon');
+});
+
+test('home rssvp affordance: logged-in points at the personal token feed', async (t) => {
+  const ctx = await spinUpWithPort();
+  t.after(() => teardown(ctx));
+  const { db, baseUrl, mailer } = ctx;
+  const jar = newJar();
+  await loginVia(jar, baseUrl, mailer, 'reader@example.com', { db });
+
+  const body = await (await jarFetch(jar, baseUrl + '/')).text();
+  const m = body.match(/<a href="(\/u\/[0-9a-f]{64}\/rss)" class="rssvp-link"/);
+  assert.ok(m, 'header rssvp link targets the personal /u/<token>/rss feed');
+  // The same personal URL is the head-alternate for logged-in readers.
+  assert.match(body, new RegExp(`<link rel="alternate" type="application/atom\\+xml" href="${m[1]}"`));
+  // Not the public firehose for a logged-in reader.
+  assert.doesNotMatch(body, /<a href="\/rss" class="rssvp-link"/);
+});
+
 test('mem-count cells carry data-mem-count for the optimistic subscribe.js update', async (t) => {
   const ctx = await spinUpWithPort();
   t.after(() => teardown(ctx));

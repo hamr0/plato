@@ -8,84 +8,90 @@
  * never a literal hex. The one exception is favicon.svg, which
  * is served standalone; copy + recolor it in the same place.
  *
- * Light mode (M8/B0):
- *   - Pre-click default: prefers-color-scheme media query picks
- *     OS theme automatically.
+ * Light mode (M8/B0; light became the default in 0.16.0):
+ *   - Pre-click default: LIGHT. Only an explicit OS dark
+ *     preference flips it, via @media (prefers-color-scheme: dark).
  *   - Post-click: the toggle stamps .theme-light or .theme-dark
  *     on <html>; that wins over the OS hint forever (per-browser,
  *     stored in localStorage). No mid-session reverts.
- *   - Forks override the dark palette under :root and the light
- *     palette under :root.theme-light + the same media
- *     query. Operator-supplied colorsLight values land via an
- *     inline <style> in <head> alongside the existing colors.
+ *   - Forks override the LIGHT palette under :root (one block — it
+ *     is the default), and the DARK palette under :root.theme-dark
+ *     + the matching prefers-color-scheme: dark block (mirror both,
+ *     they must stay aligned). There is no :root.theme-light block:
+ *     a sticky-light toggle inherits :root, which the dark media
+ *     query excludes via :not(.theme-light).
+ *   - Operator-supplied colors (dark) / colorsLight (light) values
+ *     land via an inline <style> in <head>, scoped to match.
  * ============================================================ */
-/* DEFAULT: tokyo-night — modern deep navy with soft blues. Sits between
- * github-dark and mocha-purple in saturation. Other presets are below
- * the light block; copy any one-line ":root { ... }" block over this
- * one to swap. */
+/* DEFAULT: zinc-cool — soft cool gray, low brightness for long sessions.
+ * This bare `:root` is the hard default (no class, no OS hint), so plato
+ * ships LIGHT out of the box. Dark is applied below via the .theme-dark
+ * class (sticky toggle) and the prefers-color-scheme: dark media query
+ * (OS hint). Other light presets are below the dark block; copy any
+ * one-line ":root { ... }" block over this one to swap. */
 :root {
-  --bg: #1a1b26;
-  --bg-soft: #24283b;
-  --border: #414868;
+  --bg: #eef0f2;
+  --bg-soft: #e3e6ea;
+  --border: #c7ccd2;
   /* Type */
-  --text: #c0caf5;
-  --text-dim: #a9b1d6;
+  --text: #202428;
+  --text-dim: #4d545b;
   /* Accents */
-  --accent: #7aa2f7;       /* primary — links, mark, active states */
-  --accent-warm: #ff9e64;  /* secondary — flair pills, NSFW badges, mod highlights */
+  --accent: #0066cc;       /* primary — links, mark, active states */
+  --accent-warm: #955800;  /* secondary — flair pills, NSFW badges, mod highlights */
   /* Vote signal — distinct from accent so the up/down sense is obvious */
-  --up: #9ece6a;
-  --down: #7aa2f7;
+  --up: #117833;
+  --down: #0066cc;
   --flair-text: #ffffff;   /* flair pill text — light by default; owners pick any background */
-  --note-bg: #3a3320;      /* sticky-note fill — muted amber tint over dark bg */
+  --note-bg: #fff8c5;      /* sticky-note fill — pale yellow over light bg */
 }
 
-/* Light palette — paper-light preset. Two activation paths:
+/* Dark palette — tokyo-night preset. Two activation paths:
  *   1. OS hint via @media when the user hasn't clicked the toggle.
- *   2. .theme-light class stamped by static/theme.js after click.
- * Both resolve to the same variable values. .theme-dark is the
- * sticky-dark override for users on a light-default OS who clicked
- * the toggle to dark — wins back over the media query.
+ *   2. .theme-dark class stamped by static/theme.js after click.
+ * Both resolve to the same variable values. .theme-light is the
+ * sticky-light override for users on a dark-default OS who clicked
+ * the toggle to light — it wins back over the media query, which
+ * scopes to :not(.theme-light).
  *
  * Class-based, not attribute-based: iOS Safari has long-standing
  * CSSOM-invalidation bugs around `[attr]` selectors when attribute
  * values churn (rapid theme toggles fail to repaint past the first
  * transition). Class selectors don't have this problem in any
  * engine. */
-/* DEFAULT: zinc-cool — soft cool gray, low brightness for long sessions. */
-:root.theme-light {
-  --bg: #eef0f2;
-  --bg-soft: #e3e6ea;
-  --border: #c7ccd2;
-  --text: #202428;
-  --text-dim: #4d545b;
-  --accent: #0066cc;
-  --accent-warm: #955800;
-  --up: #117833;
-  --down: #0066cc;
+:root.theme-dark {
+  --bg: #1a1b26;
+  --bg-soft: #24283b;
+  --border: #414868;
+  --text: #c0caf5;
+  --text-dim: #a9b1d6;
+  --accent: #7aa2f7;
+  --accent-warm: #ff9e64;
+  --up: #9ece6a;
+  --down: #7aa2f7;
   --flair-text: #ffffff;
-  --note-bg: #fff8c5;      /* sticky-note fill — pale yellow over light bg */
+  --note-bg: #3a3320;      /* sticky-note fill — muted amber tint over dark bg */
 }
-@media (prefers-color-scheme: light) {
-  :root:not(.theme-dark) {
-    --bg: #eef0f2;
-    --bg-soft: #e3e6ea;
-    --border: #c7ccd2;
-    --text: #202428;
-    --text-dim: #4d545b;
-    --accent: #0066cc;
-    --accent-warm: #955800;
-    --up: #117833;
-    --down: #0066cc;
+@media (prefers-color-scheme: dark) {
+  :root:not(.theme-light) {
+    --bg: #1a1b26;
+    --bg-soft: #24283b;
+    --border: #414868;
+    --text: #c0caf5;
+    --text-dim: #a9b1d6;
+    --accent: #7aa2f7;
+    --accent-warm: #ff9e64;
+    --up: #9ece6a;
+    --down: #7aa2f7;
     --flair-text: #ffffff;
-    --note-bg: #fff8c5;
+    --note-bg: #3a3320;
   }
 }
 
 /* ---------- LIGHT PALETTE PRESETS ----------
- * Operators: copy any block over the :root.theme-light + media
- * blocks above to swap. Mirror the same values into both blocks so the
- * post-click and OS-hint paths stay aligned.
+ * Light is the default, so copy any block over the `:root` block above
+ * to swap the out-of-box look. (A sticky-light toggle on a dark OS
+ * inherits `:root`, so there's only one light block to edit.)
  *
  * github-light — cool gray, neutral, brightest. Industry-familiar.
  * --bg:#f6f8fa; --bg-soft:#eaeef2; --border:#d0d7de; --text:#1f2328; --text-dim:#57606a;
@@ -105,7 +111,10 @@
  */
 
 /* ------------------------------------------------------------
- * THEME PRESETS — copy any block over the :root above to swap.
+ * DARK PALETTE PRESETS — the dark palette lives in the
+ * `:root.theme-dark` block AND the `@media (prefers-color-scheme:
+ * dark)` block above. To swap the dark look, mirror any block below
+ * into BOTH so the post-click and OS-hint paths stay aligned.
  * No build step. Reload the page; everything re-skins.
  * ------------------------------------------------------------ */
 
@@ -256,6 +265,17 @@ header h1 .logo-mark {
   gap: 0.4rem;
   margin-top: 0.3rem;
   font-size: 0.78rem;
+  /* baseline (not stretch) so verbs anchor to the trigger line: when a
+   * mod-confirm <details> opens its reason form below the summary, the
+   * other verbs stay on the top line instead of stretching to match. */
+  align-items: baseline;
+  /* Narrow viewports: let the verbs wrap rather than run off the right
+   * edge, and allow the strip to be narrower than its max-content width
+   * (min-width defaults to auto on a flex item, which would floor it at
+   * the full single-line width and force horizontal overflow). */
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 .mod-controls .mod-form { display: inline; margin: 0; }
 /* Mod controls render as warm-accent text verbs (collapse · remove · ban)
@@ -351,7 +371,7 @@ header h1 .logo-mark {
  * <details> summary; clicking expands a small reason form below. Hard
  * removal requires a reason; soft removal is optional. The expand-form
  * pattern is the friction that keeps mods deliberate. No JS needed. */
-.mod-confirm { display: inline-block; }
+.mod-confirm { display: inline-block; min-width: 0; max-width: 100%; }
 .mod-confirm > summary { list-style: none; cursor: pointer; }
 .mod-confirm > summary::-webkit-details-marker { display: none; }
 /* Open-state feedback: the summary verb gets weight so a mod sees which
@@ -368,10 +388,15 @@ header h1 .logo-mark {
   border: 1px solid var(--border);
   border-radius: 3px;
   background: var(--bg-soft);
+  max-width: 100%;
 }
 .mod-confirm > .mod-form textarea {
-  flex: 1;
-  min-width: 200px;
+  /* flex-basis, not a hard min-width: a 200px floor plus the confirm
+   * button overflowed the viewport on a phone (the reason panel is
+   * already indented inside the post body). The basis keeps the desktop
+   * size while letting the box shrink and the button wrap beneath it. */
+  flex: 1 1 12rem;
+  min-width: 0;
   min-height: 2rem;
   font-size: 0.78rem;
   padding: 0.3rem 0.4rem;
@@ -392,7 +417,15 @@ table.modlog th { color: var(--text-dim); font-weight: normal; text-transform: u
 /* Flag button — small details dropdown next to the mod controls. PRD
  * §Spam 7: separate from downvote, category-driven. Closed list of 5
  * categories; optional 280-char note. */
-.post-actions { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.15rem; flex-wrap: wrap; }
+/* baseline keeps `edit · collapse · remove` on one line: when a mod
+ * expands a reason form the row grows tall, and center-alignment used to
+ * drop the short `edit` link down beside the form. baseline anchors every
+ * verb to the trigger line, so the popup opens on its own line beneath. */
+/* max-width caps the row at its container even though `.post-title-line
+ * .post-actions` sets flex-shrink: 0 (which would otherwise size it to
+ * max-content and push the strip off-screen on a phone). With the cap in
+ * place, .mod-controls wraps inside it instead of overflowing. */
+.post-actions { display: flex; gap: 0.4rem; align-items: baseline; margin-top: 0.15rem; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 .post-actions .mod-controls { gap: 0.4rem; margin-top: 0; }
 /* Middot between .post-actions siblings so an author+mod row reads
  * `edit · collapse · remove · ban` instead of `edit  collapse · remove`
@@ -856,6 +889,10 @@ article, .comment-body, .preview, .sub-sticky-note { overflow-wrap: anywhere; }
 
 /* Home active-subs block: vertical list of the top 4 subs by 24h post count */
 .active-subs { margin-bottom: 1.5rem; }
+/* Header row: section label at one end, the feed rssvp at the other. baseline
+ * so the small rssvp link sits on the label's text line. The h3 keeps its own
+ * margins (the flex row is a thin wrapper, not a spacing reset). */
+.active-subs-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .active-subs-list { font-size: 0.92rem; }
 .active-sub-row {
   display: flex;
@@ -1844,6 +1881,14 @@ form { margin: 0.6rem 0 1rem; gap: 6px; }
    * .body prefix here to win on specificity. */
   .post .body .post-title-line h1,
   .post .body .post-title-line h2 { flex-basis: 100%; }
+
+  /* An open reason panel is far wider than a verb, so on a phone it can't
+   * share the strip's line. Give it a full-width row of its own and push it
+   * last, so the remaining verbs stay together on the line above instead of
+   * each wrapping onto a separate line with `ban` orphaned under the form.
+   * The open verb leads its own panel, which also labels what you're
+   * confirming. Desktop keeps the single-line strip (no override there). */
+  .mod-confirm[open] { flex-basis: 100%; order: 1; }
 
   /* Filter chip rows wrap onto multiple lines when they overflow. */
   .modlog-filters,

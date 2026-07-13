@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../../src/db/index.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
-import { createSub, getSubByName, listActiveSubs } from '../../src/content/sub.js';
+import { createSub, getSubByName, listActiveSubs, MAX_ACTIVE_SUBS_PER_OWNER } from '../../src/content/sub.js';
 
 const HANDLE_A = 'a'.repeat(64);
 const HANDLE_B = 'b'.repeat(64);
@@ -29,6 +29,37 @@ test('createSub: inserts sub + owner row in sub_mods', () => {
   const mod = db.prepare('SELECT * FROM sub_mods WHERE sub_name = ? AND handle = ?')
     .get('cooking', HANDLE_A);
   assert.equal(mod.role, 'owner');
+});
+
+test(`createSub: one owner can run up to ${MAX_ACTIVE_SUBS_PER_OWNER} active subs, then the next is refused`, () => {
+  const db = freshDb();
+  for (let i = 0; i < MAX_ACTIVE_SUBS_PER_OWNER; i++) {
+    createSub(db, { name: `sub-${i}`, ownerHandle: HANDLE_A });
+  }
+  assert.throws(
+    () => createSub(db, { name: 'one-too-many', ownerHandle: HANDLE_A }),
+    /already run \d+ active subs/,
+  );
+  // A different owner is unaffected — the cap is per-owner.
+  createSub(db, { name: 'other-owner-sub', ownerHandle: HANDLE_B });
+  assert.ok(getSubByName(db, 'other-owner-sub'));
+});
+
+test('createSub: a disabled sub does not count toward the active cap (ditching frees a slot)', () => {
+  const db = freshDb();
+  for (let i = 0; i < MAX_ACTIVE_SUBS_PER_OWNER; i++) {
+    createSub(db, { name: `held-${i}`, ownerHandle: HANDLE_A });
+  }
+  // Disable one — same transition as the 30-day inactivity sweep.
+  db.prepare('UPDATE subs SET disabled_at = ? WHERE name = ?').run(Date.now(), 'held-0');
+  // The freed slot lets a new sub through.
+  createSub(db, { name: 'after-ditch', ownerHandle: HANDLE_A });
+  assert.ok(getSubByName(db, 'after-ditch'));
+  // But the cap still binds on the remaining active set.
+  assert.throws(
+    () => createSub(db, { name: 'over-again', ownerHandle: HANDLE_A }),
+    /already run \d+ active subs/,
+  );
 });
 
 test('createSub: rejects invalid name (validator runs before insert)', () => {

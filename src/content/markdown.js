@@ -41,7 +41,15 @@ function escapeHtml(s) {
 }
 
 function safeHref(href) {
-  const trimmed = String(href ?? '').trim();
+  // Strip C0 controls + DEL before the scheme test. A browser's URL parser
+  // removes tab/CR/LF while resolving the scheme, so `java\tscript:` navigates
+  // as `javascript:` — but our scheme regex sees the raw tab, fails to match
+  // DANGEROUS_URL_SCHEME (\t isn't in [a-z0-9+.-]), and would pass the href
+  // through with the control char intact. CommonMark's angle-bracket
+  // destination `[x](<java\tscript:…>)` is how the tab reaches here. Removing
+  // the chars the browser removes closes the obfuscation: the stripped form is
+  // then correctly rejected. Legitimate URLs never carry raw control bytes.
+  const trimmed = String(href ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (!trimmed) return '';
   // Allow http(s), mailto, fragments, and relative URLs.
   if (SAFE_URL_SCHEME.test(trimmed)) return trimmed;
@@ -103,8 +111,14 @@ md.use({
       const hoverTitle = token.title ?? (isBareUrl && href.length > URL_DISPLAY_MAX ? href : null);
       const titleAttr = hoverTitle ? ` title="${escapeHtml(hoverTitle)}"` : '';
       if (!href) return `<a${titleAttr}>${inner}</a>`;
-      const anchor = `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`;
       const host = outboundHost(href);
+      // External absolute http(s) links open in a new tab so a click
+      // doesn't navigate the reader away from the forum. rel="noopener"
+      // blocks the new page's window.opener access. Internal/relative
+      // links (/sub/x, #anchor, mailto) stay same-tab — outboundHost only
+      // returns a host for http(s), so they get no target.
+      const extAttr = host ? ' target="_blank" rel="noopener"' : '';
+      const anchor = `<a href="${escapeHtml(href)}"${titleAttr}${extAttr}>${inner}</a>`;
       // <wbr> between anchor and host gives the browser a break opportunity
       // so a long anchor + glued ext-host doesn't push the row past viewport
       // width on narrow screens. Without it, the unit `[anchor]↗ host.com`

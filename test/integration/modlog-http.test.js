@@ -60,7 +60,7 @@ function ageHandles(db) {
   db.prepare('UPDATE handles SET first_seen_at = ? WHERE first_seen_at > ?').run(old, old);
 }
 
-async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null } = {}) {
+async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null, maxLoginRequestsPerIpPerHour } = {}) {
   return new Promise((res) => {
     const tmp = http.createServer((q, r) => r.end()).listen(0, () => {
       const port = tmp.address().port;
@@ -73,6 +73,7 @@ async function spinUp({ spamPatternsFile = null, urlhausCacheFile = null } = {})
           secret: randomBytes(32).toString('hex'),
           baseUrl, from: 'a@t', dbPath: ':memory:',
           openRegistration: true, cookieSecure: false, mailer,
+          ...(maxLoginRequestsPerIpPerHour != null ? { maxLoginRequestsPerIpPerHour } : {}),
         });
         const postsDir = mkdtempSync(join(tmpdir(), 'plato-modlog-'));
         const disposableDomains = loadDisposableDomains(DISPOSABLE_PATH);
@@ -571,6 +572,128 @@ test('defenses fire end-to-end: URLhaus host collapses post + writes audit row',
   assert.match(audit.reason, /blocked-url: malware\.example/);
 });
 
+// The edit route used to run none of the three spam gates, so "publish clean,
+// edit spam in" walked past all of them. The 15-minute title window widened
+// that lane to the title — the field feeds and RSS show. These three assert the
+// edit path enforces exactly what the submit path enforces.
+
+async function seedCleanPost(ctx, jar, { title = 'clean title', body = 'clean body' } = {}) {
+  const res = await jfetch(jar, ctx.baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'lobby', title, body }),
+  });
+  assert.equal(res.status, 302);
+  return ctx.db.prepare('SELECT id FROM posts WHERE title = ?').get(title).id;
+}
+
+// The anonymous /draft path writes a draft row before knowless's per-IP login
+// gate, so without a plato-side cap an IP could flood orphaned rows past the
+// email limit. The cap shares knowless's maxLoginRequestsPerIpPerHour budget.
+test('anonymous /draft is capped per IP on the knowless login budget', async (t) => {
+  const ctx = await spinUp({ maxLoginRequestsPerIpPerHour: 2 });
+  t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+
+  const draft = (n) => jfetch(newJar(), `${ctx.baseUrl}/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: `anon${n}@x.test`, sub_name: 'lobby', title: `t${n}`, body: 'b' }),
+  });
+
+  assert.equal((await draft(1)).status, 200, 'first anonymous draft accepted');
+  assert.equal((await draft(2)).status, 200, 'second (at the cap) accepted');
+  const third = await draft(3);
+  assert.equal(third.status, 429, 'third from the same IP is refused');
+  assert.match(await third.text(), /too many drafts/);
+  // Only the two accepted drafts were persisted — the refused one wrote nothing.
+  assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 2, 'refused draft wrote no row');
+});
+
+// A crafted POST can carry a body past the form's maxlength; submitDraft is
+// the boundary and throws. The anonymous branch must surface that as a 400,
+// not fall through to a bare 500 (and it must persist no draft row).
+test('anonymous /draft: over-cap body is rejected with 400, no row written', async (t) => {
+  const ctx = await spinUp();
+  t.after(() => teardown(ctx));
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', Date.now());
+
+  const res = await jfetch(newJar(), `${ctx.baseUrl}/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: 'anon@x.test', sub_name: 'lobby', title: 't', body: 'x'.repeat(40001) }),
+  });
+
+  assert.equal(res.status, 400, 'over-cap body is a 400, not a 500');
+  assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n, 0, 'no draft row written');
+});
+
+test('edit path: spam regex in an edited TITLE collapses the post + writes audit row', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-edit-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  assert.equal(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at, null);
+
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'GUARANTEED RETURNS', body: 'clean body' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null,
+    'spam edited into the title auto-collapses the post');
+  const audit = db.prepare('SELECT mod_handle, reason FROM mod_actions WHERE target_id = ?').get(postId);
+  assert.equal(audit.mod_handle, SYSTEM_HANDLE);
+  assert.match(audit.reason, /pattern: guaranteed returns/);
+});
+
+test('edit path: URLhaus host edited into the BODY collapses the post', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-urlhaus-edit-'));
+  const cacheFile = join(dir, 'urlhaus.txt');
+  writeFileSync(cacheFile, 'http://malware.example/payload\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const ctx = await spinUp({ urlhausCacheFile: cacheFile });
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'clean title', body: 'now see https://malware.example/here' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null,
+    'a blocked host edited into the body auto-collapses the post');
+});
+
+test('edit path: link cap rejects an edit that exceeds the tier cap, and the post is untouched', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx); // aged to established → cap 5
+  const postId = await seedCleanPost(ctx, jar);
+
+  const sixLinks = Array.from({ length: 6 }, (_, i) => `https://e${i}.test/x`).join(' ');
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'clean title', body: sixLinks }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /too many links/);
+  const row = db.prepare('SELECT edited_at FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.edited_at, null, 'link-cap rejection happens before the write');
+});
+
 test('defenses fire end-to-end: link cap blocks new account 2-link post', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, mailer, baseUrl } = ctx;
@@ -812,4 +935,35 @@ test('GET /?sort=top&date=24h: cross-sub posts feed honors filter', async (t) =>
   const body = await res.text();
   assert.match(body, /RECENT-POST/);
   assert.doesNotMatch(body, /OLD-POST/, 'date=24h excludes old post');
+});
+
+// The mod action strip (collapse · remove · ban) is one exclusive accordion:
+// every <details> shares a single `name`, so the browser closes whichever
+// form was open when the mod opens another, and re-clicking the open one
+// collapses it. `ban` targets the author handle while collapse/remove target
+// the post, so the group name must key on the strip's content target — not on
+// each action's own target, which would put ban in a group of its own.
+test('post page: mod action strip shares one <details name> accordion group', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx, { sub: 'lobby' });
+
+  // Author is someone other than the mod, so the ban control renders too
+  // (self-ban is deliberately hidden).
+  const AUTHOR = 'e'.repeat(64);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(AUTHOR, 'other-author', Date.now());
+  const postId = 'a1b2c3d4e5f60789';
+  seedPost(ctx.db, { id: postId, sub: 'lobby', handle: AUTHOR, title: 'a post' });
+  writeFileSync(
+    join(ctx.postsDir, `${postId}.md`),
+    `---\ntitle: "a post"\nhandle: ${AUTHOR}\nsub_name: lobby\ncreated_at: ${Date.now()}\n---\n\nbody\n`,
+  );
+
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${postId}`);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  const names = [...body.matchAll(/<details class="mod-confirm" name="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(names.length, 3, 'collapse + remove + ban each render as a <details>');
+  assert.equal(new Set(names).size, 1, 'all three sit in one accordion group');
+  assert.equal(names[0], `mod-post-${postId}`, 'group keys on the content target, not the action target');
 });

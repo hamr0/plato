@@ -31,6 +31,15 @@ export const RESERVED_SUB_NAMES = new Set([
 export const SUB_DESCRIPTION_MAX = 200;
 export const STICKY_NOTE_MAX = 200;
 
+// A single account may run at most this many *active* subs at once. Anti-squat
+// / anti-seed-flood bound, not an operator knob — one creator spinning up many
+// live communities is the abuse shape (brigading, seed-post flooding). Disabled
+// subs (30-day inactivity auto-disable, or any future manual disable) do NOT
+// count: ditching a sub is fine and frees a slot, so a genuine "I tried it and
+// moved on" never gets penalized. Deliberately not the spam floor-model (no
+// operator override): this is structural, not a permissiveness dial.
+export const MAX_ACTIVE_SUBS_PER_OWNER = 5;
+
 export function validateSubDescription(description) {
   if (description == null) return '';
   if (typeof description !== 'string') {
@@ -97,6 +106,16 @@ export function createSub(db, {
   const requiredFlag = flairsRequired ? 1 : 0;
   if (requiredFlag && parseFlairs(flairsJson).length === 0) {
     throw new Error('flairs_required cannot be set when no flairs are defined');
+  }
+
+  // Anti-squat cap: count only *active* subs this owner runs (disabled ones
+  // don't count — see MAX_ACTIVE_SUBS_PER_OWNER). Checked here, inside the
+  // mechanism, so every creation path (handler, import, tests) is bound.
+  const activeOwned = db.prepare(
+    'SELECT COUNT(*) AS n FROM subs WHERE owner_handle = ? AND disabled_at IS NULL'
+  ).get(ownerHandle).n;
+  if (activeOwned >= MAX_ACTIVE_SUBS_PER_OWNER) {
+    throw new Error(`createSub: you already run ${MAX_ACTIVE_SUBS_PER_OWNER} active subs — hand one off, or let one go inactive, before creating another`);
   }
 
   db.exec('BEGIN');
