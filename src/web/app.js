@@ -2971,7 +2971,7 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
   `));
 }
 
-async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId) {
+async function handlePostEdit(req, res, { db, auth, postsDir, spamPatterns, linkCapConfig, urlhausHosts }, subName, postId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
@@ -2979,6 +2979,25 @@ async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId)
   const title = form.title;
   const body = form.body ?? '';
   const sensitive = form.sensitive === '1';
+
+  // The edit path runs the same three spam gates as the submit path
+  // (handleDraft / handleFinalize). Without them, "publish clean, edit spam
+  // in" walks straight past the link cap, the pattern file, and URLhaus —
+  // and the 15-minute title window widened that lane to the title, which is
+  // the field feeds and RSS actually show. Same order as submit: link cap
+  // rejects before the write; patterns and URLhaus auto-collapse after it.
+  const existing = db.prepare('SELECT title FROM posts WHERE id = ?').get(postId);
+  const effectiveTitle = title === undefined ? (existing?.title ?? '') : title;
+  const spamText = `${effectiveTitle}\n${body}`;
+
+  const linkBlock = checkLinkCap(db, handle, spamText, Date.now(), linkCapConfig);
+  if (linkBlock) {
+    return send(res, 400, errorPage(req, { db, auth }, {
+      title: 'too many links', message: linkBlock.message,
+      links: html`<p><a href="/sub/${subName}/post/${postId}">← back to post</a></p>`,
+    }));
+  }
+
   try {
     editPost(db, { postId, handle, title, body, sensitive, postsDir });
   } catch (err) {
@@ -2990,7 +3009,19 @@ async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId)
       || err.message.includes('title is locked');
     return send(res, forbidden ? 403 : 400, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
   }
-  const post = db.prepare('SELECT sub_name, id FROM posts WHERE id = ?').get(postId);
+
+  const post = db.prepare('SELECT sub_name, id, title FROM posts WHERE id = ?').get(postId);
+  // Re-read the stored title: a locked title leaves the submitted value on the
+  // floor, so matching the form's value would scan text the post doesn't carry.
+  const storedText = `${post.title}\n${body}`;
+  const matched = matchSpamPatterns(storedText, spamPatterns);
+  if (matched.length > 0) {
+    applySpamMatches(db, { targetType: 'post', targetId: postId, subName: post.sub_name, matched });
+  }
+  const matchedHosts = matchUrlhaus(storedText, urlhausHosts);
+  if (matchedHosts.length > 0) {
+    applyUrlhausMatches(db, { targetType: 'post', targetId: postId, subName: post.sub_name, matchedHosts });
+  }
   redirect(res, permalinkFor(post));
 }
 
@@ -5748,7 +5779,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
         return renderPostEditPage(req, res, { db, auth, postsDir }, m[1], m[2]);
       }
       if ((m = path.match(SUB_POST_EDIT_PATH_RE)) && method === 'POST') {
-        return handlePostEdit(req, res, { db, auth, postsDir }, m[1], m[2]);
+        return handlePostEdit(req, res, { db, auth, postsDir, spamPatterns, linkCapConfig, urlhausHosts }, m[1], m[2]);
       }
       if ((m = path.match(SUB_POST_COMMENT_PATH_RE)) && method === 'POST') {
         return handleAddComment(req, res, { db, auth, rateLimitConfig, spamPatterns, urlhausHosts }, m[1], m[2]);

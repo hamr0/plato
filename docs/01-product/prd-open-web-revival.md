@@ -416,6 +416,8 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 14. No media hosting | locked | text-only is permanent |
 | 15. Public mod log | shipped (M4) | `/sub/<name>/modlog`; M5 added unified `/modlog` (now **public** for the audit mode — instance-wide, no login required, linked from the footer of every page; `mode=open` and `mode=inbox` stay mod-only); M5/B6 surfaces system auto-actions as `system`-attributed audit rows |
 
+**The gates cover the edit path, not just the submit path (0.15.1).** Rules 6, 6b, and 9 (link cap, URLhaus, pattern file) run on `POST /sub/<name>/post/<id>/edit` exactly as they run on `/draft` and `/finalize`: the cap rejects with a 400 before the write; the pattern and host matchers auto-collapse and system-flag after it; both match on `` `${storedTitle}\n${body}` ``. Until 0.15.1 the edit route ran none of them, so "publish clean, edit spam in" was a working bypass of the whole stack — a defense that only guards the front door is not a defense. Re-matching on every edit is idempotent by construction (collapse guarded on `collapsed_at IS NULL`; `flags` is `UNIQUE(target_type, target_id, flagger_handle)`), so a spam post that stays spam does not accumulate duplicate modlog rows.
+
 ### Build status (M5 per-sub structure)
 
 | Feature | Status | Notes |
@@ -819,6 +821,8 @@ Importable into any instance with `forum import-user user-export/`. The new inst
 ## Known limitations (shipped, named, not fixed)
 
 Things that are wrong in the running build. They are here because writing them down is cheaper than a reader discovering them and concluding the docs lie. Each names the cost and the fix, so "not now" stays a decision rather than an oversight.
+
+A limitation graduates out of this list only when it is actually fixed, never when it becomes inconvenient. One already has: **the post-edit route bypassing every spam gate** (link cap, pattern file, URLhaus) was found by the 0.15.1 release gate and closed in 0.15.1 rather than documented and deferred — the 15-minute title window would have extended a pre-existing body-edit hole to the title, which is the field feeds and RSS show, and shipping a widened spam lane behind a paragraph of prose is exactly the failure this section exists to prevent. See §Spam Defenses.
 
 - **A failed post edit discards the body you typed.** Every `editPost` refusal — blank body, over-cap body, closed 24h window, locked title, read-only sub — routes through `handlePostEdit`'s `errorPage`, which is a dead-end page. The submitted body is not carried back into a re-rendered form, so an author who writes 3 000 words and trips any one of those gates loses the text unless the browser's back button happens to restore it. The sharpest instance is the title lock: open the edit form at minute 14, submit a title fix plus a long body at minute 16, get a 403, lose both. This predates the 0.15.1 title window (blank-body has always behaved this way) — the title lock just added a gate that trips on a *clock*, so it can fire on a form that was legitimate when it was rendered. The fix is to re-render `renderPostEditPage` with the submitted values and the error inline, the same shape `postRetryView` already gives the submit path; it was left out of 0.15.1 to keep the title change small, not because the data loss is acceptable.
 

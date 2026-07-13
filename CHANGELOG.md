@@ -6,9 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
-## [0.15.1] - 2026-07-12 — light by default, outbound links open away, titles fixable before anyone acts
+## [0.15.1] - 2026-07-13 — light by default, outbound links open away, titles fixable before anyone acts
 
-Four reader-facing fixes. One of them (title editing) amends a PRD §Permanently out lock — see below; the lock's reasoning survives intact, only its edge moved.
+Four reader-facing fixes plus one spam-defense hole closed. One of them (title editing) amends a PRD §Permanently out lock — see below; the lock's reasoning survives intact, only its edge moved.
+
+### Security
+
+- **The post-edit route now runs the same three spam gates as the submit route.** `handlePostEdit` received `{ db, auth, postsDir }` and nothing else, so it ran **no** link cap, **no** spam-pattern match, and **no** URLhaus check — "publish something clean, then edit the spam in" walked past all three. The hole predates this release for the post *body*; the 15-minute title window would have widened it to the **title**, which is the field feeds, RSS, and sub indexes actually show. Both halves are closed together: the route now threads `spamPatterns` / `linkCapConfig` / `urlhausHosts` and checks `` `${title}\n${body}` `` in the submit path's exact order — link cap rejects with a 400 *before* the write, then patterns and URLhaus auto-collapse + system-flag *after* it. Re-running the matchers on an edit is safe by construction: the collapse is `WHERE collapsed_at IS NULL`-guarded and `flags` carries `UNIQUE(target_type, target_id, flagger_handle)`, so an already-collapsed spam post can't accumulate duplicate modlog rows. The title used for matching is the one that was **stored**, not the one submitted — a locked title leaves the submitted value on the floor, and scanning text the post doesn't carry would be theatre. Found by the release gate's `/security` pass on this diff, not in the wild.
 
 ### Changed
 
@@ -24,7 +28,7 @@ Four reader-facing fixes. One of them (title editing) amends a PRD §Permanently
 
 ### Tests
 
-- `+12` (893 → 905): external links carry `target`/`rel` while relative, fragment, and `mailto` links don't; `editPost` updates title in both the DB row and the on-disk frontmatter (asserted against the file, not the DB row a second time — the `.md` is the canonical record); a title containing `$&` / `` $` `` / `$1` lands literally in the frontmatter rather than expanding as a `String.replace` pattern; a padded stored title resubmitted unchanged doesn't read as a title change (so it can't trip the lock on a body-only edit); blank and over-`TITLE_MAX` titles throw; the title is editable just inside `TITLE_EDIT_WINDOW_MS` and locked just past it (with the old title surviving the blocked edit); votes and replies do **not** lock the title inside the window (guards against reintroducing the engagement-derived gate); body stays editable after the title locks, both when the title is resubmitted unchanged and when the field is omitted entirely; the post page renders `collapse`/`remove`/`ban` as three `<details>` sharing one `name` keyed on the content target.
+- `+15` (893 → 908): the edit route enforces the spam-pattern file (via an edited **title**), URLhaus (via an edited body), and the link cap (400 before the write, `edited_at` still null) — three tests that fail against the pre-fix route; external links carry `target`/`rel` while relative, fragment, and `mailto` links don't; `editPost` updates title in both the DB row and the on-disk frontmatter (asserted against the file, not the DB row a second time — the `.md` is the canonical record); a title containing `$&` / `` $` `` / `$1` lands literally in the frontmatter rather than expanding as a `String.replace` pattern; a padded stored title resubmitted unchanged doesn't read as a title change (so it can't trip the lock on a body-only edit); blank and over-`TITLE_MAX` titles throw; the title is editable just inside `TITLE_EDIT_WINDOW_MS` and locked just past it (with the old title surviving the blocked edit); votes and replies do **not** lock the title inside the window (guards against reintroducing the engagement-derived gate); body stays editable after the title locks, both when the title is resubmitted unchanged and when the field is omitted entirely; the post page renders `collapse`/`remove`/`ban` as three `<details>` sharing one `name` keyed on the content target.
 
 ## [0.15.0] - 2026-07-02 — opt-in fallback alert sink (pulselog 0.7.0)
 

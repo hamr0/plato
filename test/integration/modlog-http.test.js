@@ -571,6 +571,87 @@ test('defenses fire end-to-end: URLhaus host collapses post + writes audit row',
   assert.match(audit.reason, /blocked-url: malware\.example/);
 });
 
+// The edit route used to run none of the three spam gates, so "publish clean,
+// edit spam in" walked past all of them. The 15-minute title window widened
+// that lane to the title — the field feeds and RSS show. These three assert the
+// edit path enforces exactly what the submit path enforces.
+
+async function seedCleanPost(ctx, jar, { title = 'clean title', body = 'clean body' } = {}) {
+  const res = await jfetch(jar, ctx.baseUrl + '/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ sub_name: 'lobby', title, body }),
+  });
+  assert.equal(res.status, 302);
+  return ctx.db.prepare('SELECT id FROM posts WHERE title = ?').get(title).id;
+}
+
+test('edit path: spam regex in an edited TITLE collapses the post + writes audit row', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-edit-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  assert.equal(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at, null);
+
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'GUARANTEED RETURNS', body: 'clean body' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null,
+    'spam edited into the title auto-collapses the post');
+  const audit = db.prepare('SELECT mod_handle, reason FROM mod_actions WHERE target_id = ?').get(postId);
+  assert.equal(audit.mod_handle, SYSTEM_HANDLE);
+  assert.match(audit.reason, /pattern: guaranteed returns/);
+});
+
+test('edit path: URLhaus host edited into the BODY collapses the post', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-urlhaus-edit-'));
+  const cacheFile = join(dir, 'urlhaus.txt');
+  writeFileSync(cacheFile, 'http://malware.example/payload\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const ctx = await spinUp({ urlhausCacheFile: cacheFile });
+  t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'clean title', body: 'now see https://malware.example/here' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null,
+    'a blocked host edited into the body auto-collapses the post');
+});
+
+test('edit path: link cap rejects an edit that exceeds the tier cap, and the post is untouched', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { db, baseUrl } = ctx;
+  const { jar } = await bootstrapMod(ctx); // aged to established → cap 5
+  const postId = await seedCleanPost(ctx, jar);
+
+  const sixLinks = Array.from({ length: 6 }, (_, i) => `https://e${i}.test/x`).join(' ');
+  const res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ title: 'clean title', body: sixLinks }),
+  });
+  assert.equal(res.status, 400);
+  assert.match(await res.text(), /too many links/);
+  const row = db.prepare('SELECT edited_at FROM posts WHERE id = ?').get(postId);
+  assert.equal(row.edited_at, null, 'link-cap rejection happens before the write');
+});
+
 test('defenses fire end-to-end: link cap blocks new account 2-link post', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const { db, mailer, baseUrl } = ctx;

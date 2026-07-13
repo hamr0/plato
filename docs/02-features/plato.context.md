@@ -404,6 +404,12 @@ Code path: `checkPostRate(db, handle, now, config, { skipHourly: true, doubledFo
 | recent | 3 |
 | established | 5 |
 
+### Where the spam gates run (submit **and** edit — 0.15.1)
+
+The link cap, the `spam-patterns.txt` matcher, and the URLhaus host matcher all run on **three** routes, not one: `POST /draft`, `GET /auth/callback`→`handleFinalize`, and `POST /sub/<name>/post/<id>/edit`. All three match on `` `${title}\n${body}` `` and apply the same two-stage shape — the link cap rejects with a 400 *before* the write; the pattern and host matchers auto-collapse + system-flag *after* it.
+
+The edit route ran none of them until 0.15.1, which made "publish something clean, then edit the spam in" a working bypass of the whole stack. Adding the 15-minute title-edit window would have extended that bypass from the body to the **title** — the field that actually appears in feeds, RSS, and sub indexes — so both were closed together. If you add a fourth route that writes post content, wire these three gates into it; a defense that only guards the front door is not a defense. Re-matching on an edit is idempotent by construction (the collapse is `WHERE collapsed_at IS NULL`-guarded; `flags` carries `UNIQUE(target_type, target_id, flagger_handle)`), so an already-collapsed spam post can't accumulate duplicate modlog rows on repeat edits. The matchers read the **stored** title, not the submitted one — a locked title discards the submitted value, and scanning text the post doesn't carry would be theatre.
+
 ### Per-sub thresholds (set at `/sub/create`, raise-only via `/sub/<name>/edit`)
 
 | Knob | Floor | Default | Source |

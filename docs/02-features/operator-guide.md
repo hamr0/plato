@@ -250,6 +250,8 @@ Set at `/sub/create` (all knobs) or via owner-only `/sub/<name>/edit` (everythin
 
 Spam defenses (rate limits, link cap, regex patterns, URLhaus) live at the **forum level** in `config.json`, not per sub. Sub owners inherit the operator's settings. This is intentional: per-sub spam knobs invite "soft sub" loopholes; one forum-wide policy is auditable in one file. The per-sub `flagThreshold` is the one exception — it's a moderation lever (when does mod review trigger), not a spam-defense permissiveness control, and the floor prevents abuse.
 
+**They apply to edits, not just new posts (since 0.15.1).** The link cap, `spam-patterns.txt`, and URLhaus all run when an author edits a post, exactly as they run when one is submitted — an over-cap edit is rejected outright, and a pattern or blocked-host hit auto-collapses the post and files a `system` flag you'll see in `/modlog`. Before 0.15.1 the edit route checked none of them, so a spammer could publish something clean and edit the payload in afterwards. If you run an instance that has been live since before 0.15.1, that bypass was reachable — a `?mod=system` sweep of `/modlog` will not show posts that used it, because nothing was ever checked. There is no backfill for this: the matchers only run on write, so an old post that took the bypass is only caught if someone edits it again or a mod flags it by hand.
+
 ### Tier 4: Operator config (`config.json`), boot-validated, tighten-only
 
 Forum-wide spam-defense knobs. Drop a `config.json` at the project root (or set `PLATO_CONFIG=` to point elsewhere). Every value has a PRD-locked floor — overrides must be **at most** as permissive as the floor. Bad config throws at boot, not on first user request.
