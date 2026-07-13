@@ -13,6 +13,7 @@ import {
   finalizeDraft,
   getPost,
   editPost,
+  postTitleLocked,
   getPostPreview,
   getPostRawBody,
   listPostsInSub,
@@ -20,6 +21,7 @@ import {
   SUB_SORTS,
   EDIT_WINDOW_MS as POST_EDIT_WINDOW_MS,
   BODY_MAX as POST_BODY_MAX,
+  TITLE_MAX as POST_TITLE_MAX,
 } from '../content/post.js';
 import {
   createSub,
@@ -159,7 +161,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=51">
+<link rel="stylesheet" href="/static/style.css?v=52">
 ${feedTag}
 ${jsonLdTag}
 ${headExtra}
@@ -172,7 +174,7 @@ ${themePaletteOverrides()}
 <script src="/static/rssvp.js?v=1" defer></script>
 <script src="/static/charcount.js?v=1" defer></script>
 <script src="/static/uxbits.js?v=1" defer></script>
-<script src="/static/theme.js?v=5" defer></script>
+<script src="/static/theme.js?v=6" defer></script>
 </head>
 <body>${evalBannerView()}${body}${siteFooter()}</body>
 </html>`);
@@ -226,23 +228,24 @@ const APP_VERSION = (() => {
 })();
 
 // Operator-supplied vote-color overrides emitted as inline <style> in
-// <head>. Two scopes: the dark palette wins under :root; the light
-// palette wins under both .theme-light (post-click) and the media
-// query when the user hasn't clicked yet (and isn't sticky-dark).
+// <head>. Two scopes mirror style.css's light-default architecture: the
+// light palette wins under :root (the hard default); the dark palette
+// wins under both .theme-dark (post-click) and the media query when the
+// user hasn't clicked yet (and isn't sticky-light).
 // resolveBrandingColors has already screened the values for CSS
 // injection at boot, so direct interpolation is safe.
 function themePaletteOverrides() {
   const out = [];
-  const dark = branding.colors;
-  if (dark.up || dark.down) {
-    const decls = `${dark.up ? `--up:${dark.up};` : ''}${dark.down ? `--down:${dark.down};` : ''}`;
-    out.push(`:root{${decls}}`);
-  }
   const light = branding.colorsLight;
   if (light.up || light.down) {
     const decls = `${light.up ? `--up:${light.up};` : ''}${light.down ? `--down:${light.down};` : ''}`;
-    out.push(`:root.theme-light{${decls}}`);
-    out.push(`@media (prefers-color-scheme: light){:root:not(.theme-dark){${decls}}}`);
+    out.push(`:root{${decls}}`);
+  }
+  const dark = branding.colors;
+  if (dark.up || dark.down) {
+    const decls = `${dark.up ? `--up:${dark.up};` : ''}${dark.down ? `--down:${dark.down};` : ''}`;
+    out.push(`:root.theme-dark{${decls}}`);
+    out.push(`@media (prefers-color-scheme: dark){:root:not(.theme-light){${decls}}}`);
   }
   return out.length === 0 ? html`` : raw(`<style>${out.join('')}</style>`);
 }
@@ -2945,6 +2948,10 @@ function renderPostEditPage(req, res, { db, auth, postsDir }, subName, postId) {
     <p><a href="${permalink}">← back to post</a></p>
     <h2 class="section">// edit post</h2>
     <form method="POST" action="/sub/${subName}/post/${postId}/edit" class="post-form">
+      <label>title</label>
+      ${postTitleLocked(post)
+        ? html`<p class="muted">${post.title}<br>titles are editable for 15 minutes after posting — this one has locked.</p>`
+        : html`<input name="title" maxlength="${POST_TITLE_MAX}" value="${post.title}" required>`}
       <label>body (markdown)</label>
       <div class="textarea-wrap">
         <textarea name="body" maxlength="${POST_BODY_MAX}" data-charcount required>${body}</textarea>
@@ -2968,13 +2975,20 @@ async function handlePostEdit(req, res, { db, auth, postsDir }, subName, postId)
   const handle = auth.handleFromRequest(req);
   if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
+  // Absent title field = the post's title has locked; editPost leaves it be.
+  const title = form.title;
   const body = form.body ?? '';
   const sensitive = form.sensitive === '1';
   try {
-    editPost(db, { postId, handle, body, sensitive, postsDir });
+    editPost(db, { postId, handle, title, body, sensitive, postsDir });
   } catch (err) {
-    const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
-    return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+    // 403 for state/permission refusals the caller cannot fix by correcting
+    // their input (wrong author, closed window, locked title); 400 for the
+    // rest (blank body, over-cap title).
+    const forbidden = err.message.includes('not the author')
+      || err.message.includes('window')
+      || err.message.includes('title is locked');
+    return send(res, forbidden ? 403 : 400, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
   }
   const post = db.prepare('SELECT sub_name, id FROM posts WHERE id = ?').get(postId);
   redirect(res, permalinkFor(post));
@@ -3544,7 +3558,16 @@ function modStateView({ removedAt, collapsedAt, body }) {
 // requires a reason; soft removal (collapse) makes it optional. The
 // expand-form pattern is the friction that makes hard moderation
 // deliberate without needing a JS modal.
-function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled }) {
+//
+// `group` is the shared <details name>, which makes the strip an exclusive
+// accordion: opening one action closes any other, and clicking an open one
+// closes it. Native HTML, so it holds on the no-JS path. It must be one name
+// per control strip rather than per target — `ban` addresses the author
+// handle while collapse/remove address the post/comment, so keying on
+// targetId would put ban in its own group and let two forms sit open.
+// Browsers without <details name> support just fall back to independent
+// toggles (the old behavior) — degradation, not breakage.
+function modActionForm({ subName, action, targetType, targetId, returnTo, reasonRequired, disabled, group }) {
   if (disabled) {
     // Dimmed marker: only one mod-state should be active at a time. When
     // the target is hard-removed, the collapse/uncollapse pair is meaningless
@@ -3552,7 +3575,7 @@ function modActionForm({ subName, action, targetType, targetId, returnTo, reason
     // the <details> button. The mod must `unremove` first to re-enable.
     return html`<span class="mod-btn mod-btn-disabled" aria-disabled="true" title="not available while ${MOD_ACTION_LABELS.remove ?? 'removed'}">${action}</span>`;
   }
-  return html`<details class="mod-confirm">
+  return html`<details class="mod-confirm" name="${group}">
     <summary class="mod-btn">${action}</summary>
     <form method="POST" action="/sub/${subName}/mod" class="mod-form">
       <input type="hidden" name="action" value="${action}">
@@ -3571,6 +3594,9 @@ function modControls({
 }) {
   const collapseAction = collapsedAt != null ? 'uncollapse' : 'collapse';
   const removeAction   = removedAt   != null ? 'unremove'   : 'remove';
+  // One accordion group per control strip — keyed on the content target so
+  // two posts on the same page keep independent strips. See modActionForm.
+  const group = `mod-${targetType}-${targetId}`;
   // Mutual exclusion: hard-removal supersedes soft-collapse. While the item
   // is hard-removed, dim the collapse pair — the body is gone, so toggling a
   // collapse on/off is a no-op. A mod escalating from collapse → remove is
@@ -3596,13 +3622,14 @@ function modControls({
         targetId: authorHandle,
         returnTo,
         reasonRequired: !authorBanned,
+        group,
       })
     : html``;
   return html`<div class="mod-controls">
     ${modActionForm({ subName, action: collapseAction, targetType, targetId, returnTo,
-      reasonRequired: false, disabled: removedAt != null })}
+      reasonRequired: false, disabled: removedAt != null, group })}
     ${modActionForm({ subName, action: removeAction,   targetType, targetId, returnTo,
-      reasonRequired: removeAction === 'remove' })}
+      reasonRequired: removeAction === 'remove', group })}
     ${banForm}
   </div>`;
 }

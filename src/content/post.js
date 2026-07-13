@@ -54,6 +54,12 @@ function parseFrontmatter(raw) {
 export const TITLE_MAX = 300;
 export const BODY_MAX = 40000;
 export const EDIT_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Titles get a much shorter leash than bodies. A title is the post's contract
+// with everyone who acted on it — it shows in feeds, RSS, and sub indexes, and
+// it is what voters cast on — so it must stop moving early. 15 minutes is long
+// enough to catch a typo (there is no author-delete to fall back on) and short
+// enough that there is little to harvest before it freezes.
+export const TITLE_EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 export function submitDraft(db, { title, body, subName, flairSlug = null, sensitive = false }) {
   if (typeof title !== 'string' || title.trim().length === 0) {
@@ -192,10 +198,25 @@ export function getPost(db, postId, postsDir) {
   return { post, body, bodyHtml };
 }
 
-// Title is intentionally NOT a parameter — see PRD §Permanently out → "Editing post titles".
-export function editPost(db, { postId, handle, body, sensitive, postsDir, now = Date.now() }) {
+// Whether the post's title has frozen. A pure function of the clock — NOT of
+// live vote/comment rows. Deriving it from engagement was tried and is wrong:
+// `castVote` DELETEs the row when a voter toggles their vote off, so a lock
+// derived from vote rows silently un-locks itself, and counting the author's
+// own vote/reply froze titles nobody else had ever seen.
+export function postTitleLocked(post, now = Date.now()) {
+  return now - post.created_at > TITLE_EDIT_WINDOW_MS;
+}
+
+export function editPost(db, { postId, handle, title, body, sensitive, postsDir, now = Date.now() }) {
   if (!postId) throw new Error('editPost: postId is required');
   if (!handle) throw new Error('editPost: handle is required');
+  // Undefined title = "leave it alone" (the edit form omits the field once the
+  // title has locked). Same undefined-means-untouched contract as `sensitive`.
+  const titleProvided = title !== undefined;
+  if (titleProvided) {
+    if (typeof title !== 'string' || title.trim().length === 0) throw new Error('editPost: title is required');
+    if (title.length > TITLE_MAX) throw new Error(`editPost: title exceeds ${TITLE_MAX} characters`);
+  }
   if (typeof body !== 'string' || body.trim().length === 0) throw new Error('editPost: body is required');
   // 0.10.4: normalize CRLF → LF before length-check + write. See submitDraft.
   const normalizedBody = body.replace(/\r\n/g, '\n');
@@ -207,19 +228,36 @@ export function editPost(db, { postId, handle, body, sensitive, postsDir, now = 
   if (now - post.created_at > EDIT_WINDOW_MS) throw new Error('editPost: edit window has closed');
   if (isDisabled(db, post.sub_name)) throw new Error(`editPost: //${post.sub_name} is read-only`);
 
+  let newTitle = post.title;
+  // Compare trimmed on both sides: submitDraft stores the raw form title, so a
+  // stored title can carry surrounding whitespace an unchanged resubmit would
+  // otherwise register as an edit (and trip the lock on a title nobody touched).
+  if (titleProvided && title.trim() !== post.title.trim()) {
+    if (postTitleLocked(post, now)) {
+      throw new Error('editPost: title is locked — titles are editable for 15 minutes after posting');
+    }
+    newTitle = title.trim();
+  }
+
   const absPath = resolve(postsDir, basename(post.file_path));
   const raw = readFileSync(absPath, 'utf8');
-  // Preserve the frontmatter block exactly; replace only the body section.
+  // Preserve the frontmatter block, rewriting only the title: line (a
+  // single JSON-encoded line per frontmatterFor); replace the body section.
   const rest = raw.slice(4);
   const closeIdx = rest.indexOf('\n---\n');
   const header = raw.slice(0, 4 + closeIdx + 5);
-  writeFileSync(absPath, `${header}\n${normalizedBody.trim()}\n`);
+  // Replacer function, not a replacement string: `$&`, `$'` and friends in a
+  // user-supplied title would otherwise be expanded as replacement patterns.
+  const newHeader = newTitle === post.title
+    ? header
+    : header.replace(/^title: .*$/m, () => `title: ${JSON.stringify(newTitle)}`);
+  writeFileSync(absPath, `${newHeader}\n${normalizedBody.trim()}\n`);
 
   if (sensitive === undefined) {
-    db.prepare('UPDATE posts SET edited_at = ? WHERE id = ?').run(now, postId);
+    db.prepare('UPDATE posts SET edited_at = ?, title = ? WHERE id = ?').run(now, newTitle, postId);
   } else {
-    db.prepare('UPDATE posts SET edited_at = ?, sensitive = ? WHERE id = ?')
-      .run(now, sensitive ? 1 : 0, postId);
+    db.prepare('UPDATE posts SET edited_at = ?, title = ?, sensitive = ? WHERE id = ?')
+      .run(now, newTitle, sensitive ? 1 : 0, postId);
   }
 }
 

@@ -23,7 +23,23 @@ test('renderMarkdown: bold + italic', () => {
 
 test('renderMarkdown: links', () => {
   const out = renderMarkdown('[click here](https://example.com)');
-  assert.match(out, /<a href="https:\/\/example\.com">click here<\/a>/);
+  assert.match(out, /<a href="https:\/\/example\.com" target="_blank" rel="noopener">click here<\/a>/);
+});
+
+test('renderMarkdown: external links open in a new tab with rel=noopener', () => {
+  const out = renderMarkdown('[ex](https://example.com/page)');
+  assert.match(out, /target="_blank"/);
+  assert.match(out, /rel="noopener"/);
+});
+
+test('renderMarkdown: internal + fragment links stay same-tab (no target)', () => {
+  const rel = renderMarkdown('[sub](/sub/lobby)');
+  assert.match(rel, /<a href="\/sub\/lobby">sub<\/a>/);
+  assert.doesNotMatch(rel, /target=/);
+  const frag = renderMarkdown('[top](#comments)');
+  assert.doesNotMatch(frag, /target=/);
+  const mail = renderMarkdown('[mail](mailto:a@b.com)');
+  assert.doesNotMatch(mail, /target=/);
 });
 
 test('renderMarkdown: inline code', () => {
@@ -116,7 +132,7 @@ test('renderMarkdown: http(s), mailto, relative, and fragment URLs survive', () 
 test('PRD: image markdown is rewritten as a link (no inline embeds)', () => {
   const out = renderMarkdown('![cat photo](https://example.com/cat.jpg)');
   assert.doesNotMatch(out, /<img/i, 'no <img> tag should be emitted');
-  assert.match(out, /<a href="https:\/\/example\.com\/cat\.jpg">/);
+  assert.match(out, /<a href="https:\/\/example\.com\/cat\.jpg"/);
   assert.match(out, /cat photo/);
 });
 

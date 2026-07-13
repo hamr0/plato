@@ -20,9 +20,13 @@
   function effective() {
     if (root.classList.contains('theme-light')) return 'light';
     if (root.classList.contains('theme-dark')) return 'dark';
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
-      ? 'light'
-      : 'dark';
+    // No class = follow OS. Light is plato's default, so only an
+    // explicit OS dark preference yields dark; OS-light and "no
+    // preference" both resolve to light — matching the CSS, where the
+    // dark palette is gated behind @media (prefers-color-scheme: dark).
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
   }
   function applyTheme(theme) {
     root.classList.toggle('theme-light', theme === 'light');

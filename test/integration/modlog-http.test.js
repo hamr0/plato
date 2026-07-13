@@ -813,3 +813,34 @@ test('GET /?sort=top&date=24h: cross-sub posts feed honors filter', async (t) =>
   assert.match(body, /RECENT-POST/);
   assert.doesNotMatch(body, /OLD-POST/, 'date=24h excludes old post');
 });
+
+// The mod action strip (collapse · remove · ban) is one exclusive accordion:
+// every <details> shares a single `name`, so the browser closes whichever
+// form was open when the mod opens another, and re-clicking the open one
+// collapses it. `ban` targets the author handle while collapse/remove target
+// the post, so the group name must key on the strip's content target — not on
+// each action's own target, which would put ban in a group of its own.
+test('post page: mod action strip shares one <details name> accordion group', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx, { sub: 'lobby' });
+
+  // Author is someone other than the mod, so the ban control renders too
+  // (self-ban is deliberately hidden).
+  const AUTHOR = 'e'.repeat(64);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)')
+    .run(AUTHOR, 'other-author', Date.now());
+  const postId = 'a1b2c3d4e5f60789';
+  seedPost(ctx.db, { id: postId, sub: 'lobby', handle: AUTHOR, title: 'a post' });
+  writeFileSync(
+    join(ctx.postsDir, `${postId}.md`),
+    `---\ntitle: "a post"\nhandle: ${AUTHOR}\nsub_name: lobby\ncreated_at: ${Date.now()}\n---\n\nbody\n`,
+  );
+
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${postId}`);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  const names = [...body.matchAll(/<details class="mod-confirm" name="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(names.length, 3, 'collapse + remove + ban each render as a <details>');
+  assert.equal(new Set(names).size, 1, 'all three sit in one accordion group');
+  assert.equal(names[0], `mod-post-${postId}`, 'group keys on the content target, not the action target');
+});

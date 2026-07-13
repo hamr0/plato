@@ -103,8 +103,14 @@ md.use({
       const hoverTitle = token.title ?? (isBareUrl && href.length > URL_DISPLAY_MAX ? href : null);
       const titleAttr = hoverTitle ? ` title="${escapeHtml(hoverTitle)}"` : '';
       if (!href) return `<a${titleAttr}>${inner}</a>`;
-      const anchor = `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`;
       const host = outboundHost(href);
+      // External absolute http(s) links open in a new tab so a click
+      // doesn't navigate the reader away from the forum. rel="noopener"
+      // blocks the new page's window.opener access. Internal/relative
+      // links (/sub/x, #anchor, mailto) stay same-tab — outboundHost only
+      // returns a host for http(s), so they get no target.
+      const extAttr = host ? ' target="_blank" rel="noopener"' : '';
+      const anchor = `<a href="${escapeHtml(href)}"${titleAttr}${extAttr}>${inner}</a>`;
       // <wbr> between anchor and host gives the browser a break opportunity
       // so a long anchor + glued ext-host doesn't push the row past viewport
       // width on narrow screens. Without it, the unit `[anchor]↗ host.com`
