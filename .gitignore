@@ -12,3 +12,10 @@ exports/
 .barebrowse/
 data/
 test-suspicious-content.txt
+
+# Agent / IDE / tooling scratch — ignore EVERY dot-directory by default
+# (.claude, .litectx, .idea, .barebrowse, .vscode, and whatever the next tool
+# invents), then re-admit only the ones we actually ship. Default-deny beats
+# chasing each new scratch dir with its own line.
+.*/
+!.github/
