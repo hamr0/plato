@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ## [Unreleased]
 
+### Ops
+
+- **TLS cert auto-reload hook added (ownsub.com).** On the shared VPS,
+  certbot renews the ownsub.com cert to disk but nginx kept serving the
+  cert it loaded at its last start — there was no post-renewal reload hook,
+  so a renewed cert would silently sit unused until the next nginx restart
+  (the same latent gap that produced a stale-cert alert on the co-tenant
+  signedreply.com). Fix, on the VPS (no repo/code change): added
+  `renew_hook = systemctl reload nginx` to
+  `/etc/letsencrypt/renewal/ownsub.com.conf` (backup at `.bak-prehook`), so
+  future renewals reload nginx automatically. Verified with a staging
+  `certbot renew --cert-name ownsub.com --dry-run`: "all simulated renewals
+  succeeded" for ownsub.com (+www). The served cert is already current
+  (valid to Oct 29). Per-cert hook chosen over a global
+  `renewal-hooks/deploy/` reload to avoid changing behaviour for other
+  tenants on the box.
+
 ### Changed
 
 - **Agent/IDE scratch gitignored and de-tracked.** `.gitignore` now default-denies every dot-directory (`.*/`), re-admitting only what ships (`.github/`). Per-machine agent/IDE state (`.claude/`, `.litectx/`, `.idea/`, …) regenerates locally and only added noise and churn; any already-committed copies are removed from tracking (local files kept on disk). Repo hygiene only.
