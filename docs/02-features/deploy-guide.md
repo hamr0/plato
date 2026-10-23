@@ -1254,7 +1254,7 @@ If a CDN proxies your domain, nginx sees the CDN's edge as the TCP peer. `$remot
 
 The fix is nginx's realip module. The rendered `/etc/nginx/conf.d/plato.conf` (from `deploy/plato.nginx.template`) enables this by default: `set_real_ip_from` for each Cloudflare range plus `real_ip_header CF-Connecting-IP;`. It sits inside plato's `server {}` block, so it affects only this vhost (a co-tenant's site is untouched), and it only trusts the header when the TCP peer is inside a Cloudflare range, so it is harmless off Cloudflare. If you front with a different CDN, remove the block and add that CDN's ranges and header instead. Keep `X-Forwarded-For $remote_addr` as is: it now carries the real client IP, and overwriting (not appending) is what stops a forged header. Only trust `CF-Connecting-IP` from Cloudflare's own ranges; if the origin is reachable directly, firewall it to those ranges too.
 
-Cloudflare changes its ranges rarely. Refresh them from <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>, update the block, `nginx -t && systemctl reload nginx`.
+Cloudflare changes its ranges rarely. Refresh them from <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>, update the block, `nginx -t && systemctl reload nginx`. The ranges live in both `deploy/plato.nginx.template` and `src/cdnTripwire.js`, so update both.
 
 The same template throttles `POST /draft` and `POST /login` to 6 per minute per real client IP (burst 3, `429` past that). That only works once realip is on.
 

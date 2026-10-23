@@ -1,5 +1,6 @@
 import { BlockList, isIP } from 'node:net';
 
+// Keep in sync with the set_real_ip_from lines in deploy/plato.nginx.template.
 export const CLOUDFLARE_RANGES = Object.freeze({
   v4: Object.freeze([
     '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
