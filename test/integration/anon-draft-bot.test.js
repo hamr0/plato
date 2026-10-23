@@ -118,11 +118,18 @@ test('price-bot pattern matches all sample titles, not ordinary phrasing', () =>
     'Aloha, i am wrote about your   price for reseller',
     'Hello  i writing about your   price for reseller',
     'Aloha  i writing about your the price for reseller',
+    'Aloha i write about price',
+    'Hallo i am writing about the price for reseller',
+    'Hello, wrote about the prices',
+    'Hi write about price for reseller',
+    'Hallo, i wrote about     price for reseller',
   ]) assert.ok(hit(s), s);
   for (const s of [
     'What do you think about pricing for open source?',
     'I wrote about your post on prices yesterday',
     'How should a forum handle prices?',
+    'Hi all, I wrote about pricing models last week',
+    'I wrote about your price of admission',
   ]) assert.ok(!hit(s), s);
 });
 

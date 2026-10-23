@@ -27,7 +27,7 @@ work from home.{0,40}\$?\d{3,5}.{0,20}(?:per\s*week|/week|weekly)
 earn \$?\d{3,5}.{0,30}(?:from home|remotely|easily)
 
 # === Contact-form price bot (multilingual body, stable broken-English title) ===
-\b(?:writ(?:e|ing)|wrote)\b.{0,25}\byour\s+(?:the\s+)?prices?\b
+\b(?:hi|hello|hallo|aloha|hey)\b[\s,]*(?:i\s+)?(?:am\s+)?(?:writ(?:e|ing)|wrote)\s+about\s+(?:your\s+)?(?:the\s+)?prices?\b
 
 # === Wire fraud language ===
 \b(?:western union|moneygram|wire transfer only)\b
