@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
+## [0.16.3] - 2026-10-23 — HEAD answers on read-only routes
+
+### Fixed
+
+- **HEAD now answers on read-only GET routes.** `HEAD /`, `/login`, `/about`, sub and post pages returned 404 while GET returned 200, which broke uptime monitors and link-preview validators. The router now treats HEAD as GET; node strips the body. The two state-changing GET routes (draft finalize, notification click-through) deliberately still 404 on HEAD; `/auth/callback` and `/verify` belong to knowless and are unchanged.
+
 ## [0.16.2] - 2026-10-23 — anonymous-draft flood defenses (honeypot, pre-mail spam check, Cloudflare realip)
 
 ### Ops

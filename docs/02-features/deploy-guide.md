@@ -1086,7 +1086,7 @@ Common causes:
 
 ### `/healthz` returns 404 (or curl -I returns 404 but curl works fine)
 
-Pre-0.11.1 the `/healthz` route only matched `GET`, so any monitor or `curl -I` doing a `HEAD` request fell through to the catch-all 404. Same gotcha applied to `/static/*` (link-preview validators that probe `og.png` with HEAD before fetching). Fixed in 0.11.1; both routes now answer GET and HEAD. If you see this on a deployed instance, you're on a release < 0.11.1 — pull main and restart.
+Pre-0.11.1 the `/healthz` route only matched `GET`, so any monitor or `curl -I` doing a `HEAD` request fell through to the catch-all 404. Same gotcha applied to `/static/*` (link-preview validators that probe `og.png` with HEAD before fetching). Fixed in 0.11.1; both routes now answer GET and HEAD. After 0.16.2 (see CHANGELOG Unreleased) every read-only GET route (pages, feeds, sub and post views) answers HEAD the same way. If you see this on a deployed instance, you're on a release < 0.11.1 — pull main and restart.
 
 ### `/healthz` returns 502
 

@@ -5905,11 +5905,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
     try {
       const url = new URL(req.url, baseUrl);
       const path = url.pathname;
-      const method = req.method;
+      // HEAD routes as GET; node's ServerResponse drops the body on its own.
+      const method = req.method === 'HEAD' ? 'GET' : req.method;
 
       if (await applyStaticRoute(req, res)) return;
 
-      if (path === '/healthz' && (method === 'GET' || method === 'HEAD')) return handleHealthz(res, { db, exportsDir });
+      if (path === '/healthz' && method === 'GET') return handleHealthz(res, { db, exportsDir });
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/rss' && method === 'GET') return renderHomeRss(res, { db, postsDir });
@@ -5999,7 +6000,9 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/memlog/rss-regenerate' && method === 'POST') {
         return handleMemlogRssRegenerate(req, res, { db, auth });
       }
-      if ((m = path.match(/^\/memlog\/go\/(\d+)$/)) && method === 'GET') {
+      // Raw req.method, not the HEAD-as-GET `method`: these two GETs change
+      // state, and HEAD (link checkers, prefetchers) must stay side-effect-free.
+      if ((m = path.match(/^\/memlog\/go\/(\d+)$/)) && req.method === 'GET') {
         return handleMemlogGo(req, res, { db, auth }, m[1]);
       }
       if ((m = path.match(SUB_POST_PATH_RE)) && method === 'GET') {
@@ -6020,7 +6023,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if ((m = path.match(SUB_NAME_PATH_RE)) && method === 'GET') {
         return renderSubPage(req, res, { db, auth, postsDir }, m[1], url.searchParams.get('sort'), url.searchParams);
       }
-      if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && method === 'GET') {
+      if ((m = path.match(/^\/draft\/([0-9a-f]{16})\/finalize$/)) && req.method === 'GET') {
         return handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, m[1]);
       }
       if ((m = path.match(/^\/post\/([0-9a-f]{16})$/)) && method === 'GET') {
