@@ -43,7 +43,7 @@ export function makeCdnTripwire(captureError) {
       if (!captureError || !isCloudflareIp(ip)) return;
       if (now - lastWarnAt < WINDOW_MS) return;
       lastWarnAt = now;
-      captureError(new Error('client IP is a Cloudflare edge address; nginx realip is not configured, per-IP caps are collapsed'), { where: 'cdn-tripwire', level: 'warning' });
+      captureError(new Error('client IP is a Cloudflare edge address; nginx realip is not configured, per-IP caps are collapsed (or a Cloudflare WARP user posted; check the access log before assuming nginx is broken)'), { where: 'cdn-tripwire', level: 'warning' });
     } catch { /* tripwire must never affect the request */ }
   };
 }
