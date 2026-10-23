@@ -130,6 +130,8 @@ Validate at boot: missing required env fails fast with a clear error. The server
 
 Every sub-scoped route lives under `/sub/<name>/...` so future per-sub features don't have to refactor URL shapes.
 
+`HEAD` is answered as `GET` on every GET route (node drops the body), so uptime monitors, `curl -I`, and link-preview validators see the same status as a browser. Exceptions: `/draft/<id>/finalize` and `/memlog/go/<id>` change state on GET, so `HEAD` deliberately 404s there and side effects never fire from a prefetch. `/auth/callback` and `/verify` are knowless-owned and method-agnostic.
+
 ## Configuration: locked vs forkable
 
 Three categories. Pick the right effort tier before changing.
