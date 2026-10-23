@@ -46,7 +46,7 @@ Mail uses the system `mail`/`sendmail` — the same binary magic-link mail flows
 
 ### Counter definitions (digest)
 
-- **users** — `knowless.db.handles` row count: anyone who ever requested a magic link, lurkers included. The largest honest definition of the install base.
+- **users** — `knowless.db.handles` row count: accounts that have redeemed at least one magic link (knowless 1.3.6 creates the handle row at the first click, not at send time). The honest count of people who actually signed in.
 - **subs** — `forum.db.subs` row count.
 - **posts**, **comments** — `forum.db` row counts excluding `removed_at IS NOT NULL`.
 - **votes** — `forum.db.votes` row count (cast votes).

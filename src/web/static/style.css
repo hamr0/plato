@@ -349,6 +349,13 @@ header h1 .logo-mark {
 }
 .login-trigger > summary::-webkit-details-marker { display: none; }
 .login-trigger[open] > summary { color: var(--accent-warm); }
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
 .login-form {
   display: flex;
   gap: 0.4rem;

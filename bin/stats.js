@@ -6,7 +6,7 @@
 // groups by ISO week, and emails a fixed-width WoW table.
 //
 // Counters:
-//   users    = knowless.db handles (anyone who's ever requested a magic link)
+//   users    = knowless.db handles (accounts that have redeemed at least one magic link)
 //   subs     = forum.db subs
 //   posts    = forum.db posts (not removed)
 //   comments = forum.db comments (not removed)

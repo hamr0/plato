@@ -421,7 +421,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 2. Per-account rate limits | shipped (M5/B1) | tier'd by account age; `RATE_LIMIT_FLOOR` in `rateLimit.js`; per-instance tighten via `config.json` |
 | 3. Per-sub rate limits | shipped (M5/B2) | newish 5/day, trusted 20/day; same tighten-only floor |
 | 4. Disposable email blocking | shipped (M1) | `disposable-domains.txt` |
-| 5. Honeypot fields | deferred | low ROI; bots that fill posting fields are also bots that fill honeypots |
+| 5. Honeypot fields | shipped (2026-10-23) | anonymous `/draft` + `/login`, after the price-bot incident |
 | 6. Outbound link cap | shipped (M5/B4) | 1/3/5 by tier; `LINK_CAP_FLOOR` |
 | 6b. URL malicious-domain check | shipped (M5/B5) | URLhaus hourly cron via `bin/refresh-urlhaus.js` |
 | 7. Flag button | shipped (M4/M5) | five categories, flagThreshold per-sub, floor 3 (M5/B12) |
@@ -524,7 +524,7 @@ Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the 
 
 ### 5. Honeypot fields in post forms
 
-**Criteria**: every post and comment form contains 1-2 hidden form fields (CSS `display:none` or off-screen positioning). The fields have plausible-sounding names (`website`, `phone`). If any honeypot field is non-empty on submission, the post is silently dropped — the bot receives a 200 response and never knows it failed.
+**Criteria**: the anonymous post form and both `/login` forms contain one off-screen text field named `hp_note` (an autofill-neutral name, wrapped in a `.hp-field` label reading "leave this empty", `tabindex=-1`). If it is non-empty on submission, no draft is written and no mail is sent — the bot receives the normal "check your email" 200 page and never knows it failed. Logged-in posting and comment forms carry no honeypot.
 
 **Why it works**: most form-spamming bots fill every field they find. Silent drop (rather than error) prevents the bot from learning to avoid the trap.
 

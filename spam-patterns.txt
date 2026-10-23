@@ -26,6 +26,11 @@ send (?:btc|bitcoin|eth|usdt) to
 work from home.{0,40}\$?\d{3,5}.{0,20}(?:per\s*week|/week|weekly)
 earn \$?\d{3,5}.{0,30}(?:from home|remotely|easily)
 
+# === Contact-form price bot (multilingual body, stable broken-English title) ===
+# Anchored ^...$: matches only when the title (or title+body joined) is exactly the
+# bot phrase. Effective mainly in the anonymous /draft pre-mail title-only check.
+^\s*(?:hi|hello|hallo|aloha|hey)\b[\s,]*(?:i\s+)?(?:am\s+)?(?:writ(?:e|ing)|wrote)\s+about\s+(?:your\s+)?(?:the\s+)?prices?(?:\s+for\s+reseller)?\s*[.!?]?\s*$
+
 # === Wire fraud language ===
 \b(?:western union|moneygram|wire transfer only)\b
 payment via gift cards?\b

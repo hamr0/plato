@@ -1248,6 +1248,24 @@ restorecon -R /your/new/path
 
 ---
 
+## Behind Cloudflare (or any CDN)
+
+If a CDN proxies your domain, nginx sees the CDN's edge as the TCP peer. `$remote_addr` becomes one of a few dozen edge addresses, so every per-IP cap (plato's anonymous-draft limiter, knowless's login limits, nginx `limit_req`) silently collapses onto them and one abusive client can exhaust the budget for everyone behind the same edge, or mail-bomb strangers under a cap that never trips. Nothing errors; the caps just stop meaning what they say.
+
+The fix is nginx's realip module. The rendered `/etc/nginx/conf.d/plato.conf` (from `deploy/plato.nginx.template`) enables this by default: `set_real_ip_from` for each Cloudflare range plus `real_ip_header CF-Connecting-IP;`. It sits inside plato's `server {}` block, so it affects only this vhost (a co-tenant's site is untouched), and it only trusts the header when the TCP peer is inside a Cloudflare range, so it is harmless off Cloudflare. If you front with a different CDN, remove the block and add that CDN's ranges and header instead. Keep `X-Forwarded-For $remote_addr` as is: it now carries the real client IP, and overwriting (not appending) is what stops a forged header. Only trust `CF-Connecting-IP` from Cloudflare's own ranges; if the origin is reachable directly, firewall it to those ranges too.
+
+Cloudflare changes its ranges rarely. Refresh them from <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>, update the block, `nginx -t && systemctl reload nginx`. The ranges live in both `deploy/plato.nginx.template` and `src/cdnTripwire.js`, so update both.
+
+Templates only take effect when rendered: on an existing box, re-render `/etc/nginx/conf.d/plato.conf` from the updated template (the `envsubst '${DOMAIN} ${PLATO_PORT}'` step above), then `nginx -t && systemctl reload nginx`. Note that a certbot-managed file has been edited in place, so merge the new `map`/`limit_req_zone`, `set_real_ip_from` and `location ~ ^/(draft|login)$` blocks into it rather than overwriting.
+
+The same template throttles `POST /draft` and `POST /login` to 6 per minute per real client IP (burst 3, `429` past that). That only works once realip is on.
+
+Tripwire: if plato ever resolves a client IP inside Cloudflare's ranges on an anonymous `/draft` or `/login`, realip is not working. It records a warning through flightlog (`where: 'cdn-tripwire'`), at most once per 24 hours per process. Check `data/logs/errors.jsonl` after putting a CDN in front.
+
+For the app-side details see knowless's own CDN notes: [GUIDE.md "Behind a CDN"](https://github.com/hamr0/knowless/blob/main/GUIDE.md) and the realip section of [OPS.md](https://github.com/hamr0/knowless/blob/main/OPS.md) (knowless 1.3.5 and later).
+
+---
+
 ## Security checklist
 
 Before you announce the URL:

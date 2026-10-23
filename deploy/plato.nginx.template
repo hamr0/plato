@@ -7,10 +7,50 @@
 # and redirect 80→443. Once that's happened, treat the rendered file as
 # certbot-owned: run `certbot renew` to refresh, don't hand-edit.
 
+# Per-IP write throttle for the anonymous magic-link entry points. conf.d files
+# are included inside nginx's http{} block, so these live at top level. GET and
+# HEAD map to an empty key, which limit_req does not count.
+map $request_method $plato_post_key {
+    default "";
+    POST    $binary_remote_addr;
+}
+limit_req_zone $plato_post_key zone=plato_post:10m rate=6r/m;
+
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN};
+
+    # Cloudflare realip (on by default). CF-Connecting-IP is trusted only when
+    # the TCP peer is inside a Cloudflare range, so this is harmless off
+    # Cloudflare; without it behind Cloudflare every per-IP cap collapses onto
+    # edge addresses. Server-scoped: affects only this vhost. Refresh ranges
+    # from https://www.cloudflare.com/ips-v4 and /ips-v6; for another CDN,
+    # replace this block with that CDN's ranges and header.
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 2400:cb00::/32;
+    set_real_ip_from 2606:4700::/32;
+    set_real_ip_from 2803:f800::/32;
+    set_real_ip_from 2405:b500::/32;
+    set_real_ip_from 2405:8100::/32;
+    set_real_ip_from 2a06:98c0::/29;
+    set_real_ip_from 2c0f:f248::/32;
+    real_ip_header CF-Connecting-IP;
+
 
     location / {
         proxy_pass http://127.0.0.1:${PLATO_PORT};
@@ -21,13 +61,28 @@ server {
         # client-supplied prefix, and knowless trusts the leftmost element —
         # so a forged X-Forwarded-For would mint a fresh rate-limit bucket per
         # request. $remote_addr is the real TLS peer. Valid because nginx
-        # terminates TLS directly here; revisit if fronted by a CDN/LB.
+        # terminates TLS directly here; behind a CDN/LB see the Cloudflare realip block above.
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
 
         # Generous client cap; plato's own validators reject oversized
         # posts and the import worker streams archives to disk.
+        client_max_body_size 8m;
+    }
+
+    # Anonymous POSTs here send mail to an arbitrary address; throttle per real
+    # client IP (6/min, burst 3). Same proxy headers as `/`.
+    location ~ ^/(draft|login)$ {
+        limit_req zone=plato_post burst=3 nodelay;
+        limit_req_status 429;
+        proxy_pass http://127.0.0.1:${PLATO_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
         client_max_body_size 8m;
     }
 
