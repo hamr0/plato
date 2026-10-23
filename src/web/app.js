@@ -694,6 +694,7 @@ function loginStatusFor(db, currentHandle) {
         <summary>log in</summary>
         <form method="POST" action="/login" class="login-form">
           <input name="email" type="email" placeholder="your email" required>
+          <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
           <input type="hidden" name="return_to" value="">
           <button>send link</button>
         </form>
@@ -5730,6 +5731,7 @@ function renderLogin(req, res, { db, auth }, searchParams) {
     <p class="muted">enter your email — we'll send a magic link. no password, no PII stored.</p>
     <form method="POST" action="/login" class="login-form-page">
       <input name="email" type="email" placeholder="your email" required autofocus>
+      <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
       <input type="hidden" name="return_to" value="${next}">
       <button>send link</button>
     </form>
@@ -5754,12 +5756,14 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
   const landing = safeLocalRedirect(returnTo, '/');
   const loginIp = determineSourceIp(req, auth.config.trustedProxies);
   cdnCheck(loginIp);
-  await auth.startLogin({
-    email,
-    nextUrl: `${baseUrl}${landing}`,
-    sourceIp: loginIp,
-    bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
-  });
+  if ((form.website ?? '').trim() === '') {
+    await auth.startLogin({
+      email,
+      nextUrl: `${baseUrl}${landing}`,
+      sourceIp: loginIp,
+      bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
+    });
+  }
   send(
     res,
     200,

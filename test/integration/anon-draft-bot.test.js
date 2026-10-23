@@ -148,3 +148,35 @@ test('cdn tripwire: Cloudflare IP warns once per window, normal IP never', () =>
   assert.equal(calls.length, 2);
   assert.ok(isCloudflareIp('104.16.0.1') && !isCloudflareIp('8.8.8.8') && !isCloudflareIp('garbage'));
 });
+
+const loginPost = (ctx, fields) => fetch(ctx.baseUrl + '/login', {
+  method: 'POST', headers: FORM, redirect: 'manual', body: new URLSearchParams(fields),
+});
+
+test('/login honeypot filled: same success page as a real login, no mail', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const real = await loginPost(ctx, { email: 'a@x.test', website: '' });
+  assert.equal(ctx.sent.length, 1);
+  const realHtml = await real.text();
+  const res = await loginPost(ctx, { email: 'b@x.test', website: 'http://spam.test' });
+  assert.equal(res.status, real.status);
+  const html = await res.text();
+  assert.match(html, /We sent a magic link to <code>b@x\.test<\/code>/);
+  assert.equal(html.replace('b@x.test', 'a@x.test'), realHtml);
+  assert.equal(ctx.sent.length, 1, 'no mail for the honeypot hit');
+});
+
+test('/login honeypot empty: mail sent', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await loginPost(ctx, { email: 'a@x.test' });
+  assert.equal(res.status, 200);
+  assert.equal(ctx.sent.length, 1);
+});
+
+test('both login forms render the honeypot field', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const hp = /name="website"[^>]*class="hp-field"/;
+  assert.match(await (await fetch(ctx.baseUrl + '/sub/seed')).text().then((h) => h.slice(h.indexOf('class="login-form"'))), hp);
+  const page = await (await fetch(ctx.baseUrl + '/login')).text();
+  assert.match(page.slice(page.indexOf('login-form-page')), hp);
+});
