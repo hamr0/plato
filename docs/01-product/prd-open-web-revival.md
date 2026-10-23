@@ -421,7 +421,7 @@ Layered, all standard practice. Each rule below has explicit criteria and a sour
 | 2. Per-account rate limits | shipped (M5/B1) | tier'd by account age; `RATE_LIMIT_FLOOR` in `rateLimit.js`; per-instance tighten via `config.json` |
 | 3. Per-sub rate limits | shipped (M5/B2) | newish 5/day, trusted 20/day; same tighten-only floor |
 | 4. Disposable email blocking | shipped (M1) | `disposable-domains.txt` |
-| 5. Honeypot fields | deferred | low ROI; bots that fill posting fields are also bots that fill honeypots |
+| 5. Honeypot fields | shipped (2026-10-23) | anonymous `/draft` + `/login`, after the price-bot incident |
 | 6. Outbound link cap | shipped (M5/B4) | 1/3/5 by tier; `LINK_CAP_FLOOR` |
 | 6b. URL malicious-domain check | shipped (M5/B5) | URLhaus hourly cron via `bin/refresh-urlhaus.js` |
 | 7. Flag button | shipped (M4/M5) | five categories, flagThreshold per-sub, floor 3 (M5/B12) |
