@@ -686,7 +686,7 @@ const themeToggleBtn = html` · <button class="link theme-toggle" type="button" 
 // Honeypot: invisible to sighted users; the label tells a screen-reader user
 // to skip it. The field name avoids every autofill heuristic token.
 const HONEYPOT_FIELD = 'hp_note';
-const RETRY_HINT = "Didn't arrive? Check spam, then wait an hour before trying again — repeat requests from one network are slowed down.";
+const RETRY_HINT = "Didn't arrive? Check spam. If it still hasn't come after a few minutes, wait an hour before asking again — repeat requests from one network are slowed down.";
 const honeypotField = html`<label class="hp-field">leave this empty <input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off"></label>`;
 const honeypotFilled = (form) => (form[HONEYPOT_FIELD] ?? '').trim() !== '';
 
@@ -2574,7 +2574,7 @@ function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPat
       res,
       401,
       quickPage(req, { db, auth }, 'not logged in',
-        html`<p class="muted">your session expired. <a href="/">post again</a> to get a fresh magic link.</p>`
+        html`<p class="muted">your session expired before you clicked the link. check spam first; if you need a fresh link, wait an hour before <a href="/">posting again</a>, because repeat requests from one network are slowed down.</p>`
       )
     );
   }

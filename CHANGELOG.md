@@ -36,7 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ### Changed
 
-- **Check-email pages no longer say "try again".** The /draft and /login confirmation pages now say to check spam and wait an hour, since retrying immediately only burns the per-network send cap. Copy only.
+- **Check-email pages and the finalize 401 page no longer say "try again" / "post again".** The /draft and /login confirmation pages and the expired-session page after a magic-link click now say to check spam and wait an hour, since retrying immediately only burns the per-network send cap. Copy only.
 - **Agent/IDE scratch gitignored and de-tracked.** `.gitignore` now default-denies every dot-directory (`.*/`), re-admitting only what ships (`.github/`). Per-machine agent/IDE state (`.claude/`, `.litectx/`, `.idea/`, …) regenerates locally and only added noise and churn; any already-committed copies are removed from tracking (local files kept on disk). Repo hygiene only.
 
 ## [0.16.1] - 2026-07-13 — knowless 1.3.4 (patched nodemailer)
