@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
-## [Unreleased]
+## [0.16.2] - 2026-10-23 — anonymous-draft flood defenses (honeypot, pre-mail spam check, Cloudflare realip)
 
 ### Ops
 
@@ -28,11 +28,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 - **Anonymous `/draft` hardened against the "I want to know your price" contact-form bot** (incident 2026-10-23: ~1,300 magic-link emails/day to strangers, sender IP blocklisted; root cause was Cloudflare edges standing in for client IPs so every per-IP cap collapsed). Four layers:
   - Honeypot field (`hp_note`, an autofill-neutral name, off-screen via a labelled `.hp-field` wrapper reading "leave this empty") on the anonymous post form and on both `/login` forms. A filled value returns the normal "check your email" page but writes no draft and sends no mail; checked before the disposable check and limiter. Logged-in posting ignores it. `/login` returns the same success page with no mail.
   - Spam patterns now run on anonymous drafts before any draft row or mail: a match is a vague 400 "post not accepted". New `spam-patterns.txt` entry for the price-bot title, anchored `^...$` so it matches only a whole-title bot phrase (not ordinary English such as "Hi, I wrote about the price of RAM"); the anonymous check runs it against the title alone as well as title+body. Stylesheet cache token `v=54`.
-  - `deploy/plato.nginx.template`: Cloudflare realip block enabled by default (trusts CF-Connecting-IP only from Cloudflare ranges), plus POST-only `limit_req` (6r/m, burst 3, 429) on `/draft` and `/login` keyed on the real client IP.
-  - CDN-misconfig tripwire (`src/cdnTripwire.js`): an anonymous `/draft` or `/login` resolving to a Cloudflare edge IP logs one flightlog warning per 24h per process; never affects the request.
+  - `deploy/plato.nginx.template`: Cloudflare realip block enabled by default, scoped to plato's server block (trusts CF-Connecting-IP only from Cloudflare ranges), plus POST-only `limit_req` (6r/m, burst 3, 429) on `/draft` and `/login` keyed on the real client IP.
+  - CDN-misconfig tripwire (`src/cdnTripwire.js`): an anonymous `/draft` or `/login` resolving to a Cloudflare edge IP logs one flightlog warning per 24h per process; never affects the request. The message notes that Cloudflare WARP users egress from Cloudflare ranges, so check the access log before assuming realip is broken; the ranges live in both the nginx template and the tripwire.
   - Deploy guide gains a "Behind Cloudflare (or any CDN)" section.
 
-- **Bumped `knowless` `^1.3.4` → `^1.3.6` (and transitive `nodemailer` `^9.0.3` → `^10.2.1`).** knowless 1.3.6 creates the handle row at the first magic-link redemption instead of at send time, so an address that has never clicked stays "new" and `maxNewHandlesPerIpPerHour` keeps applying to it; this closes the gap where send-time handle creation let mass-sent links consume no new-handle budget. The weekly `users` counter (`knowless.db.handles`) changes meaning with it: it now counts accounts that have redeemed at least one magic link, so expect a one-time drop after deploy (the 2026-10-23 purge of never-clicked handles) and clicked accounts only from then on. No API change; also brings the GUIDE.md/OPS.md "Behind a CDN" docs. `npm audit` shows only the pre-existing `@dicebear` advisories; full suite (937 tests) passes unchanged.
+- **Bumped `knowless` `^1.3.4` → `^1.3.6` (and transitive `nodemailer` `^9.0.3` → `^10.2.1`).** knowless 1.3.6 creates the handle row at the first magic-link redemption instead of at send time, so an address that has never clicked stays "new" and `maxNewHandlesPerIpPerHour` keeps applying to it; this closes the gap where send-time handle creation let mass-sent links consume no new-handle budget. The weekly `users` counter (`knowless.db.handles`) changes meaning with it: it now counts accounts that have redeemed at least one magic link, so expect a one-time drop after deploy (the 2026-10-23 purge of never-clicked handles) and clicked accounts only from then on. No API change; also brings the GUIDE.md/OPS.md "Behind a CDN" docs. `npm audit` shows only the pre-existing `@dicebear` advisories; full suite (939 tests) passes unchanged.
 
 ### Changed
 
