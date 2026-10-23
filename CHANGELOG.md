@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
-## [Unreleased]
+## [0.16.3] - 2026-10-23 — HEAD answers on read-only routes
 
 ### Fixed
 
