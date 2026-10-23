@@ -5762,23 +5762,21 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
   const landing = safeLocalRedirect(returnTo, '/');
   const loginIp = determineSourceIp(req, auth.config.trustedProxies);
   cdnCheck(loginIp);
-  if (!honeypotFilled(form)) {
-    await auth.startLogin({
-      email,
-      nextUrl: `${baseUrl}${landing}`,
-      sourceIp: loginIp,
-      bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
-    });
+  const sentPage = pageView({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline }, html`
+    <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
+    <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
+    <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
+  `);
+  if (honeypotFilled(form)) {
+    return send(res, 200, sentPage);
   }
-  send(
-    res,
-    200,
-    pageView({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline }, html`
-      <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
-      <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
-      <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
-    `)
-  );
+  await auth.startLogin({
+    email,
+    nextUrl: `${baseUrl}${landing}`,
+    sourceIp: loginIp,
+    bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
+  });
+  send(res, 200, sentPage);
 }
 
 async function handleLogout(req, res, { db, auth }) {
