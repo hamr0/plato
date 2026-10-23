@@ -109,7 +109,7 @@ test('anon draft matching a spam pattern: 400, no draft, no mail', async (t) => 
   assert.equal(ctx.sent.length, 0);
 });
 
-test('price-bot pattern matches all sample titles, not ordinary phrasing', () => {
+test('price-bot pattern matches whole bot titles only (title-only haystack)', () => {
   const patterns = loadSpamPatterns(SPAM_PATH);
   const hit = (s) => matchSpamPatterns(s, patterns).length > 0;
   for (const s of [
@@ -129,8 +129,20 @@ test('price-bot pattern matches all sample titles, not ordinary phrasing', () =>
     'I wrote about your post on prices yesterday',
     'How should a forum handle prices?',
     'Hi all, I wrote about pricing models last week',
+    'Hi all, I wrote about pricing models',
     'I wrote about your price of admission',
+    'Hi, I wrote about the price of RAM',
+    'hello I am writing about prices in Berlin',
+    'Hi, I am writing about the price elasticity of demand',
   ]) assert.ok(!hit(s), s);
+});
+
+test('anon draft titled like ordinary English about price is accepted', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const res = await post(ctx, { ...base, title: 'Hi, I wrote about the price of RAM' });
+  assert.equal(res.status, 200);
+  assert.equal(drafts(ctx.db), 1);
+  assert.equal(ctx.sent.length, 1);
 });
 
 test('cdn tripwire: Cloudflare IP warns once per window, normal IP never', () => {

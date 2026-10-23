@@ -2512,7 +2512,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     return send(res, 200, checkEmailPage(req, { db, auth }, email));
   }
 
-  if (matchSpamPatterns(`${title}\n${postBody}`, spamPatterns).length > 0) {
+  if (matchSpamPatterns(title, spamPatterns).length > 0 || matchSpamPatterns(`${title}\n${postBody}`, spamPatterns).length > 0) {
     return send(res, 400, quickPage(req, { db, auth }, 'post not accepted',
       html`<p class="muted">this post wasn't accepted. <a href="/">back</a></p>`
     ));
