@@ -19,7 +19,7 @@ const DISPOSABLE_PATH = resolve(HERE, '../../disposable-domains.txt');
 const SPAM_PATH = resolve(HERE, '../../spam-patterns.txt');
 const FORM = { 'Content-Type': 'application/x-www-form-urlencoded' };
 
-async function spinUp() {
+async function spinUp({ trustedProxies } = {}) {
   const tmp = http.createServer((q, r) => r.end());
   const port = await new Promise((r) => tmp.listen(0, () => r(tmp.address().port)));
   await new Promise((r) => tmp.close(r));
@@ -34,7 +34,7 @@ async function spinUp() {
   };
   const auth = knowless({
     secret: randomBytes(32).toString('hex'), baseUrl, from: 'a@t', dbPath: ':memory:',
-    openRegistration: true, cookieSecure: false, mailer,
+    openRegistration: true, cookieSecure: false, mailer, trustedProxies,
   });
   const postsDir = mkdtempSync(join(tmpdir(), 'plato-bot-'));
   const captured = [];
@@ -192,4 +192,28 @@ test('both login forms render the honeypot field', async (t) => {
   assert.match(await (await fetch(ctx.baseUrl + '/sub/seed')).text().then((h) => h.slice(h.indexOf('class="login-form"'))), HP);
   const page = await (await fetch(ctx.baseUrl + '/login')).text();
   assert.match(page.slice(page.indexOf('login-form-page')), HP);
+});
+
+const CF_XFF = { 'X-Forwarded-For': '104.16.0.1' };
+const LOOPBACK = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
+test('cdn tripwire fires through a real anonymous POST /draft, once per window', async (t) => {
+  const ctx = await spinUp({ trustedProxies: LOOPBACK }); t.after(() => teardown(ctx));
+  await post(ctx, base, CF_XFF);
+  assert.equal(ctx.captured.length, 1);
+  assert.equal(ctx.captured[0].extra.where, 'cdn-tripwire');
+  await post(ctx, { ...base, email: 'w@x.test' }, CF_XFF);
+  assert.equal(ctx.captured.length, 1, 'second request inside the window does not warn again');
+});
+
+test('cdn tripwire fires through a real POST /login, once per window', async (t) => {
+  const ctx = await spinUp({ trustedProxies: LOOPBACK }); t.after(() => teardown(ctx));
+  const login = (email) => fetch(ctx.baseUrl + '/login', {
+    method: 'POST', headers: { ...FORM, ...CF_XFF }, redirect: 'manual', body: new URLSearchParams({ email }),
+  });
+  await login('a@x.test');
+  assert.equal(ctx.captured.length, 1);
+  assert.equal(ctx.captured[0].extra.where, 'cdn-tripwire');
+  await login('b@x.test');
+  assert.equal(ctx.captured.length, 1, 'second request inside the window does not warn again');
 });
