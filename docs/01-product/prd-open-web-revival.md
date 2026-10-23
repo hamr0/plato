@@ -524,7 +524,7 @@ Both carve-outs only apply when the actor `canModerate(...) === 'owner'` of the 
 
 ### 5. Honeypot fields in post forms
 
-**Criteria**: every post and comment form contains 1-2 hidden form fields (CSS `display:none` or off-screen positioning). The fields have plausible-sounding names (`website`, `phone`). If any honeypot field is non-empty on submission, the post is silently dropped — the bot receives a 200 response and never knows it failed.
+**Criteria**: the anonymous post form and both `/login` forms contain one off-screen text field named `hp_note` (an autofill-neutral name, wrapped in a `.hp-field` label reading "leave this empty", `tabindex=-1`). If it is non-empty on submission, no draft is written and no mail is sent — the bot receives the normal "check your email" 200 page and never knows it failed. Logged-in posting and comment forms carry no honeypot.
 
 **Why it works**: most form-spamming bots fill every field they find. Silent drop (rather than error) prevents the bot from learning to avoid the trap.
 
