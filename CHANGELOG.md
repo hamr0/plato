@@ -32,6 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
   - CDN-misconfig tripwire (`src/cdnTripwire.js`): an anonymous `/draft` or `/login` resolving to a Cloudflare edge IP logs one flightlog warning per 24h per process; never affects the request.
   - Deploy guide gains a "Behind Cloudflare (or any CDN)" section.
 
+- **Bumped `knowless` `^1.3.4` → `^1.3.6` (and transitive `nodemailer` `^9.0.3` → `^10.2.1`).** knowless 1.3.6 creates the handle row at the first magic-link redemption instead of at send time, so an address that has never clicked stays "new" and `maxNewHandlesPerIpPerHour` keeps applying to it; this closes the gap where send-time handle creation let mass-sent links consume no new-handle budget. No API change; also brings the GUIDE.md/OPS.md "Behind a CDN" docs. `npm audit` shows only the pre-existing `@dicebear` advisories; full suite (937 tests) passes unchanged.
+
 ### Changed
 
 - **Agent/IDE scratch gitignored and de-tracked.** `.gitignore` now default-denies every dot-directory (`.*/`), re-admitting only what ships (`.github/`). Per-machine agent/IDE state (`.claude/`, `.litectx/`, `.idea/`, …) regenerates locally and only added noise and churn; any already-committed copies are removed from tracking (local files kept on disk). Repo hygiene only.
