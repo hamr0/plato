@@ -56,11 +56,13 @@ const drafts = (db) => db.prepare('SELECT COUNT(*) AS n FROM drafts').get().n;
 const post = (ctx, fields, headers = {}) => fetch(ctx.baseUrl + '/draft', {
   method: 'POST', headers: { ...FORM, ...headers }, redirect: 'manual', body: new URLSearchParams(fields),
 });
+// Wrapper label tells screen-reader users to skip it; the input is not aria-hidden and has an autofill-neutral name.
+const HP = /<label class="hp-field">leave this empty <input name="hp_note" type="text" tabindex="-1" autocomplete="off"><\/label>/;
 const base = { email: 'v@x.test', sub_name: 'seed', title: 'hello', body: 'world' };
 
 test('anon honeypot filled: 200 check-your-email, no draft, no mail', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
-  const res = await post(ctx, { ...base, website: 'http://spam.test' });
+  const res = await post(ctx, { ...base, hp_note: 'http://spam.test' });
   assert.equal(res.status, 200);
   assert.match(await res.text(), /We sent a magic link/);
   assert.equal(drafts(ctx.db), 0);
@@ -69,7 +71,7 @@ test('anon honeypot filled: 200 check-your-email, no draft, no mail', async (t) 
 
 test('anon honeypot empty: draft written and mail sent', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
-  const res = await post(ctx, { ...base, website: '' });
+  const res = await post(ctx, { ...base, hp_note: '' });
   assert.equal(res.status, 200);
   assert.equal(drafts(ctx.db), 1);
   assert.equal(ctx.sent.length, 1);
@@ -78,7 +80,7 @@ test('anon honeypot empty: draft written and mail sent', async (t) => {
 test('anon form renders the honeypot field', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const html = await (await fetch(ctx.baseUrl + '/sub/seed')).text();
-  assert.match(html, /name="website"[^>]*class="hp-field"|class="hp-field"[^>]*name="website"/);
+  assert.match(html, HP);
 });
 
 test('logged-in post ignores a filled honeypot', async (t) => {
@@ -94,7 +96,7 @@ test('logged-in post ignores a filled honeypot', async (t) => {
   const before = ctx.db.prepare('SELECT COUNT(*) AS n FROM posts').get().n;
   res = await fetch(ctx.baseUrl + '/draft', {
     method: 'POST', redirect: 'manual', headers: { ...FORM, Cookie: cookies },
-    body: new URLSearchParams({ sub_name: 'seed', title: 'second', body: 'again', website: 'filled' }),
+    body: new URLSearchParams({ sub_name: 'seed', title: 'second', body: 'again', hp_note: 'filled' }),
   });
   assert.equal(res.status, 302);
   assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM posts').get().n, before + 1);
@@ -167,10 +169,10 @@ const loginPost = (ctx, fields) => fetch(ctx.baseUrl + '/login', {
 
 test('/login honeypot filled: same success page as a real login, no mail', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
-  const real = await loginPost(ctx, { email: 'a@x.test', website: '' });
+  const real = await loginPost(ctx, { email: 'a@x.test', hp_note: '' });
   assert.equal(ctx.sent.length, 1);
   const realHtml = await real.text();
-  const res = await loginPost(ctx, { email: 'b@x.test', website: 'http://spam.test' });
+  const res = await loginPost(ctx, { email: 'b@x.test', hp_note: 'http://spam.test' });
   assert.equal(res.status, real.status);
   const html = await res.text();
   assert.match(html, /We sent a magic link to <code>b@x\.test<\/code>/);
@@ -187,8 +189,7 @@ test('/login honeypot empty: mail sent', async (t) => {
 
 test('both login forms render the honeypot field', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
-  const hp = /name="website"[^>]*class="hp-field"/;
-  assert.match(await (await fetch(ctx.baseUrl + '/sub/seed')).text().then((h) => h.slice(h.indexOf('class="login-form"'))), hp);
+  assert.match(await (await fetch(ctx.baseUrl + '/sub/seed')).text().then((h) => h.slice(h.indexOf('class="login-form"'))), HP);
   const page = await (await fetch(ctx.baseUrl + '/login')).text();
-  assert.match(page.slice(page.indexOf('login-form-page')), hp);
+  assert.match(page.slice(page.indexOf('login-form-page')), HP);
 });

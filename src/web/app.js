@@ -683,6 +683,12 @@ function listSubsForNav(db, { sinceMs = Date.now() - 24 * 60 * 60 * 1000 } = {})
 // label to the effective theme on load.
 const themeToggleBtn = html` · <button class="link theme-toggle" type="button" aria-label="toggle theme">light</button>`;
 
+// Honeypot: invisible to sighted users; the label tells a screen-reader user
+// to skip it. The field name avoids every autofill heuristic token.
+const HONEYPOT_FIELD = 'hp_note';
+const honeypotField = html`<label class="hp-field">leave this empty <input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off"></label>`;
+const honeypotFilled = (form) => (form[HONEYPOT_FIELD] ?? '').trim() !== '';
+
 function loginStatusFor(db, currentHandle) {
   if (!currentHandle) {
     // Anonymous: explicit "log in" affordance top-right. Triggers the same
@@ -694,7 +700,7 @@ function loginStatusFor(db, currentHandle) {
         <summary>log in</summary>
         <form method="POST" action="/login" class="login-form">
           <input name="email" type="email" placeholder="your email" required>
-          <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+          ${honeypotField}
           <input type="hidden" name="return_to" value="">
           <button>send link</button>
         </form>
@@ -901,7 +907,7 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
     ${currentHandle
       ? html``
       : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>
-        <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">`}
+        ${honeypotField}`}
     ${subField}
     <input name="title" placeholder="post title" value="${dTitle}" required>
     ${flairField}
@@ -2506,9 +2512,9 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   const draftIp = determineSourceIp(req, auth.config.trustedProxies);
   cdnCheck(draftIp);
 
-  // Honeypot: a human never sees the `website` field. Bots get the same
+  // Honeypot: a human leaves it empty. Bots get the same
   // success page as a real send, with no draft row and no mail.
-  if ((form.website ?? '').trim() !== '') {
+  if (honeypotFilled(form)) {
     return send(res, 200, checkEmailPage(req, { db, auth }, email));
   }
 
@@ -5731,7 +5737,7 @@ function renderLogin(req, res, { db, auth }, searchParams) {
     <p class="muted">enter your email — we'll send a magic link. no password, no PII stored.</p>
     <form method="POST" action="/login" class="login-form-page">
       <input name="email" type="email" placeholder="your email" required autofocus>
-      <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+      ${honeypotField}
       <input type="hidden" name="return_to" value="${next}">
       <button>send link</button>
     </form>
@@ -5756,7 +5762,7 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
   const landing = safeLocalRedirect(returnTo, '/');
   const loginIp = determineSourceIp(req, auth.config.trustedProxies);
   cdnCheck(loginIp);
-  if ((form.website ?? '').trim() === '') {
+  if (!honeypotFilled(form)) {
     await auth.startLogin({
       email,
       nextUrl: `${baseUrl}${landing}`,
