@@ -686,6 +686,7 @@ const themeToggleBtn = html` · <button class="link theme-toggle" type="button" 
 // Honeypot: invisible to sighted users; the label tells a screen-reader user
 // to skip it. The field name avoids every autofill heuristic token.
 const HONEYPOT_FIELD = 'hp_note';
+const RETRY_HINT = "Didn't arrive? Check spam, then wait an hour before trying again — repeat requests from one network are slowed down.";
 const honeypotField = html`<label class="hp-field">leave this empty <input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off"></label>`;
 const honeypotFilled = (form) => (form[HONEYPOT_FIELD] ?? '').trim() !== '';
 
@@ -2417,7 +2418,7 @@ function checkEmailPage(req, { db, auth }, email) {
     html`
       <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
       <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
-      <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
+      <p class="muted">Your draft is saved server-side until you click. ${RETRY_HINT}</p>
     `
   );
 }
@@ -5765,7 +5766,7 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
   const sentPage = pageView({ db: null, currentHandle: null, title: html`${branding.forumName} · check your email`, subtitle: branding.tagline }, html`
     <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to sign in.</p>
     <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
-    <p class="muted">If you don't get the email, <a href="/">try again</a>.</p>
+    <p class="muted">${RETRY_HINT}</p>
   `);
   if (honeypotFilled(form)) {
     return send(res, 200, sentPage);

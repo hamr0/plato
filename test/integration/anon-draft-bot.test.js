@@ -180,6 +180,20 @@ test('/login honeypot filled: same success page as a real login, no mail', async
   assert.equal(ctx.sent.length, 1, 'no mail for the honeypot hit');
 });
 
+test('check-email pages tell users to wait an hour, not to retry immediately', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const hint = /Didn&#39;t arrive\? Check spam, then wait an hour before trying again|Didn't arrive\? Check spam, then wait an hour before trying again/;
+  const pages = [
+    await (await loginPost(ctx, { email: 'a@x.test' })).text(),
+    await (await post(ctx, { ...base, email: 'c@x.test' })).text(),
+  ];
+  for (const page of pages) {
+    assert.match(page, hint);
+    assert.match(page, /repeat requests from one network are slowed down/);
+    assert.doesNotMatch(page, /post again|try again/);
+  }
+});
+
 test('/login honeypot empty: mail sent', async (t) => {
   const ctx = await spinUp(); t.after(() => teardown(ctx));
   const res = await loginPost(ctx, { email: 'a@x.test' });
