@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
 
 ### Fixed
 
-- **HEAD now answers on every GET route.** `HEAD /`, `/login`, `/about`, sub and post pages returned 404 while GET returned 200, which broke uptime monitors and link-preview validators. The router now treats HEAD as GET; node strips the body.
+- **HEAD now answers on read-only GET routes.** `HEAD /`, `/login`, `/about`, sub and post pages returned 404 while GET returned 200, which broke uptime monitors and link-preview validators. The router now treats HEAD as GET; node strips the body. The two state-changing GET routes (draft finalize, notification click-through) deliberately still 404 on HEAD; `/auth/callback` and `/verify` belong to knowless and are unchanged.
 
 ## [0.16.2] - 2026-10-23 — anonymous-draft flood defenses (honeypot, pre-mail spam check, Cloudflare realip)
 
