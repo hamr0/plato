@@ -32,7 +32,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
   - CDN-misconfig tripwire (`src/cdnTripwire.js`): an anonymous `/draft` or `/login` resolving to a Cloudflare edge IP logs one flightlog warning per 24h per process; never affects the request.
   - Deploy guide gains a "Behind Cloudflare (or any CDN)" section.
 
-- **Bumped `knowless` `^1.3.4` → `^1.3.6` (and transitive `nodemailer` `^9.0.3` → `^10.2.1`).** knowless 1.3.6 creates the handle row at the first magic-link redemption instead of at send time, so an address that has never clicked stays "new" and `maxNewHandlesPerIpPerHour` keeps applying to it; this closes the gap where send-time handle creation let mass-sent links consume no new-handle budget. No API change; also brings the GUIDE.md/OPS.md "Behind a CDN" docs. `npm audit` shows only the pre-existing `@dicebear` advisories; full suite (937 tests) passes unchanged.
+- **Bumped `knowless` `^1.3.4` → `^1.3.6` (and transitive `nodemailer` `^9.0.3` → `^10.2.1`).** knowless 1.3.6 creates the handle row at the first magic-link redemption instead of at send time, so an address that has never clicked stays "new" and `maxNewHandlesPerIpPerHour` keeps applying to it; this closes the gap where send-time handle creation let mass-sent links consume no new-handle budget. The weekly `users` counter (`knowless.db.handles`) changes meaning with it: it now counts accounts that have redeemed at least one magic link, so expect a one-time drop after deploy (the 2026-10-23 purge of never-clicked handles) and clicked accounts only from then on. No API change; also brings the GUIDE.md/OPS.md "Behind a CDN" docs. `npm audit` shows only the pre-existing `@dicebear` advisories; full suite (937 tests) passes unchanged.
 
 ### Changed
 
