@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -150,4 +150,24 @@ test('HEAD /static/<file>: 200, image/* content-type (link-preview validators / 
   assert.equal(res.headers.get('content-type'), 'image/png');
   const body = await res.text();
   assert.equal(body, '');
+});
+
+test('HEAD on public GET routes: same status as GET, empty body; unknown path still 404', async (t) => {
+  const ctx = await spinUp(); t.after(() => teardown(ctx));
+  const handle = 'a'.repeat(64);
+  const now = Date.now();
+  ctx.db.prepare('INSERT INTO subs (name, created_at) VALUES (?, ?)').run('lobby', now);
+  ctx.db.prepare('INSERT INTO handles (handle, pseudonym, first_seen_at) VALUES (?, ?, ?)').run(handle, 'alpha-one', now);
+  ctx.db.prepare(`INSERT INTO posts (id, sub_name, handle, title, file_path, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?)`).run('0123456789abcdef', 'lobby', handle, 'hello', '0123456789abcdef.md', now);
+  writeFileSync(join(ctx.postsDir, '0123456789abcdef.md'), 'hello body\n');
+  for (const path of ['/', '/login', '/about', '/sub/lobby', '/sub/lobby/post/0123456789abcdef']) {
+    const get = await fetch(ctx.baseUrl + path);
+    const head = await fetch(ctx.baseUrl + path, { method: 'HEAD' });
+    assert.equal(get.status, 200, `GET ${path}`);
+    assert.equal(head.status, 200, `HEAD ${path}`);
+    assert.equal(await head.text(), '', `HEAD ${path} body`);
+  }
+  const missing = await fetch(ctx.baseUrl + '/no-such-path', { method: 'HEAD' });
+  assert.equal(missing.status, 404);
 });

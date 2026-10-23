@@ -5905,11 +5905,12 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
     try {
       const url = new URL(req.url, baseUrl);
       const path = url.pathname;
-      const method = req.method;
+      // HEAD routes as GET; node's ServerResponse drops the body on its own.
+      const method = req.method === 'HEAD' ? 'GET' : req.method;
 
       if (await applyStaticRoute(req, res)) return;
 
-      if (path === '/healthz' && (method === 'GET' || method === 'HEAD')) return handleHealthz(res, { db, exportsDir });
+      if (path === '/healthz' && method === 'GET') return handleHealthz(res, { db, exportsDir });
       if (path === '/robots.txt' && method === 'GET') return renderRobots(res);
       if (path === '/sitemap.xml' && method === 'GET') return renderSitemap(res, { db });
       if (path === '/rss' && method === 'GET') return renderHomeRss(res, { db, postsDir });
