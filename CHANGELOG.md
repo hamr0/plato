@@ -23,6 +23,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). pla
   `renewal-hooks/deploy/` reload to avoid changing behaviour for other
   tenants on the box.
 
+### Security
+
+- **Anonymous `/draft` hardened against the "I want to know your price" contact-form bot** (incident 2026-10-23: ~1,300 magic-link emails/day to strangers, sender IP blocklisted; root cause was Cloudflare edges standing in for client IPs so every per-IP cap collapsed). Four layers:
+  - Honeypot field (`website`, off-screen via `.hp-field`) on the anonymous post form. A filled value returns the normal "check your email" page but writes no draft and sends no mail; checked before the disposable check and limiter. Logged-in posting ignores it.
+  - Spam patterns now run on anonymous drafts before any draft row or mail: a match is a vague 400 "post not accepted". New `spam-patterns.txt` entry for the price-bot title. Stylesheet cache token `v=54`.
+  - `deploy/plato.nginx.template`: optional commented "Behind Cloudflare" realip block, plus POST-only `limit_req` (6r/m, burst 3, 429) on `/draft` and `/login` keyed on the real client IP.
+  - CDN-misconfig tripwire (`src/cdnTripwire.js`): an anonymous `/draft` or `/login` resolving to a Cloudflare edge IP logs one flightlog warning per 24h per process; never affects the request.
+  - Deploy guide gains a "Behind Cloudflare (or any CDN)" section.
+
 ### Changed
 
 - **Agent/IDE scratch gitignored and de-tracked.** `.gitignore` now default-denies every dot-directory (`.*/`), re-admitting only what ships (`.github/`). Per-machine agent/IDE state (`.claude/`, `.litectx/`, `.idea/`, …) regenerates locally and only added noise and churn; any already-committed copies are removed from tracking (local files kept on disk). Repo hygiene only.

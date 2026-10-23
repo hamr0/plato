@@ -6,6 +6,7 @@ import { html, render, raw, escapeHTML } from './templates.js';
 import { applyStaticRoute } from './static.js';
 import { readBody, parseForm, send, redirect } from './request.js';
 import { determineSourceIp } from '../auth/index.js';
+import { makeCdnTripwire } from '../cdnTripwire.js';
 import { pseudonymFor } from '../identity/pseudonym.js';
 import { avatarSvg } from '../identity/avatar.js';
 import {
@@ -161,7 +162,7 @@ function layout(title, body, seo = {}) {
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v=3">
 <link rel="alternate icon" href="/static/favicon.svg?v=3">
-<link rel="stylesheet" href="/static/style.css?v=53">
+<link rel="stylesheet" href="/static/style.css?v=54">
 ${feedTag}
 ${jsonLdTag}
 ${headExtra}
@@ -898,7 +899,8 @@ function postFormFor({ currentHandle, defaultSub, postableSubs, subFlairs = [], 
   return html`<form method="POST" action="/draft">
     ${currentHandle
       ? html``
-      : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>`}
+      : html`<input name="email" type="email" placeholder="your email (we don't keep it)" required>
+        <input name="website" class="hp-field" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">`}
     ${subField}
     <input name="title" placeholder="post title" value="${dTitle}" required>
     ${flairField}
@@ -2402,7 +2404,18 @@ export function makeAnonDraftLimiter(limit) {
   };
 }
 
-async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow }) {
+function checkEmailPage(req, { db, auth }, email) {
+  return pageView(
+    { db, currentHandle: auth.handleFromRequest(req), title: html`${branding.forumName} · check your email` },
+    html`
+      <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
+      <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
+      <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
+    `
+  );
+}
+
+async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow, cdnCheck }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, title, body: postBody, sub_name: subName } = form;
@@ -2489,6 +2502,21 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     }
   }
 
+  const draftIp = determineSourceIp(req, auth.config.trustedProxies);
+  cdnCheck(draftIp);
+
+  // Honeypot: a human never sees the `website` field. Bots get the same
+  // success page as a real send, with no draft row and no mail.
+  if ((form.website ?? '').trim() !== '') {
+    return send(res, 200, checkEmailPage(req, { db, auth }, email));
+  }
+
+  if (matchSpamPatterns(`${title}\n${postBody}`, spamPatterns).length > 0) {
+    return send(res, 400, quickPage(req, { db, auth }, 'post not accepted',
+      html`<p class="muted">this post wasn't accepted. <a href="/">back</a></p>`
+    ));
+  }
+
   if (isDisposableEmail(email, disposableDomains)) {
     return send(
       res,
@@ -2503,7 +2531,6 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
   // Vague message on purpose (0.10.4 UX-honesty rule: rate-limit copy never
   // reveals the cap or window). Checked before the write, so a flooded IP
   // stops accumulating rows once it is past the email cap anyway.
-  const draftIp = determineSourceIp(req, auth.config.trustedProxies);
   if (!anonDraftAllow(draftIp)) {
     return send(res, 429, quickPage(req, { db, auth }, 'slow down',
       html`<p class="muted">too many drafts from your network right now — try again later. <a href="/">back</a></p>`
@@ -2529,18 +2556,7 @@ async function handleDraft(req, res, { db, auth, disposableDomains, baseUrl, pos
     bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
 
-  send(
-    res,
-    200,
-    pageView(
-      { db, currentHandle: auth.handleFromRequest(req), title: html`${branding.forumName} · check your email` },
-      html`
-        <p>We sent a magic link to <code>${email}</code>. Click it within 15 minutes to publish your post.</p>
-        <p class="muted">No account needed. The same email always becomes the same pseudonym + avatar on this instance — that's how identity works here. We never store the email itself, only a one-way hash of it.</p>
-        <p class="muted">Your draft is saved server-side until you click. If you don't get the email or the link expires, just <a href="/">post again</a>.</p>
-      `
-    )
-  );
+  send(res, 200, checkEmailPage(req, { db, auth }, email));
 }
 
 function handleFinalize(req, res, { db, auth, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts }, draftId) {
@@ -5721,7 +5737,7 @@ function renderLogin(req, res, { db, auth }, searchParams) {
   `));
 }
 
-async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride }) {
+async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride, cdnCheck }) {
   const body = await readBody(req);
   const form = parseForm(body);
   const { email, return_to: returnTo } = form;
@@ -5736,10 +5752,12 @@ async function handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mai
     );
   }
   const landing = safeLocalRedirect(returnTo, '/');
+  const loginIp = determineSourceIp(req, auth.config.trustedProxies);
+  cdnCheck(loginIp);
   await auth.startLogin({
     email,
     nextUrl: `${baseUrl}${landing}`,
-    sourceIp: determineSourceIp(req, auth.config.trustedProxies),
+    sourceIp: loginIp,
     bodyOverride: mailBodyOverride ? mailBodyOverride(email) : undefined,
   });
   send(
@@ -5840,6 +5858,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
   const linkCapConfig = resolveLinkCapConfig(linkCaps);
   // Anonymous-draft per-IP limiter, sharing knowless's per-hour login budget
   // (no separate plato tunable). Per-app-instance state; see makeAnonDraftLimiter.
+  const cdnCheck = makeCdnTripwire(captureError);
   const anonDraftAllow = makeAnonDraftLimiter(auth.config.maxLoginRequestsPerIpPerHour);
   // Spam patterns: load once at boot. File path is operator-supplied;
   // when missing or empty, the matcher returns no matches (a no-op).
@@ -5890,7 +5909,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/.well-known/security.txt' && method === 'GET') return renderSecurityTxt(res);
       if (path === '/.well-known/plato-pubkey' && method === 'GET') return renderPubkey(res, { db });
       if (path === '/login' && method === 'GET') return renderLogin(req, res, { db, auth }, url.searchParams);
-      if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride });
+      if (path === '/login' && method === 'POST') return handleLogin(req, res, { db, auth, baseUrl, disposableDomains, mailBodyOverride, cdnCheck });
       if (path === '/auth/callback') return auth.callback(req, res);
       if (path === '/verify') return auth.verify(req, res);
       if (path === '/logout' && method === 'POST') return handleLogout(req, res, { db, auth });
@@ -5899,7 +5918,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
       if (path === '/about' && method === 'GET') return renderAbout(req, res, { db, auth });
       if (path === '/subs' && method === 'GET') return renderCommunities(req, res, { db, auth }, url.searchParams);
       if (path === '/draft' && method === 'POST') {
-        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow });
+        return handleDraft(req, res, { db, auth, disposableDomains, baseUrl, postsDir, rateLimitConfig, spamPatterns, linkCapConfig, urlhausHosts, mailBodyOverride, anonDraftAllow, cdnCheck });
       }
       if (path === '/vote' && method === 'POST') return handleVote(req, res, { db, auth });
       if (path === '/flag' && method === 'POST') return handleFlag(req, res, { db, auth });

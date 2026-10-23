@@ -26,6 +26,9 @@ send (?:btc|bitcoin|eth|usdt) to
 work from home.{0,40}\$?\d{3,5}.{0,20}(?:per\s*week|/week|weekly)
 earn \$?\d{3,5}.{0,30}(?:from home|remotely|easily)
 
+# === Contact-form price bot (multilingual body, stable broken-English title) ===
+\b(?:writ(?:e|ing)|wrote)\b.{0,25}\byour\s+(?:the\s+)?prices?\b
+
 # === Wire fraud language ===
 \b(?:western union|moneygram|wire transfer only)\b
 payment via gift cards?\b
