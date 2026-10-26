@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
+## [0.16.4] - 2026-10-26 — @dicebear 9.4.3 (clean npm audit)
+
+### Security
+
+- **Bumped `@dicebear/*` 9.4.2 → 9.4.3** (lockfile only, inside the existing `^9.4.2` range) for GHSA-gcr2-9v8m-gq45 (SVG injection via the `rotate` option in `@dicebear/core`, `fontSize`/`fontWeight` in `@dicebear/initials`). It was not reachable — `src/identity/avatar.js` passes only seed and size — but `npm audit` is now clean. Avatar SVGs are byte-identical before and after.
+
 ## [0.16.3] - 2026-10-23 — HEAD answers on read-only routes
 
 ### Fixed
