@@ -132,3 +132,36 @@ test('applyUrlhausMatches: re-run does not duplicate audit row', () => {
   const n = db.prepare(`SELECT COUNT(*) AS n FROM mod_actions WHERE target_id = 'p1'`).get().n;
   assert.equal(n, 1);
 });
+
+test('shared hosts: a listed github.com malware URL does not block other github.com links', () => {
+  const { path, cleanup } = tmpUrlhausFile([
+    'https://github.com/evil/x/releases/download/1/a.rar',
+    'http://evil.example/x',
+  ]);
+  try {
+    const set = loadUrlhausCache(path);
+    assert.ok(!set.has('github.com'));
+    assert.deepEqual(matchUrlhaus('see https://github.com/hamr0/plato', set), []);
+    assert.deepEqual(
+      matchUrlhaus('dl https://www.GitHub.com/evil/x/releases/download/1/a.rar/#frag', set),
+      ['https://www.GitHub.com/evil/x/releases/download/1/a.rar/#frag'],
+    );
+    assert.deepEqual(matchUrlhaus('https://github.com/evil/x/releases/download/1/A.rar', set), [],
+      'path stays case-sensitive');
+    assert.deepEqual(matchUrlhaus('http://evil.example/other', set), ['evil.example']);
+  } finally { cleanup(); }
+});
+
+test('applyUrlhausMatches: dismissed system flag returns to pending on re-collapse, no churn while collapsed', () => {
+  const db = setup();
+  const args = { targetType: 'post', targetId: 'p1', subName: 'lobby', matchedHosts: ['bad.example'] };
+  applyUrlhausMatches(db, args);
+  db.prepare(`UPDATE flags SET resolution = 'dismissed', resolver_handle = ?, resolved_at = 1`).run(OWNER);
+  applyUrlhausMatches(db, args); // still collapsed: stays dismissed
+  assert.equal(db.prepare('SELECT resolution FROM flags').get().resolution, 'dismissed');
+  db.prepare('UPDATE posts SET collapsed_at = NULL WHERE id = ?').run('p1');
+  applyUrlhausMatches(db, args);
+  const f = db.prepare('SELECT resolution, resolver_handle, resolved_at FROM flags').all();
+  assert.equal(f.length, 1);
+  assert.deepEqual({ ...f[0] }, { resolution: 'pending', resolver_handle: null, resolved_at: null });
+});

@@ -17,9 +17,14 @@
 // - Malware operators rotate paths under the same host within an hour.
 // - URLhaus already has plenty of host coverage; a host hit is a strong
 //   signal even if the specific URL isn't listed yet.
-// - False positives would require a legitimate site to share a host
-//   with a known malware URL, which is rare; if it happens, the operator
-//   can append the host to a local allow-list (future feature).
+//
+// Exception: shared/multi-tenant hosting hosts (github.com, drive.google.com,
+// pastebin.com, ...). URLhaus lists individual malware files hosted there,
+// and a host hit would collapse every legitimate link to the platform. For
+// SHARED_HOSTS only the exact listed URL (case-sensitive path+query, scheme,
+// leading www., fragment and trailing slash ignored) matches. The loaded Set
+// holds bare hostnames for ordinary hosts and "host/path?query" keys for
+// shared ones; a key containing "/" is never a bare host.
 
 import { existsSync, readFileSync } from 'node:fs';
 
@@ -34,6 +39,23 @@ function hostOf(url) {
   }
 }
 
+export const SHARED_HOSTS = Object.freeze(new Set([
+  'github.com', 'raw.githubusercontent.com', 'objects.githubusercontent.com',
+  'gist.github.com', 'gist.githubusercontent.com', 'gitlab.com', 'bitbucket.org',
+  'codeberg.org', 'drive.google.com', 'docs.google.com', 'storage.googleapis.com',
+  'dropbox.com', 'dl.dropboxusercontent.com', 'onedrive.live.com', '1drv.ms',
+  'cdn.discordapp.com', 'pastebin.com', 'transfer.sh', 'mediafire.com',
+]));
+
+function urlKey(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.toLowerCase().replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`;
+  } catch {
+    return null;
+  }
+}
+
 export function loadUrlhausCache(filePath) {
   if (!filePath || !existsSync(filePath)) return new Set();
   const raw = readFileSync(filePath, 'utf8');
@@ -42,7 +64,13 @@ export function loadUrlhausCache(filePath) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const host = hostOf(trimmed);
-    if (host) hosts.add(host);
+    if (!host) continue;
+    if (SHARED_HOSTS.has(host)) {
+      const key = urlKey(trimmed);
+      if (key) hosts.add(key);
+    } else {
+      hosts.add(host);
+    }
   }
   return hosts;
 }
@@ -54,7 +82,7 @@ const URL_RE = /https?:\/\/[^\s)\]]+/gi;
 // Same shape as applySpamMatches: collapse, dedup-flag, and (when we
 // actually flipped state) write a system-attributed audit row.
 import { randomBytes } from 'node:crypto';
-import { SYSTEM_HANDLE } from './spamPatterns.js';
+import { SYSTEM_HANDLE, upsertSystemFlag } from './spamPatterns.js';
 
 export function applyUrlhausMatches(db, { targetType, targetId, subName, matchedHosts, now = Date.now() }) {
   if (!matchedHosts || matchedHosts.length === 0) return { hidden: false };
@@ -63,11 +91,7 @@ export function applyUrlhausMatches(db, { targetType, targetId, subName, matched
     .prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
     .run(now, targetId);
   const note = `blocked-url: ${matchedHosts.join(', ')}`;
-  db.prepare(
-    `INSERT OR IGNORE INTO flags
-       (id, target_type, target_id, flagger_handle, category, note, created_at)
-     VALUES (?, ?, ?, ?, 'spam', ?, ?)`
-  ).run(randomBytes(8).toString('hex'), targetType, targetId, SYSTEM_HANDLE, note, now);
+  upsertSystemFlag(db, { targetType, targetId, note, now, reflagged: result.changes > 0 });
   if (result.changes > 0 && subName) {
     db.prepare(
       `INSERT INTO mod_actions
@@ -84,7 +108,13 @@ export function matchUrlhaus(text, hostSet) {
   const matched = new Set();
   for (const u of urls) {
     const host = hostOf(u);
-    if (host && hostSet.has(host)) matched.add(host);
+    if (!host) continue;
+    if (SHARED_HOSTS.has(host)) {
+      const key = urlKey(u);
+      if (key && hostSet.has(key)) matched.add(u);
+    } else if (hostSet.has(host)) {
+      matched.add(host);
+    }
   }
   return [...matched];
 }

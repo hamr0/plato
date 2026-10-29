@@ -43,6 +43,22 @@ import { randomBytes } from 'node:crypto';
 
 const ID_BYTES = 8;
 
+// Shared by urlhaus.js. A fresh collapse (reflagged) must put the system flag
+// back to pending even if a mod dismissed the previous one; an already
+// collapsed target keeps whatever flag state it has.
+export function upsertSystemFlag(db, { targetType, targetId, note, now, reflagged }) {
+  const id = randomBytes(ID_BYTES).toString('hex');
+  const sql = reflagged
+    ? `INSERT INTO flags (id, target_type, target_id, flagger_handle, category, note, created_at)
+       VALUES (?, ?, ?, ?, 'spam', ?, ?)
+       ON CONFLICT(target_type, target_id, flagger_handle) DO UPDATE SET
+         resolution = 'pending', note = excluded.note, created_at = excluded.created_at,
+         resolver_handle = NULL, resolved_at = NULL`
+    : `INSERT OR IGNORE INTO flags (id, target_type, target_id, flagger_handle, category, note, created_at)
+       VALUES (?, ?, ?, ?, 'spam', ?, ?)`;
+  db.prepare(sql).run(id, targetType, targetId, SYSTEM_HANDLE, note, now);
+}
+
 export function applySpamMatches(db, { targetType, targetId, subName, matched, now = Date.now() }) {
   if (!matched || matched.length === 0) return { hidden: false };
   const table = targetType === 'post' ? 'posts' : 'comments';
@@ -50,11 +66,7 @@ export function applySpamMatches(db, { targetType, targetId, subName, matched, n
     .prepare(`UPDATE ${table} SET collapsed_at = ?, score_at_collapse = score WHERE id = ? AND collapsed_at IS NULL`)
     .run(now, targetId);
   const note = `pattern: ${matched.join(' | ')}`;
-  db.prepare(
-    `INSERT OR IGNORE INTO flags
-       (id, target_type, target_id, flagger_handle, category, note, created_at)
-     VALUES (?, ?, ?, ?, 'spam', ?, ?)`
-  ).run(randomBytes(ID_BYTES).toString('hex'), targetType, targetId, SYSTEM_HANDLE, note, now);
+  upsertSystemFlag(db, { targetType, targetId, note, now, reflagged: result.changes > 0 });
   if (result.changes > 0 && subName) {
     db.prepare(
       `INSERT INTO mod_actions

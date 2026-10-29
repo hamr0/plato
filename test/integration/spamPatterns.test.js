@@ -201,3 +201,17 @@ test('migration 007: SYSTEM_HANDLE row exists with pseudonym "system"', () => {
   assert.ok(row, 'SYSTEM_HANDLE row should exist after migrations');
   assert.equal(row.pseudonym, 'system');
 });
+
+test('applySpamMatches: dismissed system flag returns to pending on re-collapse, no churn while collapsed', () => {
+  const db = setup();
+  const args = { targetType: 'post', targetId: 'p1', subName: 'lobby', matched: ['x'] };
+  applySpamMatches(db, args);
+  db.prepare(`UPDATE flags SET resolution = 'dismissed', resolver_handle = ?, resolved_at = 1`).run(SYSTEM_HANDLE);
+  applySpamMatches(db, args); // still collapsed: stays dismissed
+  assert.equal(db.prepare('SELECT resolution FROM flags').get().resolution, 'dismissed');
+  db.prepare('UPDATE posts SET collapsed_at = NULL WHERE id = ?').run('p1');
+  applySpamMatches(db, args);
+  const f = db.prepare('SELECT resolution, resolver_handle, resolved_at FROM flags').all();
+  assert.equal(f.length, 1);
+  assert.deepEqual({ ...f[0] }, { resolution: 'pending', resolver_handle: null, resolved_at: null });
+});
