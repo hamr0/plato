@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). plato has not yet shipped its first release; everything below is on the path to v1.
 
+## [0.16.5] - 2026-10-29 — URLhaus false positives on shared hosts; spam gates on comment edits
+
+### Fixed
+
+- **Links to shared hosts are no longer auto-collapsed on host alone.** URLhaus lists individual malware files on GitHub, Google Drive and similar hosts, so matching by host collapsed every `github.com` link (four false positives on ownsub.com). Shared hosts now match only on the exact listed URL; all other hosts keep host matching. Trailing prose punctuation and markdown closers (a period, `**bold**`) are stripped from both the feed URL and the posted URL before matching, so a listed URL inside a sentence still matches. Six hosts added to the shared list: `codeload.github.com`, `cdn.jsdelivr.net`, `web.archive.org`, `firebasestorage.googleapis.com`, `img1.wsimg.com`, `pastefy.app`.
+- **A re-collapse after a mod dismissal re-queues the system flag.** After a mod dismissed a system flag, a later automatic re-collapse (for example on edit) hit the `(target_type, target_id, flagger_handle)` unique row and was ignored, leaving the item collapsed with no pending flag and absent from the review queue. A fresh collapse now sets the system flag back to pending, in both the spam-pattern and URLhaus paths.
+- **Comment edits now run the spam gates.** Editing a comment runs the same spam-pattern and URLhaus checks as a new comment, closing the "post clean, edit the payload in" path. The resulting modlog row is attributed to the comment's own sub, not the sub in the URL, and a bogus post id in the edit URL no longer returns a 500 after the write.
+
 ## [0.16.4] - 2026-10-26 — @dicebear 9.4.3 (clean npm audit)
 
 ### Security

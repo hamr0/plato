@@ -16,6 +16,7 @@ import { loadDisposableDomains } from '../../src/content/disposable-domain.js';
 import { createApp } from '../../src/web/app.js';
 import { applyAllMigrations } from '../_helpers/migrations.js';
 import { SYSTEM_HANDLE } from '../../src/content/spamPatterns.js';
+import { pendingFlagsAcrossSubs } from '../../src/content/flag.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DISPOSABLE_PATH = resolve(HERE, '../../disposable-domains.txt');
@@ -674,6 +675,174 @@ test('edit path: URLhaus host edited into the BODY collapses the post', async (t
   assert.equal(res.status, 302);
   assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null,
     'a blocked host edited into the body auto-collapses the post');
+});
+
+async function editAndDismissCycle(ctx, jar, postId, { bodyA, bodyB, titleA = 'clean title', titleB = 'clean title' }) {
+  const { db, baseUrl } = ctx;
+  const form = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  let res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST', headers: form, body: new URLSearchParams({ title: titleA, body: bodyA }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null, 'first edit collapses');
+  res = await jfetch(jar, baseUrl + '/modlog/resolve', {
+    method: 'POST', headers: form,
+    body: new URLSearchParams({ target_type: 'post', target_id: postId, sub_name: 'lobby', decision: 'dismiss' }),
+  });
+  assert.equal(res.status, 302);
+  assert.equal(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at, null, 'dismiss uncollapses');
+  res = await jfetch(jar, `${baseUrl}/sub/lobby/post/${postId}/edit`, {
+    method: 'POST', headers: form, body: new URLSearchParams({ title: titleB, body: bodyB }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(db.prepare('SELECT collapsed_at FROM posts WHERE id = ?').get(postId).collapsed_at != null, 're-edit re-collapses');
+  const pending = db.prepare(
+    `SELECT note, resolution, resolver_handle, resolved_at FROM flags
+      WHERE target_id = ? AND flagger_handle = ? AND resolution = 'pending'`
+  ).all(postId, SYSTEM_HANDLE);
+  assert.equal(pending.length, 1, 're-collapse puts the system flag back in the review queue');
+  assert.equal(pending[0].resolver_handle, null);
+  assert.equal(pending[0].resolved_at, null);
+  assert.equal(pendingFlagsAcrossSubs(db, ['lobby']).filter((f) => f.target_id === postId).length, 1,
+    'item is visible in the flag review queue');
+  return pending[0];
+}
+
+test('re-collapse after a mod dismissal is pending again: URLhaus path', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-urlhaus-recollapse-'));
+  const cacheFile = join(dir, 'urlhaus.txt');
+  writeFileSync(cacheFile, 'http://malware.example/payload\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ urlhausCacheFile: cacheFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const flag = await editAndDismissCycle(ctx, jar, postId, {
+    bodyA: 'see https://malware.example/a', bodyB: 'again https://malware.example/b',
+  });
+  assert.match(flag.note, /^blocked-url: malware\.example/);
+});
+
+test('re-collapse after a mod dismissal is pending again: spam-pattern path', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-recollapse-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const flag = await editAndDismissCycle(ctx, jar, postId, {
+    titleA: 'GUARANTEED RETURNS', titleB: 'guaranteed returns again', bodyA: 'clean body', bodyB: 'clean body 2',
+  });
+  assert.match(flag.note, /^pattern: guaranteed returns/);
+});
+
+async function seedCleanComment(ctx, jar, postId, body = 'clean comment') {
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${postId}/comment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body }),
+  });
+  assert.equal(res.status, 302);
+  return ctx.db.prepare('SELECT id FROM comments WHERE post_id = ?').get(postId).id;
+}
+
+async function editComment(ctx, jar, postId, commentId, body) {
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${postId}/comment/${commentId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body }),
+  });
+  assert.equal(res.status, 302);
+}
+
+function commentState(db, commentId) {
+  return {
+    collapsed_at: db.prepare('SELECT collapsed_at FROM comments WHERE id = ?').get(commentId).collapsed_at,
+    flags: db.prepare(`SELECT note FROM flags WHERE target_id = ? AND flagger_handle = ? AND resolution = 'pending'`)
+      .all(commentId, SYSTEM_HANDLE),
+  };
+}
+
+test('comment edit path: spam pattern edited in collapses the comment + pending system flag', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-cedit-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const commentId = await seedCleanComment(ctx, jar, postId);
+  assert.equal(commentState(ctx.db, commentId).collapsed_at, null);
+
+  await editComment(ctx, jar, postId, commentId, 'now with GUARANTEED RETURNS');
+  const st = commentState(ctx.db, commentId);
+  assert.ok(st.collapsed_at != null, 'collapsed');
+  assert.equal(st.flags.length, 1);
+  assert.match(st.flags[0].note, /^pattern: guaranteed returns/);
+});
+
+test('comment edit path: URLhaus host edited in collapses the comment + pending system flag', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-urlhaus-cedit-'));
+  const cacheFile = join(dir, 'urlhaus.txt');
+  writeFileSync(cacheFile, 'http://malware.example/payload\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ urlhausCacheFile: cacheFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const commentId = await seedCleanComment(ctx, jar, postId);
+
+  await editComment(ctx, jar, postId, commentId, 'see https://malware.example/here');
+  const st = commentState(ctx.db, commentId);
+  assert.ok(st.collapsed_at != null, 'collapsed');
+  assert.equal(st.flags.length, 1);
+  assert.match(st.flags[0].note, /^blocked-url: malware\.example/);
+});
+
+test('comment edit path: a URL postId that is not the comment\'s post neither 500s nor misattributes the modlog', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-cedit-wrongpost-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const commentId = await seedCleanComment(ctx, jar, postId);
+
+  const bogusPostId = '0123456789abcdef';
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${bogusPostId}/comment/${commentId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body: 'now with GUARANTEED RETURNS' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(commentState(ctx.db, commentId).collapsed_at != null, 'collapsed');
+  const rows = ctx.db.prepare(`SELECT sub_name FROM mod_actions WHERE target_id = ?`).all(commentId);
+  assert.ok(rows.length >= 1);
+  for (const r of rows) assert.equal(r.sub_name, 'lobby');
+});
+
+test('comment edit path: a clean edit stays uncollapsed and unflagged', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-clean-cedit-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  const cacheFile = join(dir, 'urlhaus.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  writeFileSync(cacheFile, 'http://malware.example/payload\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ spamPatternsFile: patternsFile, urlhausCacheFile: cacheFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const commentId = await seedCleanComment(ctx, jar, postId);
+
+  await editComment(ctx, jar, postId, commentId, 'still fine, see https://ok.example/');
+  const st = commentState(ctx.db, commentId);
+  assert.equal(st.collapsed_at, null);
+  assert.equal(st.flags.length, 0);
 });
 
 test('edit path: link cap rejects an edit that exceeds the tier cap, and the post is untouched', async (t) => {
