@@ -802,6 +802,30 @@ test('comment edit path: URLhaus host edited in collapses the comment + pending 
   assert.match(st.flags[0].note, /^blocked-url: malware\.example/);
 });
 
+test('comment edit path: a URL postId that is not the comment\'s post neither 500s nor misattributes the modlog', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'plato-spam-cedit-wrongpost-'));
+  const patternsFile = join(dir, 'patterns.txt');
+  writeFileSync(patternsFile, 'guaranteed returns\n', 'utf8');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const ctx = await spinUp({ spamPatternsFile: patternsFile });
+  t.after(() => teardown(ctx));
+  const { jar } = await bootstrapMod(ctx);
+  const postId = await seedCleanPost(ctx, jar);
+  const commentId = await seedCleanComment(ctx, jar, postId);
+
+  const bogusPostId = '0123456789abcdef';
+  const res = await jfetch(jar, `${ctx.baseUrl}/sub/lobby/post/${bogusPostId}/comment/${commentId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ body: 'now with GUARANTEED RETURNS' }),
+  });
+  assert.equal(res.status, 302);
+  assert.ok(commentState(ctx.db, commentId).collapsed_at != null, 'collapsed');
+  const rows = ctx.db.prepare(`SELECT sub_name FROM mod_actions WHERE target_id = ?`).all(commentId);
+  assert.ok(rows.length >= 1);
+  for (const r of rows) assert.equal(r.sub_name, 'lobby');
+});
+
 test('comment edit path: a clean edit stays uncollapsed and unflagged', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'plato-clean-cedit-'));
   const patternsFile = join(dir, 'patterns.txt');

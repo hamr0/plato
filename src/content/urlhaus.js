@@ -49,6 +49,10 @@ export const SHARED_HOSTS = Object.freeze(new Set([
   'firebasestorage.googleapis.com', 'img1.wsimg.com', 'pastefy.app',
 ]));
 
+// Prose punctuation and markdown emphasis/code closers that URL_RE swallows after a link
+// ("see <url>.", "\"url\"", "**url**", "_url_", "`url`").
+const TRAILING_PROSE_RE = /[.,!?;:"'>*_`]+$/;
+
 function urlKey(url) {
   try {
     const u = new URL(url.replace(TRAILING_PROSE_RE, ''));
@@ -80,9 +84,6 @@ export function loadUrlhausCache(filePath) {
 // Pull every absolute URL out of `text` and return the array of host
 // strings whose hosts are in the blocklist. Empty array means clean.
 const URL_RE = /https?:\/\/[^\s)\]]+/gi;
-// Prose punctuation and markdown emphasis/code closers that URL_RE swallows after a link
-// ("see <url>.", "\"url\"", "**url**", "_url_", "`url`").
-const TRAILING_PROSE_RE = /[.,!?;:"'>*_`]+$/;
 
 // Same shape as applySpamMatches: collapse, dedup-flag, and (when we
 // actually flipped state) write a system-attributed audit row.

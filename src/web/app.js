@@ -3176,15 +3176,16 @@ async function handleCommentEdit(req, res, { db, auth, spamPatterns, urlhausHost
   }
   // Same post-write auto-collapse gates as handleAddComment: without them,
   // "post clean, edit spam in" skips the pattern file and URLhaus.
-  const sub = db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(postId);
-  const stored = db.prepare('SELECT body FROM comments WHERE id = ?').get(commentId).body;
+  const { sub_name: subOfComment, body: stored } = db.prepare(
+    'SELECT p.sub_name, c.body FROM comments c JOIN posts p ON p.id = c.post_id WHERE c.id = ?',
+  ).get(commentId);
   const matched = matchSpamPatterns(stored, spamPatterns);
   if (matched.length > 0) {
-    applySpamMatches(db, { targetType: 'comment', targetId: commentId, subName: sub.sub_name, matched });
+    applySpamMatches(db, { targetType: 'comment', targetId: commentId, subName: subOfComment, matched });
   }
   const matchedHosts = matchUrlhaus(stored, urlhausHosts);
   if (matchedHosts.length > 0) {
-    applyUrlhausMatches(db, { targetType: 'comment', targetId: commentId, subName: sub.sub_name, matchedHosts });
+    applyUrlhausMatches(db, { targetType: 'comment', targetId: commentId, subName: subOfComment, matchedHosts });
   }
   redirect(res, `/sub/${subName}/post/${postId}#comment-${commentId}`);
 }
