@@ -3163,7 +3163,7 @@ function renderCommentEditPage(req, res, { db, auth }, subName, postId, commentI
   `));
 }
 
-async function handleCommentEdit(req, res, { db, auth }, subName, postId, commentId) {
+async function handleCommentEdit(req, res, { db, auth, spamPatterns, urlhausHosts }, subName, postId, commentId) {
   const handle = auth.handleFromRequest(req);
   if (!handle) return send(res, 401, quickPage(req, { db, auth }, 'login required', html`<p class="muted">log in to edit.</p>`));
   const form = parseForm(await readBody(req));
@@ -3173,6 +3173,18 @@ async function handleCommentEdit(req, res, { db, auth }, subName, postId, commen
   } catch (err) {
     const status = err.message.includes('not the author') || err.message.includes('window') ? 403 : 400;
     return send(res, status, errorPage(req, { db, auth }, { title: 'edit failed', message: err.message }));
+  }
+  // Same post-write auto-collapse gates as handleAddComment: without them,
+  // "post clean, edit spam in" skips the pattern file and URLhaus.
+  const sub = db.prepare('SELECT sub_name FROM posts WHERE id = ?').get(postId);
+  const stored = db.prepare('SELECT body FROM comments WHERE id = ?').get(commentId).body;
+  const matched = matchSpamPatterns(stored, spamPatterns);
+  if (matched.length > 0) {
+    applySpamMatches(db, { targetType: 'comment', targetId: commentId, subName: sub.sub_name, matched });
+  }
+  const matchedHosts = matchUrlhaus(stored, urlhausHosts);
+  if (matchedHosts.length > 0) {
+    applyUrlhausMatches(db, { targetType: 'comment', targetId: commentId, subName: sub.sub_name, matchedHosts });
   }
   redirect(res, `/sub/${subName}/post/${postId}#comment-${commentId}`);
 }
@@ -5941,7 +5953,7 @@ export function createApp({ db, auth, disposableDomains, postsDir, exportsDir = 
         return renderCommentEditPage(req, res, { db, auth }, m[1], m[2], m[3]);
       }
       if ((m = path.match(SUB_POST_COMMENT_EDIT_PATH_RE)) && method === 'POST') {
-        return handleCommentEdit(req, res, { db, auth }, m[1], m[2], m[3]);
+        return handleCommentEdit(req, res, { db, auth, spamPatterns, urlhausHosts }, m[1], m[2], m[3]);
       }
       if ((m = path.match(SUB_POST_EDIT_PATH_RE)) && method === 'GET') {
         return renderPostEditPage(req, res, { db, auth, postsDir }, m[1], m[2]);

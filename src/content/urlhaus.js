@@ -45,11 +45,13 @@ export const SHARED_HOSTS = Object.freeze(new Set([
   'codeberg.org', 'drive.google.com', 'docs.google.com', 'storage.googleapis.com',
   'dropbox.com', 'dl.dropboxusercontent.com', 'onedrive.live.com', '1drv.ms',
   'cdn.discordapp.com', 'pastebin.com', 'transfer.sh', 'mediafire.com',
+  'codeload.github.com', 'cdn.jsdelivr.net', 'web.archive.org',
+  'firebasestorage.googleapis.com', 'img1.wsimg.com', 'pastefy.app',
 ]));
 
 function urlKey(url) {
   try {
-    const u = new URL(url);
+    const u = new URL(url.replace(TRAILING_PROSE_RE, ''));
     return `${u.hostname.toLowerCase().replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}${u.search}`;
   } catch {
     return null;
@@ -78,6 +80,9 @@ export function loadUrlhausCache(filePath) {
 // Pull every absolute URL out of `text` and return the array of host
 // strings whose hosts are in the blocklist. Empty array means clean.
 const URL_RE = /https?:\/\/[^\s)\]]+/gi;
+// Prose punctuation and markdown emphasis/code closers that URL_RE swallows after a link
+// ("see <url>.", "\"url\"", "**url**", "_url_", "`url`").
+const TRAILING_PROSE_RE = /[.,!?;:"'>*_`]+$/;
 
 // Same shape as applySpamMatches: collapse, dedup-flag, and (when we
 // actually flipped state) write a system-attributed audit row.
@@ -106,7 +111,8 @@ export function matchUrlhaus(text, hostSet) {
   if (!text || !hostSet || hostSet.size === 0) return [];
   const urls = text.match(URL_RE) ?? [];
   const matched = new Set();
-  for (const u of urls) {
+  for (const raw of urls) {
+    const u = raw.replace(TRAILING_PROSE_RE, '');
     const host = hostOf(u);
     if (!host) continue;
     if (SHARED_HOSTS.has(host)) {

@@ -152,6 +152,47 @@ test('shared hosts: a listed github.com malware URL does not block other github.
   } finally { cleanup(); }
 });
 
+test('matchUrlhaus: trailing prose punctuation does not defeat an exact shared-host match', () => {
+  const listed = 'https://github.com/evil/x/releases/download/1/a.rar';
+  const { path, cleanup } = tmpUrlhausFile([listed, 'http://evil.example/x']);
+  try {
+    const set = loadUrlhausCache(path);
+    for (const text of [`${listed}.`, `${listed},`, `${listed}!`, `${listed}"`, `${listed}>`,
+      `say "${listed}"`, `see <${listed}>`, `${listed}?!`,
+      `**${listed}**`, `_${listed}_`, `\`${listed}\``, `**${listed}**.`, `\`${listed}\`.`]) {
+      assert.equal(matchUrlhaus(text, set).length, 1, `matches: ${text}`);
+    }
+    assert.deepEqual(matchUrlhaus('see http://evil.example.', set), ['evil.example'],
+      'non-shared host with a trailing dot still matches');
+    assert.deepEqual(matchUrlhaus('see https://github.com/hamr0/plato.', set), []);
+    assert.deepEqual(matchUrlhaus('**https://github.com/hamr0/plato**', set), []);
+  } finally { cleanup(); }
+});
+
+test('matchUrlhaus: a listed shared-host URL that itself ends in "_" still matches exactly', () => {
+  const listed = 'https://drive.google.com/uc?export=download&id=ABC_';
+  const { path, cleanup } = tmpUrlhausFile([listed]);
+  try {
+    const set = loadUrlhausCache(path);
+    assert.equal(matchUrlhaus(`get ${listed}`, set).length, 1);
+    assert.equal(matchUrlhaus(`**${listed}**`, set).length, 1);
+    assert.deepEqual(matchUrlhaus('https://drive.google.com/uc?export=download&id=OTHER_', set), []);
+  } finally { cleanup(); }
+});
+
+test('shared hosts: web.archive.org and cdn.jsdelivr.net only match the exact listed URL', () => {
+  const { path, cleanup } = tmpUrlhausFile([
+    'https://web.archive.org/web/2020/http://bad.example/m.exe',
+    'https://cdn.jsdelivr.net/gh/evil/x@1/payload.js',
+  ]);
+  try {
+    const set = loadUrlhausCache(path);
+    assert.deepEqual(matchUrlhaus('https://web.archive.org/web/2020/http://fine.example/', set), []);
+    assert.deepEqual(matchUrlhaus('https://cdn.jsdelivr.net/npm/lodash', set), []);
+    assert.equal(matchUrlhaus('https://cdn.jsdelivr.net/gh/evil/x@1/payload.js', set).length, 1);
+  } finally { cleanup(); }
+});
+
 test('applyUrlhausMatches: dismissed system flag returns to pending on re-collapse, no churn while collapsed', () => {
   const db = setup();
   const args = { targetType: 'post', targetId: 'p1', subName: 'lobby', matchedHosts: ['bad.example'] };
